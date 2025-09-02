@@ -99,6 +99,9 @@ class ListenMoePlayer(QWidget):
         # Shortcuts
         self.pause_shortcut = QShortcut(QKeySequence("Space"), self)
         self.pause_shortcut.activated.connect(self.pause_resume)
+        # Mute shortcut (M)
+        self.mute_shortcut = QShortcut(QKeySequence("M"), self)
+        self.mute_shortcut.activated.connect(self.mute_button.toggle)
 
         # Signals/UI connections
         self.play_button.clicked.connect(self.play_stream)
@@ -215,7 +218,11 @@ class ListenMoePlayer(QWidget):
         self.settings.setValue('mute', 'true' if checked else 'false')
 
     def pause_resume(self):
-        self.player.pause_toggle()
+        # Se sta riproducendo -> pausa; altrimenti avvia la riproduzione
+        if self.player.is_playing():
+            self.player.pause_toggle()
+        else:
+            self.play_stream()
 
     def _on_player_event(self, code: str, value):
         if code == 'opening':
