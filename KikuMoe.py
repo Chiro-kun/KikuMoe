@@ -62,9 +62,12 @@ class ListenMoePlayer(QWidget):
         # Add VLC Path button for configurable libvlc
         self.vlc_button = QPushButton(self.i18n.t('libvlc_button'))
         self.vlc_button.clicked.connect(self.choose_libvlc_path)
+        # Indicatore stato VLC
+        self.vlc_status = QLabel("")
         lang_row.addWidget(self.lang_label)
         lang_row.addWidget(self.lang_combo)
         lang_row.addWidget(self.vlc_button)
+        lang_row.addWidget(self.vlc_status)
         self.layout.addLayout(lang_row)
 
         # Buffering progress bar
@@ -98,10 +101,8 @@ class ListenMoePlayer(QWidget):
 
         # Shortcuts
         self.pause_shortcut = QShortcut(QKeySequence("Space"), self)
+        self.pause_shortcut.setContext(Qt.ApplicationShortcut)
         self.pause_shortcut.activated.connect(self.pause_resume)
-        # Mute shortcut (M)
-        self.mute_shortcut = QShortcut(QKeySequence("M"), self)
-        self.mute_shortcut.activated.connect(self.mute_button.toggle)
 
         # Signals/UI connections
         self.play_button.clicked.connect(self.play_stream)
@@ -134,6 +135,8 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
         self.player.set_volume(self.volume_slider.value())
         self.player.set_mute(self.mute_button.isChecked())
+        # Aggiorna indicatore stato VLC
+        self.update_vlc_status_label()
 
         # Track cache for i18n rerender
         self._current_title = None
@@ -172,6 +175,9 @@ class ListenMoePlayer(QWidget):
             self.vlc_button.setText(self.i18n.t('libvlc_button'))
         self.update_header_label()
         self.update_now_playing_label()
+        # Aggiorna label stato VLC secondo lingua corrente
+        if hasattr(self, 'vlc_status'):
+            self.update_vlc_status_label()
 
     # ------------------- Helpers -------------------
     def t(self, key: str, **kwargs) -> str:
@@ -197,6 +203,22 @@ class ListenMoePlayer(QWidget):
         text = f"{prefix} {title}" + (f" — {artist}" if artist and title != '–' else "")
         self.now_playing_changed.emit(text)
 
+    def update_vlc_status_label(self):
+        try:
+            if self.player and self.player.is_ready():
+                text = "VLC è presente" if self.i18n.lang == 'it' else "VLC is present"
+                color = "#2e7d32"
+            else:
+                text = "VLC non trovato" if self.i18n.lang == 'it' else "VLC not found"
+                color = "#c62828"
+            self.vlc_status.setText(text)
+            self.vlc_status.setStyleSheet(f"color: {color}; font-weight: bold;")
+            self.vlc_status.setVisible(True)
+            # Suggerimento su come impostare il percorso
+            self.vlc_status.setToolTip(self.i18n.t('libvlc_hint'))
+        except Exception:
+            pass
+
     def on_stream_selection_changed(self):
         self.update_header_label()
         if self.player.is_playing():
@@ -206,6 +228,22 @@ class ListenMoePlayer(QWidget):
                 self.player.set_mute(self.mute_button.isChecked())
             except Exception:
                 pass
+
+    # ------------------- Configurazione VLC -------------------
+    def choose_libvlc_path(self):
+        start_dir = self.settings.value('libvlc_path', None) or os.path.expandvars(r"C:\\Program Files\\VideoLAN\\VLC")
+        chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
+        if not chosen:
+            return
+        if self.player.reinitialize(chosen):
+            self.settings.setValue('libvlc_path', chosen)
+            QMessageBox.information(self, 'VLC', self.i18n.t('libvlc_saved_ok') + '\n' + self.i18n.t('libvlc_hint'))
+            self.status_changed.emit("")
+            self.update_vlc_status_label()
+        else:
+            QMessageBox.warning(self, 'VLC', self.i18n.t('libvlc_saved_fail') + '\n' + self.i18n.t('libvlc_hint'))
+            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
+            self.update_vlc_status_label()
 
     # ------------------- Player controls -------------------
     def volume_changed(self, value: int):
@@ -218,11 +256,15 @@ class ListenMoePlayer(QWidget):
         self.settings.setValue('mute', 'true' if checked else 'false')
 
     def pause_resume(self):
-        # Se sta riproducendo -> pausa; altrimenti avvia la riproduzione
-        if self.player.is_playing():
-            self.player.pause_toggle()
-        else:
-            self.play_stream()
+        try:
+            if not self.player.is_playing():
+                # Se non sta riproducendo nulla, avvia subito lo stream corrente
+                self.play_stream()
+            else:
+                # Altrimenti metti in pausa/riprendi
+                self.player.pause_toggle()
+        except Exception as e:
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     def _on_player_event(self, code: str, value):
         if code == 'opening':
@@ -240,6 +282,7 @@ class ListenMoePlayer(QWidget):
         elif code == 'playing':
             self.status_changed.emit(self.t('status_playing'))
             self.buffering_visible.emit(False)
+            self.update_vlc_status_label()
         elif code == 'paused':
             self.status_changed.emit(self.t('status_paused'))
         elif code == 'stopped':
@@ -251,6 +294,7 @@ class ListenMoePlayer(QWidget):
         elif code == 'libvlc_init_failed':
             self.status_changed.emit(self.t('libvlc_init_failed'))
             self.buffering_visible.emit(False)
+            self.update_vlc_status_label()
         elif code == 'error':
             # Fallback generic error
             self.status_changed.emit(self.t('status_error'))
@@ -264,11 +308,13 @@ class ListenMoePlayer(QWidget):
                 saved_path = self.settings.value('libvlc_path', None)
                 if not self.player.reinitialize(saved_path):
                     self.status_changed.emit(self.t('libvlc_not_ready'))
+                    self.update_vlc_status_label()
                     return
             self.status_changed.emit(self.t('status_opening'))
             self.player.play_url(self.get_selected_stream_url())
             self.player.set_volume(self.volume_slider.value())
             self.player.set_mute(self.mute_button.isChecked())
+            self.update_vlc_status_label()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
@@ -278,20 +324,6 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.t('status_stopped'))
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
-            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
-
-    def choose_libvlc_path(self):
-        start_dir = self.settings.value('libvlc_path', None) or os.path.expandvars(r"C:\\Program Files\\VideoLAN\\VLC")
-        chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
-        if not chosen:
-            return
-        if self.player.reinitialize(chosen):
-            self.settings.setValue('libvlc_path', chosen)
-            QMessageBox.information(self, 'VLC', self.i18n.t('libvlc_saved_ok') + '\n' + self.i18n.t('libvlc_hint'))
-            self.status_changed.emit("")
-        else:
-            QMessageBox.warning(self, 'VLC', self.i18n.t('libvlc_saved_fail') + '\n' + self.i18n.t('libvlc_hint'))
-            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
 
     # ------------------- WebSocket callbacks -------------------
     def _on_now_playing(self, title: str, artist: str):
