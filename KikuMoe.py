@@ -271,6 +271,20 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.t('status_stopped'))
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
+            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
+
+    def choose_libvlc_path(self):
+        start_dir = self.settings.value('libvlc_path', None) or os.path.expandvars(r"C:\\Program Files\\VideoLAN\\VLC")
+        chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
+        if not chosen:
+            return
+        if self.player.reinitialize(chosen):
+            self.settings.setValue('libvlc_path', chosen)
+            QMessageBox.information(self, 'VLC', self.i18n.t('libvlc_saved_ok') + '\n' + self.i18n.t('libvlc_hint'))
+            self.status_changed.emit("")
+        else:
+            QMessageBox.warning(self, 'VLC', self.i18n.t('libvlc_saved_fail') + '\n' + self.i18n.t('libvlc_hint'))
+            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
 
     # ------------------- WebSocket callbacks -------------------
     def _on_now_playing(self, title: str, artist: str):
@@ -309,17 +323,3 @@ if __name__ == "__main__":
         except Exception:
             pass
         pass
-
-
-    def choose_libvlc_path(self):
-        start_dir = self.settings.value('libvlc_path', None) or os.path.expandvars(r"C:\\Program Files\\VideoLAN\\VLC")
-        chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
-        if not chosen:
-            return
-        if self.player.reinitialize(chosen):
-            self.settings.setValue('libvlc_path', chosen)
-            QMessageBox.information(self, 'VLC', self.i18n.t('libvlc_saved_ok') + '\n' + self.i18n.t('libvlc_hint'))
-            self.status_changed.emit("")
-        else:
-            QMessageBox.warning(self, 'VLC', self.i18n.t('libvlc_saved_fail') + '\n' + self.i18n.t('libvlc_hint'))
-            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
