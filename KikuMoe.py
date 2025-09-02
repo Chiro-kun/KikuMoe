@@ -103,6 +103,14 @@ class ListenMoePlayer(QWidget):
         self.pause_shortcut = QShortcut(QKeySequence("Space"), self)
         self.pause_shortcut.setContext(Qt.ApplicationShortcut)
         self.pause_shortcut.activated.connect(self.pause_resume)
+        # Shortcut Stop (S)
+        self.stop_shortcut = QShortcut(QKeySequence("S"), self)
+        self.stop_shortcut.setContext(Qt.ApplicationShortcut)
+        self.stop_shortcut.activated.connect(self.stop_stream)
+        # Shortcut Mute (M)
+        self.mute_shortcut = QShortcut(QKeySequence("M"), self)
+        self.mute_shortcut.setContext(Qt.ApplicationShortcut)
+        self.mute_shortcut.activated.connect(self.toggle_mute_shortcut)
 
         # Signals/UI connections
         self.play_button.clicked.connect(self.play_stream)
@@ -362,3 +370,11 @@ if __name__ == "__main__":
         except Exception:
             pass
         pass
+
+
+    def toggle_mute_shortcut(self):
+        # Simula il click del pulsante per mantenere la UI e le impostazioni in sync
+        try:
+            self.mute_button.toggle()
+        except Exception as e:
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
