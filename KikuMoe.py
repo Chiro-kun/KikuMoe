@@ -47,23 +47,80 @@ class ListenMoePlayer(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LISTEN.moe Player (VLC)")
+
+        # --- i18n setup ---
+        self._i18n = {
+            'it': {
+                'app_title': 'LISTEN.moe Player (VLC)',
+                'header': 'LISTEN.moe - {channel} - {format} (VLC)',
+                'channel_label': 'Canale:',
+                'format_label': 'Formato:',
+                'language_label': 'Lingua:',
+                'play': 'Riproduci',
+                'pause': 'Pausa',
+                'stop': 'Stop',
+                'volume': 'Volume',
+                'mute': 'Muto',
+                'unmute': 'Riattiva audio',
+                'now_playing_prefix': 'In riproduzione:',
+                'status_opening': 'Apertura…',
+                'status_buffering': 'Buffering…',
+                'status_buffering_pct': 'Buffering… {pct}%',
+                'status_playing': 'In riproduzione!',
+                'status_paused': 'In pausa.',
+                'status_stopped': 'Fermo.',
+                'status_ended': 'Stream terminato.',
+                'status_error': 'Errore di riproduzione.',
+                'ws_closed_reconnect': 'In riproduzione: WS chiuso, riconnessione...',
+                'ws_error_prefix': 'In riproduzione: errore WS: ',
+                'unknown': 'Sconosciuto',
+            },
+            'en': {
+                'app_title': 'LISTEN.moe Player (VLC)',
+                'header': 'LISTEN.moe - {channel} - {format} (VLC)',
+                'channel_label': 'Channel:',
+                'format_label': 'Format:',
+                'language_label': 'Language:',
+                'play': 'Play',
+                'pause': 'Pause',
+                'stop': 'Stop',
+                'volume': 'Volume',
+                'mute': 'Mute',
+                'unmute': 'Unmute',
+                'now_playing_prefix': 'Now Playing:',
+                'status_opening': 'Opening…',
+                'status_buffering': 'Buffering…',
+                'status_buffering_pct': 'Buffering… {pct}% ',
+                'status_playing': 'Playing!',
+                'status_paused': 'Paused.',
+                'status_stopped': 'Stopped.',
+                'status_ended': 'Stream ended.',
+                'status_error': 'Playback error.',
+                'ws_closed_reconnect': 'Now Playing: WS closed, reconnecting...',
+                'ws_error_prefix': 'Now Playing: WS error: ',
+                'unknown': 'Unknown',
+            },
+        }
+        self._lang_map = {"Italiano": 'it', "English": 'en'}
+        self.lang = 'it'
+
+        self.setWindowTitle(self.t('app_title'))
         self.layout = QVBoxLayout()
 
         # Header + Now playing
-        self.label = QLabel("LISTEN.moe - Streaming Vorbis (VLC)")
+        self.label = QLabel(self.t('header').format(channel='J-POP', format='Vorbis'))
         self.status_label = QLabel("")
-        self.now_playing_label = QLabel("Now Playing: –")
+        self.now_playing_label = QLabel(f"{self.t('now_playing_prefix')} –")
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.status_label)
         self.layout.addWidget(self.now_playing_label)
 
         # Stream selectors (Channel + Format)
         sel_row = QHBoxLayout()
-        self.channel_label = QLabel("Canale:")
+        self.channel_label = QLabel(self.t('channel_label'))
         self.channel_combo = QComboBox()
         self.channel_combo.addItems(["J-POP", "K-POP"])
-        self.format_label = QLabel("Formato:")
+        self.format_label = QLabel(self.t('format_label'))
         self.format_combo = QComboBox()
         self.format_combo.addItems(["Vorbis", "MP3"])  # Vorbis consigliato; MP3 per compatibilità
         sel_row.addWidget(self.channel_label)
@@ -72,6 +129,16 @@ class ListenMoePlayer(QWidget):
         sel_row.addWidget(self.format_combo)
         self.layout.addLayout(sel_row)
 
+        # Language selector
+        lang_row = QHBoxLayout()
+        self.lang_label = QLabel(self.t('language_label'))
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["Italiano", "English"])
+        self.lang_combo.setCurrentIndex(0)
+        lang_row.addWidget(self.lang_label)
+        lang_row.addWidget(self.lang_combo)
+        self.layout.addLayout(lang_row)
+
         # Buffering progress bar
         self.buffer_bar = QProgressBar()
         self.buffer_bar.setRange(0, 100)
@@ -79,16 +146,16 @@ class ListenMoePlayer(QWidget):
         self.layout.addWidget(self.buffer_bar)
 
         # Controls
-        self.play_button = QPushButton("Play")
-        self.pause_button = QPushButton("Pause")  # toggle
-        self.stop_button = QPushButton("Stop")
+        self.play_button = QPushButton(self.t('play'))
+        self.pause_button = QPushButton(self.t('pause'))  # toggle
+        self.stop_button = QPushButton(self.t('stop'))
 
         vol_row = QHBoxLayout()
-        self.volume_label = QLabel("Volume")
+        self.volume_label = QLabel(self.t('volume'))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
-        self.mute_button = QPushButton("Mute")
+        self.mute_button = QPushButton(self.t('mute'))
         self.mute_button.setCheckable(True)
         vol_row.addWidget(self.volume_label)
         vol_row.addWidget(self.volume_slider)
@@ -116,6 +183,7 @@ class ListenMoePlayer(QWidget):
         self.buffering_visible.connect(self.buffer_bar.setVisible)
         self.channel_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
         self.format_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
+        self.lang_combo.currentIndexChanged.connect(self.on_lang_changed)
 
         # VLC setup
         self.vlc_instance = vlc.Instance()
@@ -149,8 +217,41 @@ class ListenMoePlayer(QWidget):
         self.ws_heartbeat_timer = None
         self.ws_should_reconnect = True
 
+        # Track cache for i18n rerender
+        self._current_title = None
+        self._current_artist = None
+
         self.start_ws()
         self.update_header_label()
+
+    # ------------------- i18n -------------------
+    def t(self, key: str, **kwargs) -> str:
+        try:
+            s = self._i18n[self.lang][key]
+            return s.format(**kwargs) if kwargs else s
+        except Exception:
+            return key
+
+    def on_lang_changed(self, idx: int):
+        display = self.lang_combo.currentText()
+        self.lang = self._lang_map.get(display, 'it')
+        self.apply_translations()
+
+    def apply_translations(self):
+        # Window/app
+        self.setWindowTitle(self.t('app_title'))
+        # Labels and controls
+        self.channel_label.setText(self.t('channel_label'))
+        self.format_label.setText(self.t('format_label'))
+        self.lang_label.setText(self.t('language_label'))
+        self.play_button.setText(self.t('play'))
+        self.pause_button.setText(self.t('pause'))
+        self.stop_button.setText(self.t('stop'))
+        self.volume_label.setText(self.t('volume'))
+        self.mute_button.setText(self.t('unmute') if self.mute_button.isChecked() else self.t('mute'))
+        # Header + now playing
+        self.update_header_label()
+        self.update_now_playing_label()
 
     # ------------------- Helpers -------------------
     def get_selected_stream_url(self) -> str:
@@ -171,7 +272,14 @@ class ListenMoePlayer(QWidget):
     def update_header_label(self):
         channel = self.channel_combo.currentText()
         fmt = self.format_combo.currentText()
-        self.label.setText(f"LISTEN.moe - {channel} - {fmt} (VLC)")
+        self.label.setText(self.t('header').format(channel=channel, format=fmt))
+
+    def update_now_playing_label(self):
+        title = self._current_title or '–'
+        artist = self._current_artist or ''
+        prefix = self.t('now_playing_prefix')
+        text = f"{prefix} {title}" + (f" — {artist}" if artist and title != '–' else "")
+        self.now_playing_changed.emit(text)
 
     def on_stream_selection_changed(self):
         # Update header and, if currently playing, switch stream seamlessly
@@ -182,7 +290,6 @@ class ListenMoePlayer(QWidget):
         except Exception:
             is_playing = False
         if is_playing:
-            # Rebuild media and play
             try:
                 self.media = self.vlc_instance.media_new(self.get_selected_stream_url())
                 self.player.set_media(self.media)
@@ -202,7 +309,7 @@ class ListenMoePlayer(QWidget):
     def mute_toggled(self, checked: bool):
         try:
             self.player.audio_set_mute(bool(checked))
-            self.mute_button.setText("Unmute" if checked else "Mute")
+            self.mute_button.setText(self.t('unmute') if checked else self.t('mute'))
         except Exception:
             pass
 
@@ -215,7 +322,7 @@ class ListenMoePlayer(QWidget):
     def _on_vlc_event(self, event):
         et = event.type
         if et == vlc.EventType.MediaPlayerOpening:
-            self.status_changed.emit("Opening…")
+            self.status_changed.emit(self.t('status_opening'))
             self.buffering_visible.emit(True)
             self.buffering_progress.emit(0)
         elif et == vlc.EventType.MediaPlayerBuffering:
@@ -230,23 +337,23 @@ class ListenMoePlayer(QWidget):
                     self.buffering_progress.emit(int(pct))
                 except Exception:
                     self.buffering_progress.emit(0)
-                self.status_changed.emit(f"Buffering… {int(pct)}%")
+                self.status_changed.emit(self.t('status_buffering_pct', pct=int(pct)))
             else:
                 self.buffering_visible.emit(True)
-                self.status_changed.emit("Buffering…")
+                self.status_changed.emit(self.t('status_buffering'))
         elif et == vlc.EventType.MediaPlayerPlaying:
-            self.status_changed.emit("Playing!")
+            self.status_changed.emit(self.t('status_playing'))
             self.buffering_visible.emit(False)
         elif et == vlc.EventType.MediaPlayerPaused:
-            self.status_changed.emit("Paused.")
+            self.status_changed.emit(self.t('status_paused'))
         elif et == vlc.EventType.MediaPlayerStopped:
-            self.status_changed.emit("Stopped.")
+            self.status_changed.emit(self.t('status_stopped'))
             self.buffering_visible.emit(False)
         elif et == vlc.EventType.MediaPlayerEndReached:
-            self.status_changed.emit("Stream ended.")
+            self.status_changed.emit(self.t('status_ended'))
             self.buffering_visible.emit(False)
         elif et == vlc.EventType.MediaPlayerEncounteredError:
-            self.status_changed.emit("Playback error.")
+            self.status_changed.emit(self.t('status_error'))
             self.buffering_visible.emit(False)
 
     # ------------------- WebSocket -------------------
@@ -271,17 +378,18 @@ class ListenMoePlayer(QWidget):
                 t = data.get("t")
                 if t in ("TRACK_UPDATE", "TRACK_UPDATE_REQUEST"):
                     song = d.get("song") or {}
-                    title = song.get("title") or "Unknown"
+                    title = song.get("title") or self.t('unknown')
                     artists = song.get("artists") or []
                     artist_name = artists[0].get("name") if artists else ""
-                    text = f"Now Playing: {title}" + (f" — {artist_name}" if artist_name else "")
-                    self.now_playing_changed.emit(text)
+                    self._current_title = title
+                    self._current_artist = artist_name
+                    self.update_now_playing_label()
 
         def on_error(ws, error):
-            self.now_playing_changed.emit(f"Now Playing: errore WS: {error}")
+            self.now_playing_changed.emit(self.t('ws_error_prefix') + str(error))
 
         def on_close(ws, code, msg):
-            self.now_playing_changed.emit("Now Playing: WS chiuso, riconnessione...")
+            self.now_playing_changed.emit(self.t('ws_closed_reconnect'))
             if self.ws_should_reconnect:
                 threading.Timer(5.0, self.start_ws).start()
 
@@ -330,21 +438,21 @@ class ListenMoePlayer(QWidget):
     # ------------------- Playback (VLC) -------------------
     def play_stream(self):
         try:
-            self.status_changed.emit("Opening…")
+            self.status_changed.emit(self.t('status_opening'))
             self.media = self.vlc_instance.media_new(self.get_selected_stream_url())
             self.player.set_media(self.media)
             self.player.audio_set_volume(self.volume_slider.value())
             self.player.audio_set_mute(self.mute_button.isChecked())
             self.player.play()
         except Exception as e:
-            self.status_changed.emit(f"Errore avvio: {e}")
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     def stop_stream(self):
         try:
             self.player.stop()
-            self.status_changed.emit("Stopped.")
+            self.status_changed.emit(self.t('status_stopped'))
         except Exception as e:
-            self.status_changed.emit(f"Errore stop: {e}")
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     def closeEvent(self, event):
         try:
