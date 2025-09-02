@@ -2,13 +2,13 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QComboBox, QProgressBar, QShortcut
 )
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings
 from PyQt5.QtGui import QKeySequence
-import vlc
 
 from i18n import I18n
 from ws_client import NowPlayingWS
-
+from player_vlc import PlayerVLC
+from config import STREAMS
 
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
@@ -19,8 +19,12 @@ class ListenMoePlayer(QWidget):
     def __init__(self):
         super().__init__()
 
+        # settings
+        self.settings = QSettings('KikuMoe', 'ListenMoePlayer')
+
         # i18n
-        self.i18n = I18n('it')
+        saved_lang = self.settings.value('lang', 'it')
+        self.i18n = I18n(saved_lang if saved_lang in ('it', 'en') else 'it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
 
         self.setWindowTitle(self.i18n.t('app_title'))
@@ -73,9 +77,10 @@ class ListenMoePlayer(QWidget):
         self.volume_label = QLabel(self.i18n.t('volume'))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(80)
+        self.volume_slider.setValue(int(self.settings.value('volume', 80)))
         self.mute_button = QPushButton(self.i18n.t('mute'))
         self.mute_button.setCheckable(True)
+        self.mute_button.setChecked(self.settings.value('mute', 'false') == 'true')
         vol_row.addWidget(self.volume_label)
         vol_row.addWidget(self.volume_slider)
         vol_row.addWidget(self.mute_button)
@@ -104,30 +109,19 @@ class ListenMoePlayer(QWidget):
         self.format_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
         self.lang_combo.currentIndexChanged.connect(self.on_lang_changed)
 
-        # VLC setup
-        self.vlc_instance = vlc.Instance()
-        self.player = self.vlc_instance.media_player_new()
-        self.media = None
+        # Restore saved channel/format
+        saved_channel = self.settings.value('channel', 'J-POP')
+        saved_format = self.settings.value('format', 'Vorbis')
+        self.channel_combo.setCurrentIndex(0 if saved_channel == 'J-POP' else 1)
+        self.format_combo.setCurrentIndex(0 if saved_format == 'Vorbis' else 1)
+        # Restore saved language selector index
+        lang_index = 0 if (saved_lang == 'it') else 1
+        self.lang_combo.setCurrentIndex(lang_index)
 
-        # Attach VLC events to reflect state changes
-        try:
-            self._em = self.player.event_manager()
-            for et in (
-                vlc.EventType.MediaPlayerOpening,
-                vlc.EventType.MediaPlayerBuffering,
-                vlc.EventType.MediaPlayerPlaying,
-                vlc.EventType.MediaPlayerPaused,
-                vlc.EventType.MediaPlayerStopped,
-                vlc.EventType.MediaPlayerEndReached,
-                vlc.EventType.MediaPlayerEncounteredError,
-            ):
-                self._em.event_attach(et, self._on_vlc_event)
-        except Exception:
-            pass
-
-        # Initialize volume/mute from UI
-        self.player.audio_set_volume(self.volume_slider.value())
-        self.player.audio_set_mute(False)
+        # Player wrapper
+        self.player = PlayerVLC(on_event=self._on_player_event)
+        self.player.set_volume(self.volume_slider.value())
+        self.player.set_mute(self.mute_button.isChecked())
 
         # Track cache for i18n rerender
         self._current_title = None
@@ -147,6 +141,8 @@ class ListenMoePlayer(QWidget):
     def on_lang_changed(self, idx: int):
         display = self.lang_combo.currentText()
         self.i18n.set_lang(self._lang_map.get(display, 'it'))
+        # persist language code
+        self.settings.setValue('lang', self.i18n.lang)
         self.apply_translations()
 
     def apply_translations(self):
@@ -169,17 +165,10 @@ class ListenMoePlayer(QWidget):
     def get_selected_stream_url(self) -> str:
         channel = self.channel_combo.currentText()
         fmt = self.format_combo.currentText()
-        streams = {
-            "J-POP": {
-                "Vorbis": "https://listen.moe/stream",
-                "MP3": "https://listen.moe/stream/mp3",
-            },
-            "K-POP": {
-                "Vorbis": "https://listen.moe/kpop/stream",
-                "MP3": "https://listen.moe/kpop/stream/mp3",
-            },
-        }
-        return streams.get(channel, {}).get(fmt, "https://listen.moe/stream")
+        # persist selection
+        self.settings.setValue('channel', channel)
+        self.settings.setValue('format', fmt)
+        return STREAMS.get(channel, {}).get(fmt, STREAMS["J-POP"]["Vorbis"])
 
     def update_header_label(self):
         channel = self.channel_combo.currentText()
@@ -195,77 +184,71 @@ class ListenMoePlayer(QWidget):
 
     def on_stream_selection_changed(self):
         self.update_header_label()
-        try:
-            state = self.player.get_state()
-            is_playing = state in (vlc.State.Playing, vlc.State.Buffering, vlc.State.Opening)
-        except Exception:
-            is_playing = False
-        if is_playing:
+        if self.player.is_playing():
             try:
-                self.media = self.vlc_instance.media_new(self.get_selected_stream_url())
-                self.player.set_media(self.media)
-                self.player.audio_set_volume(self.volume_slider.value())
-                self.player.audio_set_mute(self.mute_button.isChecked())
-                self.player.play()
+                self.player.play_url(self.get_selected_stream_url())
+                self.player.set_volume(self.volume_slider.value())
+                self.player.set_mute(self.mute_button.isChecked())
             except Exception:
                 pass
 
-    # ------------------- VLC controls -------------------
+    # ------------------- Player controls -------------------
     def volume_changed(self, value: int):
-        try:
-            self.player.audio_set_volume(int(value))
-        except Exception:
-            pass
+        self.player.set_volume(int(value))
+        self.settings.setValue('volume', int(value))
 
     def mute_toggled(self, checked: bool):
-        try:
-            self.player.audio_set_mute(bool(checked))
-            self.mute_button.setText(self.t('unmute') if checked else self.t('mute'))
-        except Exception:
-            pass
+        self.player.set_mute(bool(checked))
+        self.mute_button.setText(self.t('unmute') if checked else self.t('mute'))
+        self.settings.setValue('mute', 'true' if checked else 'false')
 
     def pause_resume(self):
-        try:
-            self.player.pause()
-        except Exception:
-            pass
+        self.player.pause_toggle()
 
-    def _on_vlc_event(self, event):
-        et = event.type
-        if et == vlc.EventType.MediaPlayerOpening:
+    def _on_player_event(self, code: str, value):
+        if code == 'opening':
             self.status_changed.emit(self.t('status_opening'))
             self.buffering_visible.emit(True)
             self.buffering_progress.emit(0)
-        elif et == vlc.EventType.MediaPlayerBuffering:
-            pct = None
-            try:
-                pct = getattr(getattr(event, 'u', None), 'new_cache', None)
-            except Exception:
-                pct = None
-            if pct is not None:
+        elif code == 'buffering':
+            if value is not None:
                 self.buffering_visible.emit(True)
-                try:
-                    self.buffering_progress.emit(int(pct))
-                except Exception:
-                    self.buffering_progress.emit(0)
-                self.status_changed.emit(self.t('status_buffering_pct', pct=int(pct)))
+                self.buffering_progress.emit(int(value))
+                self.status_changed.emit(self.t('status_buffering_pct', pct=int(value)))
             else:
                 self.buffering_visible.emit(True)
                 self.status_changed.emit(self.t('status_buffering'))
-        elif et == vlc.EventType.MediaPlayerPlaying:
+        elif code == 'playing':
             self.status_changed.emit(self.t('status_playing'))
             self.buffering_visible.emit(False)
-        elif et == vlc.EventType.MediaPlayerPaused:
+        elif code == 'paused':
             self.status_changed.emit(self.t('status_paused'))
-        elif et == vlc.EventType.MediaPlayerStopped:
+        elif code == 'stopped':
             self.status_changed.emit(self.t('status_stopped'))
             self.buffering_visible.emit(False)
-        elif et == vlc.EventType.MediaPlayerEndReached:
+        elif code == 'ended':
             self.status_changed.emit(self.t('status_ended'))
             self.buffering_visible.emit(False)
-        elif et == vlc.EventType.MediaPlayerEncounteredError:
+        elif code == 'error':
             self.status_changed.emit(self.t('status_error'))
             self.buffering_visible.emit(False)
+
+    # ------------------- Playback -------------------
+    def play_stream(self):
+        try:
+            self.status_changed.emit(self.t('status_opening'))
+            self.player.play_url(self.get_selected_stream_url())
+            self.player.set_volume(self.volume_slider.value())
+            self.player.set_mute(self.mute_button.isChecked())
+        except Exception as e:
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
+
+    def stop_stream(self):
+        try:
+            self.player.stop()
+            self.status_changed.emit(self.t('status_stopped'))
+        except Exception as e:
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     # ------------------- WebSocket callbacks -------------------
     def _on_now_playing(self, title: str, artist: str):
@@ -279,25 +262,7 @@ class ListenMoePlayer(QWidget):
     def _on_ws_closed_text(self, _):
         self.now_playing_changed.emit(self.t('ws_closed_reconnect'))
 
-    # ------------------- Playback (VLC) -------------------
-    def play_stream(self):
-        try:
-            self.status_changed.emit(self.t('status_opening'))
-            self.media = self.vlc_instance.media_new(self.get_selected_stream_url())
-            self.player.set_media(self.media)
-            self.player.audio_set_volume(self.volume_slider.value())
-            self.player.audio_set_mute(self.mute_button.isChecked())
-            self.player.play()
-        except Exception as e:
-            self.status_changed.emit(f"{self.t('status_error')} {e}")
-
-    def stop_stream(self):
-        try:
-            self.player.stop()
-            self.status_changed.emit(self.t('status_stopped'))
-        except Exception as e:
-            self.status_changed.emit(f"{self.t('status_error')} {e}")
-
+    # ------------------- Window -------------------
     def closeEvent(self, event):
         try:
             self.stop_stream()
@@ -308,6 +273,7 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         event.accept()
+
 
 if __name__ == "__main__":
     app = QApplication([])
