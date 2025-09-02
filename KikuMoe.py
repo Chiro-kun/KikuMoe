@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
-    QSlider, QComboBox, QProgressBar, QShortcut, QFileDialog, QMessageBox
+    QSlider, QComboBox, QProgressBar, QShortcut, QFileDialog, QMessageBox,
+    QSystemTrayIcon, QMenu, QAction, QStyle
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings
 from PyQt5.QtGui import QKeySequence
@@ -62,13 +63,19 @@ class ListenMoePlayer(QWidget):
         # Add VLC Path button for configurable libvlc
         self.vlc_button = QPushButton(self.i18n.t('libvlc_button'))
         self.vlc_button.clicked.connect(self.choose_libvlc_path)
-        # Indicatore stato VLC
+        # Indicatore stato VLC (icona + testo)
+        self.vlc_status_icon = QLabel("")
+        self.vlc_status_icon.setFixedSize(10, 10)
         self.vlc_status = QLabel("")
         lang_row.addWidget(self.lang_label)
         lang_row.addWidget(self.lang_combo)
         lang_row.addWidget(self.vlc_button)
+        lang_row.addWidget(self.vlc_status_icon)
         lang_row.addWidget(self.vlc_status)
         self.layout.addLayout(lang_row)
+        # Dettagli VLC (versione e percorso)
+        self.vlc_details = QLabel("")
+        self.layout.addWidget(self.vlc_details)
 
         # Buffering progress bar
         self.buffer_bar = QProgressBar()
@@ -143,8 +150,9 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
         self.player.set_volume(self.volume_slider.value())
         self.player.set_mute(self.mute_button.isChecked())
-        # Aggiorna indicatore stato VLC
+        # Aggiorna indicatore stato VLC e dettagli
         self.update_vlc_status_label()
+        self.update_vlc_details()
 
         # Track cache for i18n rerender
         self._current_title = None
@@ -157,6 +165,32 @@ class ListenMoePlayer(QWidget):
             on_closed_text=self._on_ws_closed_text,
         )
         self.ws.start()
+
+        # System Tray Icon e menu
+        try:
+            self.tray = QSystemTrayIcon(self)
+            self.update_tray_icon()
+            self.tray_menu = QMenu(self)
+            self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
+            self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
+            self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
+            self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
+            self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
+            self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
+            self.tray_menu.addAction(self.action_show)
+            self.tray_menu.addAction(self.action_hide)
+            self.tray_menu.addSeparator()
+            self.tray_menu.addAction(self.action_play_pause)
+            self.tray_menu.addAction(self.action_stop)
+            self.tray_menu.addAction(self.action_mute)
+            self.tray_menu.addSeparator()
+            self.tray_menu.addAction(self.action_quit)
+            self.tray.setContextMenu(self.tray_menu)
+            self.tray.setToolTip(self.i18n.t('app_title'))
+            self.tray.activated.connect(self._on_tray_activated)
+            self.tray.show()
+        except Exception:
+            pass
 
         self.update_header_label()
 
@@ -186,6 +220,10 @@ class ListenMoePlayer(QWidget):
         # Aggiorna label stato VLC secondo lingua corrente
         if hasattr(self, 'vlc_status'):
             self.update_vlc_status_label()
+        if hasattr(self, 'vlc_details'):
+            self.update_vlc_details()
+        # Aggiorna testi del Tray
+        self.update_tray_texts()
 
     # ------------------- Helpers -------------------
     def t(self, key: str, **kwargs) -> str:
@@ -213,17 +251,28 @@ class ListenMoePlayer(QWidget):
 
     def update_vlc_status_label(self):
         try:
-            if self.player and self.player.is_ready():
-                text = "VLC è presente" if self.i18n.lang == 'it' else "VLC is present"
-                color = "#2e7d32"
-            else:
-                text = "VLC non trovato" if self.i18n.lang == 'it' else "VLC not found"
-                color = "#c62828"
+            is_ok = bool(self.player and self.player.is_ready())
+            text = self.t('vlc_present') if is_ok else self.t('vlc_not_found')
+            color = "#2e7d32" if is_ok else "#c62828"
             self.vlc_status.setText(text)
             self.vlc_status.setStyleSheet(f"color: {color}; font-weight: bold;")
             self.vlc_status.setVisible(True)
-            # Suggerimento su come impostare il percorso
+            # Dot icon styling
+            self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+            self.vlc_status_icon.setToolTip(self.i18n.t('libvlc_hint'))
             self.vlc_status.setToolTip(self.i18n.t('libvlc_hint'))
+            # Aggiorna dettagli
+            self.update_vlc_details()
+        except Exception:
+            pass
+
+    def update_vlc_details(self):
+        try:
+            ver = self.player.get_version() if self.player else None
+            path = self.player.get_configured_path() if self.player else None
+            ver_txt = ver or self.t('unknown')
+            path_txt = path or self.t('vlc_path_system')
+            self.vlc_details.setText(f"{self.t('vlc_version_label')} {ver_txt}    {self.t('vlc_path_label')} {path_txt}")
         except Exception:
             pass
 
@@ -248,10 +297,12 @@ class ListenMoePlayer(QWidget):
             QMessageBox.information(self, 'VLC', self.i18n.t('libvlc_saved_ok') + '\n' + self.i18n.t('libvlc_hint'))
             self.status_changed.emit("")
             self.update_vlc_status_label()
+            self.update_vlc_details()
         else:
             QMessageBox.warning(self, 'VLC', self.i18n.t('libvlc_saved_fail') + '\n' + self.i18n.t('libvlc_hint'))
             self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
             self.update_vlc_status_label()
+            self.update_vlc_details()
 
     # ------------------- Player controls -------------------
     def volume_changed(self, value: int):
@@ -262,6 +313,12 @@ class ListenMoePlayer(QWidget):
         self.player.set_mute(bool(checked))
         self.mute_button.setText(self.t('unmute') if checked else self.t('mute'))
         self.settings.setValue('mute', 'true' if checked else 'false')
+        # Aggiorna testo azione tray per mute
+        try:
+            if hasattr(self, 'action_mute'):
+                self.action_mute.setText(self.i18n.t('tray_unmute') if checked else self.i18n.t('tray_mute'))
+        except Exception:
+            pass
 
     def pause_resume(self):
         try:
@@ -274,11 +331,19 @@ class ListenMoePlayer(QWidget):
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
+    def toggle_mute_shortcut(self):
+        # Simula il click del pulsante per mantenere la UI e le impostazioni in sync
+        try:
+            self.mute_button.toggle()
+        except Exception as e:
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
+
     def _on_player_event(self, code: str, value):
         if code == 'opening':
             self.status_changed.emit(self.t('status_opening'))
             self.buffering_visible.emit(True)
             self.buffering_progress.emit(0)
+            self.update_tray_icon()
         elif code == 'buffering':
             if value is not None:
                 self.buffering_visible.emit(True)
@@ -291,22 +356,28 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.t('status_playing'))
             self.buffering_visible.emit(False)
             self.update_vlc_status_label()
+            self.update_tray_icon()
         elif code == 'paused':
             self.status_changed.emit(self.t('status_paused'))
+            self.update_tray_icon()
         elif code == 'stopped':
             self.status_changed.emit(self.t('status_stopped'))
             self.buffering_visible.emit(False)
+            self.update_tray_icon()
         elif code == 'ended':
             self.status_changed.emit(self.t('status_ended'))
             self.buffering_visible.emit(False)
+            self.update_tray_icon()
         elif code == 'libvlc_init_failed':
             self.status_changed.emit(self.t('libvlc_init_failed'))
             self.buffering_visible.emit(False)
             self.update_vlc_status_label()
+            self.update_tray_icon()
         elif code == 'error':
             # Fallback generic error
             self.status_changed.emit(self.t('status_error'))
             self.buffering_visible.emit(False)
+            self.update_tray_icon()
 
     # ------------------- Playback -------------------
     def play_stream(self):
@@ -317,12 +388,15 @@ class ListenMoePlayer(QWidget):
                 if not self.player.reinitialize(saved_path):
                     self.status_changed.emit(self.t('libvlc_not_ready'))
                     self.update_vlc_status_label()
+                    self.update_vlc_details()
                     return
             self.status_changed.emit(self.t('status_opening'))
             self.player.play_url(self.get_selected_stream_url())
             self.player.set_volume(self.volume_slider.value())
             self.player.set_mute(self.mute_button.isChecked())
             self.update_vlc_status_label()
+            self.update_vlc_details()
+            self.update_tray_icon()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
@@ -330,8 +404,55 @@ class ListenMoePlayer(QWidget):
         try:
             self.player.stop()
             self.status_changed.emit(self.t('status_stopped'))
+            self.update_tray_icon()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
+
+    # ------------------- Tray helpers -------------------
+    def _on_tray_activated(self, reason):
+        try:
+            if reason == QSystemTrayIcon.Trigger:
+                if self.isHidden():
+                    self.showNormal()
+                    self.activateWindow()
+                else:
+                    self.hide()
+        except Exception:
+            pass
+
+    def update_tray_texts(self):
+        try:
+            if hasattr(self, 'action_show'):
+                self.action_show.setText(self.i18n.t('tray_show'))
+            if hasattr(self, 'action_hide'):
+                self.action_hide.setText(self.i18n.t('tray_hide'))
+            if hasattr(self, 'action_play_pause'):
+                self.action_play_pause.setText(self.i18n.t('tray_play_pause'))
+            if hasattr(self, 'action_stop'):
+                self.action_stop.setText(self.i18n.t('tray_stop'))
+            if hasattr(self, 'action_mute'):
+                self.action_mute.setText(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'))
+            if hasattr(self, 'action_quit'):
+                self.action_quit.setText(self.i18n.t('tray_quit'))
+            if hasattr(self, 'tray'):
+                self.tray.setToolTip(self.i18n.t('app_title'))
+        except Exception:
+            pass
+
+    def update_tray_icon(self):
+        try:
+            if not hasattr(self, 'tray') or self.tray is None:
+                return
+            style = self.style()
+            icon = None
+            # Usa icone standard del sistema per evitare file esterni
+            if self.player and self.player.is_playing():
+                icon = style.standardIcon(QStyle.SP_MediaPlay)
+            else:
+                icon = style.standardIcon(QStyle.SP_MediaStop)
+            self.tray.setIcon(icon)
+        except Exception:
+            pass
 
     # ------------------- WebSocket callbacks -------------------
     def _on_now_playing(self, title: str, artist: str):
@@ -370,11 +491,3 @@ if __name__ == "__main__":
         except Exception:
             pass
         pass
-
-
-    def toggle_mute_shortcut(self):
-        # Simula il click del pulsante per mantenere la UI e le impostazioni in sync
-        try:
-            self.mute_button.toggle()
-        except Exception as e:
-            self.status_changed.emit(f"{self.t('status_error')} {e}")

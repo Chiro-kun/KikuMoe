@@ -32,6 +32,19 @@ I18N: Dict[str, Dict[str, str]] = {
         'libvlc_saved_ok': 'Percorso VLC salvato. Prova a riprodurre lo stream.',
         'libvlc_saved_fail': 'Impossibile inizializzare VLC con il percorso selezionato.',
         'libvlc_hint': 'Suggerimento: scegli la cartella che contiene libvlc.dll (es. C:/Program Files/VideoLAN/VLC) e assicurati che l’architettura corrisponda a Python.',
+        # Nuove chiavi per indicatori/Tray/dettagli VLC
+        'vlc_present': 'VLC è presente',
+        'vlc_not_found': 'VLC non trovato',
+        'vlc_version_label': 'Versione VLC:',
+        'vlc_path_label': 'Percorso VLC:',
+        'vlc_path_system': 'Sistema/PATH',
+        'tray_show': 'Mostra finestra',
+        'tray_hide': 'Nascondi finestra',
+        'tray_play_pause': 'Play/Pausa',
+        'tray_stop': 'Stop',
+        'tray_mute': 'Muto',
+        'tray_unmute': 'Riattiva audio',
+        'tray_quit': 'Esci',
     },
     'en': {
         'app_title': 'LISTEN.moe Player (VLC)',
@@ -64,19 +77,33 @@ I18N: Dict[str, Dict[str, str]] = {
         'libvlc_saved_ok': 'VLC path saved. Try playing the stream.',
         'libvlc_saved_fail': 'Failed to initialize VLC with the selected path.',
         'libvlc_hint': 'Hint: choose the folder containing libvlc.dll (e.g., C:/Program Files/VideoLAN/VLC) and ensure architecture matches Python.',
+        # New keys for indicators/Tray/VLC details
+        'vlc_present': 'VLC is present',
+        'vlc_not_found': 'VLC not found',
+        'vlc_version_label': 'VLC Version:',
+        'vlc_path_label': 'VLC Path:',
+        'vlc_path_system': 'System/PATH',
+        'tray_show': 'Show window',
+        'tray_hide': 'Hide window',
+        'tray_play_pause': 'Play/Pause',
+        'tray_stop': 'Stop',
+        'tray_mute': 'Mute',
+        'tray_unmute': 'Unmute',
+        'tray_quit': 'Quit',
     },
 }
 
+
 class I18n:
-    def __init__(self, default_lang: str = 'it') -> None:
-        self.lang = default_lang if default_lang in I18N else 'it'
+    def __init__(self, lang: str) -> None:
+        self.lang = 'it' if lang not in ('it', 'en') else lang
 
     def set_lang(self, lang: str) -> None:
-        self.lang = lang if lang in I18N else 'it'
+        self.lang = 'it' if lang not in ('it', 'en') else lang
 
     def t(self, key: str, **kwargs) -> str:
         try:
-            s = I18N[self.lang][key]
-            return s.format(**kwargs) if kwargs else s
+            txt = I18N[self.lang][key]
+            return txt.format(**kwargs) if kwargs else txt
         except Exception:
-            return key
+            return I18N['it'].get(key, key)

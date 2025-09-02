@@ -165,3 +165,20 @@ class PlayerVLC:
             self._emit('ended', None)
         elif et == vlc.EventType.MediaPlayerEncounteredError:
             self._emit('error', None)
+
+    # -------- Dettagli/diagnostica VLC --------
+    def get_version(self) -> Optional[str]:
+        """Return libVLC version string if available, otherwise None."""
+        if vlc is None:
+            return None
+        try:
+            ver = vlc.libvlc_get_version()  # type: ignore[attr-defined]
+            if isinstance(ver, bytes):
+                ver = ver.decode(errors='ignore')
+            return str(ver)
+        except Exception:
+            return None
+
+    def get_configured_path(self) -> Optional[str]:
+        """Return configured libvlc path (folder) or None if using system/PATH."""
+        return self._vlc_path
