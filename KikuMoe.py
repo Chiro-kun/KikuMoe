@@ -1,43 +1,14 @@
-import json
-import threading
-import requests
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QComboBox, QProgressBar, QShortcut
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QKeySequence
-from websocket import WebSocketApp
 import vlc
 
-API_BASE_URL = "https://listen.moe/api"
-LOGIN_URL = f"{API_BASE_URL}/login"
-WS_URL = "wss://listen.moe/gateway_v2"
+from i18n import I18n
+from ws_client import NowPlayingWS
 
-class ListenMoeAPI:
-    def __init__(self):
-        self.jwt = None
-
-    def login(self, username, password):
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/vnd.listen.v4+json"
-        }
-        data = {"username": username, "password": password}
-        response = requests.post(LOGIN_URL, json=data, headers=headers)
-        if response.status_code == 200:
-            self.jwt = response.json().get("token")
-            return True
-        return False
-
-    def get_headers(self):
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/vnd.listen.v4+json"
-        }
-        if self.jwt:
-            headers["Authorization"] = f"Bearer {self.jwt}"
-        return headers
 
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
@@ -48,79 +19,27 @@ class ListenMoePlayer(QWidget):
     def __init__(self):
         super().__init__()
 
-        # --- i18n setup ---
-        self._i18n = {
-            'it': {
-                'app_title': 'LISTEN.moe Player (VLC)',
-                'header': 'LISTEN.moe - {channel} - {format} (VLC)',
-                'channel_label': 'Canale:',
-                'format_label': 'Formato:',
-                'language_label': 'Lingua:',
-                'play': 'Riproduci',
-                'pause': 'Pausa',
-                'stop': 'Stop',
-                'volume': 'Volume',
-                'mute': 'Muto',
-                'unmute': 'Riattiva audio',
-                'now_playing_prefix': 'In riproduzione:',
-                'status_opening': 'Apertura…',
-                'status_buffering': 'Buffering…',
-                'status_buffering_pct': 'Buffering… {pct}%',
-                'status_playing': 'In riproduzione!',
-                'status_paused': 'In pausa.',
-                'status_stopped': 'Fermo.',
-                'status_ended': 'Stream terminato.',
-                'status_error': 'Errore di riproduzione.',
-                'ws_closed_reconnect': 'In riproduzione: WS chiuso, riconnessione...',
-                'ws_error_prefix': 'In riproduzione: errore WS: ',
-                'unknown': 'Sconosciuto',
-            },
-            'en': {
-                'app_title': 'LISTEN.moe Player (VLC)',
-                'header': 'LISTEN.moe - {channel} - {format} (VLC)',
-                'channel_label': 'Channel:',
-                'format_label': 'Format:',
-                'language_label': 'Language:',
-                'play': 'Play',
-                'pause': 'Pause',
-                'stop': 'Stop',
-                'volume': 'Volume',
-                'mute': 'Mute',
-                'unmute': 'Unmute',
-                'now_playing_prefix': 'Now Playing:',
-                'status_opening': 'Opening…',
-                'status_buffering': 'Buffering…',
-                'status_buffering_pct': 'Buffering… {pct}% ',
-                'status_playing': 'Playing!',
-                'status_paused': 'Paused.',
-                'status_stopped': 'Stopped.',
-                'status_ended': 'Stream ended.',
-                'status_error': 'Playback error.',
-                'ws_closed_reconnect': 'Now Playing: WS closed, reconnecting...',
-                'ws_error_prefix': 'Now Playing: WS error: ',
-                'unknown': 'Unknown',
-            },
-        }
+        # i18n
+        self.i18n = I18n('it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
-        self.lang = 'it'
 
-        self.setWindowTitle(self.t('app_title'))
+        self.setWindowTitle(self.i18n.t('app_title'))
         self.layout = QVBoxLayout()
 
         # Header + Now playing
-        self.label = QLabel(self.t('header').format(channel='J-POP', format='Vorbis'))
+        self.label = QLabel(self.i18n.t('header').format(channel='J-POP', format='Vorbis'))
         self.status_label = QLabel("")
-        self.now_playing_label = QLabel(f"{self.t('now_playing_prefix')} –")
+        self.now_playing_label = QLabel(f"{self.i18n.t('now_playing_prefix')} –")
         self.layout.addWidget(self.label)
         self.layout.addWidget(self.status_label)
         self.layout.addWidget(self.now_playing_label)
 
         # Stream selectors (Channel + Format)
         sel_row = QHBoxLayout()
-        self.channel_label = QLabel(self.t('channel_label'))
+        self.channel_label = QLabel(self.i18n.t('channel_label'))
         self.channel_combo = QComboBox()
         self.channel_combo.addItems(["J-POP", "K-POP"])
-        self.format_label = QLabel(self.t('format_label'))
+        self.format_label = QLabel(self.i18n.t('format_label'))
         self.format_combo = QComboBox()
         self.format_combo.addItems(["Vorbis", "MP3"])  # Vorbis consigliato; MP3 per compatibilità
         sel_row.addWidget(self.channel_label)
@@ -131,7 +50,7 @@ class ListenMoePlayer(QWidget):
 
         # Language selector
         lang_row = QHBoxLayout()
-        self.lang_label = QLabel(self.t('language_label'))
+        self.lang_label = QLabel(self.i18n.t('language_label'))
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["Italiano", "English"])
         self.lang_combo.setCurrentIndex(0)
@@ -146,16 +65,16 @@ class ListenMoePlayer(QWidget):
         self.layout.addWidget(self.buffer_bar)
 
         # Controls
-        self.play_button = QPushButton(self.t('play'))
-        self.pause_button = QPushButton(self.t('pause'))  # toggle
-        self.stop_button = QPushButton(self.t('stop'))
+        self.play_button = QPushButton(self.i18n.t('play'))
+        self.pause_button = QPushButton(self.i18n.t('pause'))  # toggle
+        self.stop_button = QPushButton(self.i18n.t('stop'))
 
         vol_row = QHBoxLayout()
-        self.volume_label = QLabel(self.t('volume'))
+        self.volume_label = QLabel(self.i18n.t('volume'))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(80)
-        self.mute_button = QPushButton(self.t('mute'))
+        self.mute_button = QPushButton(self.i18n.t('mute'))
         self.mute_button.setCheckable(True)
         vol_row.addWidget(self.volume_label)
         vol_row.addWidget(self.volume_slider)
@@ -210,50 +129,43 @@ class ListenMoePlayer(QWidget):
         self.player.audio_set_volume(self.volume_slider.value())
         self.player.audio_set_mute(False)
 
-        # WebSocket state
-        self.ws_app = None
-        self.ws_thread = None
-        self.ws_heartbeat_interval_ms = None
-        self.ws_heartbeat_timer = None
-        self.ws_should_reconnect = True
-
         # Track cache for i18n rerender
         self._current_title = None
         self._current_artist = None
 
-        self.start_ws()
+        # WebSocket wrapper
+        self.ws = NowPlayingWS(
+            on_now_playing=self._on_now_playing,
+            on_error_text=self._on_ws_error_text,
+            on_closed_text=self._on_ws_closed_text,
+        )
+        self.ws.start()
+
         self.update_header_label()
 
     # ------------------- i18n -------------------
-    def t(self, key: str, **kwargs) -> str:
-        try:
-            s = self._i18n[self.lang][key]
-            return s.format(**kwargs) if kwargs else s
-        except Exception:
-            return key
-
     def on_lang_changed(self, idx: int):
         display = self.lang_combo.currentText()
-        self.lang = self._lang_map.get(display, 'it')
+        self.i18n.set_lang(self._lang_map.get(display, 'it'))
         self.apply_translations()
 
     def apply_translations(self):
-        # Window/app
-        self.setWindowTitle(self.t('app_title'))
-        # Labels and controls
-        self.channel_label.setText(self.t('channel_label'))
-        self.format_label.setText(self.t('format_label'))
-        self.lang_label.setText(self.t('language_label'))
-        self.play_button.setText(self.t('play'))
-        self.pause_button.setText(self.t('pause'))
-        self.stop_button.setText(self.t('stop'))
-        self.volume_label.setText(self.t('volume'))
-        self.mute_button.setText(self.t('unmute') if self.mute_button.isChecked() else self.t('mute'))
-        # Header + now playing
+        self.setWindowTitle(self.i18n.t('app_title'))
+        self.channel_label.setText(self.i18n.t('channel_label'))
+        self.format_label.setText(self.i18n.t('format_label'))
+        self.lang_label.setText(self.i18n.t('language_label'))
+        self.play_button.setText(self.i18n.t('play'))
+        self.pause_button.setText(self.i18n.t('pause'))
+        self.stop_button.setText(self.i18n.t('stop'))
+        self.volume_label.setText(self.i18n.t('volume'))
+        self.mute_button.setText(self.i18n.t('unmute') if self.mute_button.isChecked() else self.i18n.t('mute'))
         self.update_header_label()
         self.update_now_playing_label()
 
     # ------------------- Helpers -------------------
+    def t(self, key: str, **kwargs) -> str:
+        return self.i18n.t(key, **kwargs)
+
     def get_selected_stream_url(self) -> str:
         channel = self.channel_combo.currentText()
         fmt = self.format_combo.currentText()
@@ -282,7 +194,6 @@ class ListenMoePlayer(QWidget):
         self.now_playing_changed.emit(text)
 
     def on_stream_selection_changed(self):
-        # Update header and, if currently playing, switch stream seamlessly
         self.update_header_label()
         try:
             state = self.player.get_state()
@@ -356,84 +267,17 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.t('status_error'))
             self.buffering_visible.emit(False)
 
-    # ------------------- WebSocket -------------------
-    def start_ws(self):
-        def on_open(ws):
-            pass
+    # ------------------- WebSocket callbacks -------------------
+    def _on_now_playing(self, title: str, artist: str):
+        self._current_title = title or self.t('unknown')
+        self._current_artist = artist or ''
+        self.update_now_playing_label()
 
-        def on_message(ws, message):
-            try:
-                data = json.loads(message)
-            except Exception:
-                return
-            op = data.get("op")
-            if op == 0:
-                d = data.get("d", {})
-                hb = d.get("heartbeat")
-                if isinstance(hb, int):
-                    self.ws_heartbeat_interval_ms = hb
-                    self.schedule_heartbeat()
-            elif op == 1:
-                d = data.get("d", {})
-                t = data.get("t")
-                if t in ("TRACK_UPDATE", "TRACK_UPDATE_REQUEST"):
-                    song = d.get("song") or {}
-                    title = song.get("title") or self.t('unknown')
-                    artists = song.get("artists") or []
-                    artist_name = artists[0].get("name") if artists else ""
-                    self._current_title = title
-                    self._current_artist = artist_name
-                    self.update_now_playing_label()
+    def _on_ws_error_text(self, error_text: str):
+        self.now_playing_changed.emit(self.t('ws_error_prefix') + error_text)
 
-        def on_error(ws, error):
-            self.now_playing_changed.emit(self.t('ws_error_prefix') + str(error))
-
-        def on_close(ws, code, msg):
-            self.now_playing_changed.emit(self.t('ws_closed_reconnect'))
-            if self.ws_should_reconnect:
-                threading.Timer(5.0, self.start_ws).start()
-
-        self.ws_app = WebSocketApp(
-            WS_URL,
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-        )
-        self.ws_thread = threading.Thread(target=self.ws_app.run_forever, kwargs={"ping_interval": None}, daemon=True)
-        self.ws_thread.start()
-
-    def schedule_heartbeat(self):
-        if self.ws_heartbeat_interval_ms is None or self.ws_app is None:
-            return
-        def send_hb():
-            try:
-                self.ws_app.send(json.dumps({"op": 9}))
-            except Exception:
-                pass
-            self.schedule_heartbeat()
-        delay = self.ws_heartbeat_interval_ms / 1000.0
-        self.ws_heartbeat_timer = threading.Timer(delay, send_hb)
-        self.ws_heartbeat_timer.daemon = True
-        self.ws_heartbeat_timer.start()
-
-    def shutdown_ws(self):
-        self.ws_should_reconnect = False
-        try:
-            if self.ws_heartbeat_timer:
-                self.ws_heartbeat_timer.cancel()
-        except Exception:
-            pass
-        try:
-            if self.ws_app:
-                self.ws_app.close()
-        except Exception:
-            pass
-        try:
-            if self.ws_thread and self.ws_thread.is_alive():
-                self.ws_thread.join(timeout=1.0)
-        except Exception:
-            pass
+    def _on_ws_closed_text(self, _):
+        self.now_playing_changed.emit(self.t('ws_closed_reconnect'))
 
     # ------------------- Playback (VLC) -------------------
     def play_stream(self):
@@ -460,7 +304,7 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         try:
-            self.shutdown_ws()
+            self.ws.shutdown()
         except Exception:
             pass
         event.accept()
