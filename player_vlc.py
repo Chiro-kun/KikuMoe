@@ -1,103 +1,167 @@
-import vlc
-from typing import Callable, Optional
+from __future__ import annotations
+from typing import Optional, Callable
+import os
+
+try:
+    import vlc
+except Exception:
+    vlc = None  # type: ignore
 
 
 class PlayerVLC:
-    """
-    Thin wrapper around python-vlc MediaPlayer that:
-    - Encapsulates VLC instance/player creation
-    - Exposes simple controls (play_url, stop, pause_toggle, set_volume, set_mute)
-    - Maps VLC events to simple codes and forwards them to an on_event callback
-    """
-
-    def __init__(self, on_event: Optional[Callable[[str, Optional[int]], None]] = None):
-        self._instance = vlc.Instance()
-        self._player = self._instance.media_player_new()
-        self._media = None
+    def __init__(self, libvlc_path: Optional[str] = None, on_event: Optional[Callable[[str, Optional[int]], None]] = None) -> None:
+        self._vlc_path = libvlc_path
         self._on_event = on_event
+        self.instance: Optional['vlc.Instance'] = None
+        self.player: Optional['vlc.MediaPlayer'] = None
+        self._muted: bool = False
+        self._volume: int = 100
+        self._ready: bool = False
+        self._init_vlc()
 
+    def _init_vlc(self) -> None:
+        self._ready = False
+        if vlc is None:
+            return
+        # Setup plugin path if provided
+        if self._vlc_path and os.path.isdir(self._vlc_path):
+            try:
+                os.add_dll_directory(self._vlc_path)
+            except Exception:
+                pass
         try:
-            em = self._player.event_manager()
-            em.event_attach(vlc.EventType.MediaPlayerOpening, self._handle_event)
-            em.event_attach(vlc.EventType.MediaPlayerBuffering, self._handle_event)
-            em.event_attach(vlc.EventType.MediaPlayerPlaying, self._handle_event)
-            em.event_attach(vlc.EventType.MediaPlayerPaused, self._handle_event)
-            em.event_attach(vlc.EventType.MediaPlayerStopped, self._handle_event)
-            em.event_attach(vlc.EventType.MediaPlayerEndReached, self._handle_event)
-            em.event_attach(vlc.EventType.MediaPlayerEncounteredError, self._handle_event)
+            self.instance = vlc.Instance()
+            self.player = self.instance.media_player_new()
+            # Hook events for UI feedback
+            try:
+                em = self.player.event_manager()
+                em.event_attach(vlc.EventType.MediaPlayerOpening, self._handle_event)
+                em.event_attach(vlc.EventType.MediaPlayerBuffering, self._handle_event)
+                em.event_attach(vlc.EventType.MediaPlayerPlaying, self._handle_event)
+                em.event_attach(vlc.EventType.MediaPlayerPaused, self._handle_event)
+                em.event_attach(vlc.EventType.MediaPlayerStopped, self._handle_event)
+                em.event_attach(vlc.EventType.MediaPlayerEndReached, self._handle_event)
+                em.event_attach(vlc.EventType.MediaPlayerEncounteredError, self._handle_event)
+            except Exception:
+                pass
+            # Apply last known audio state
+            self.player.audio_set_volume(self._volume)
+            self.player.audio_set_mute(self._muted)
+            self._ready = True
         except Exception:
-            # Event hookup failure should not break basic playback
-            pass
+            self.instance = None
+            self.player = None
+            self._ready = False
 
-    # ------------- Controls -------------
-    def play_url(self, url: str):
-        try:
-            self._media = self._instance.media_new(url)
-            self._player.set_media(self._media)
-            self._player.play()
-        except Exception:
-            if self._on_event:
-                self._on_event('error', None)
+    def is_ready(self) -> bool:
+        return bool(self._ready and self.instance is not None and self.player is not None)
 
-    def stop(self):
-        try:
-            self._player.stop()
-        except Exception:
-            pass
+    def reinitialize(self, libvlc_path: Optional[str]) -> bool:
+        self._vlc_path = libvlc_path
+        self._init_vlc()
+        return self.is_ready()
 
-    def pause_toggle(self):
-        try:
-            self._player.pause()
-        except Exception:
-            pass
+    def _emit(self, code: str, value: Optional[int] = None) -> None:
+        if self._on_event:
+            try:
+                self._on_event(code, value)
+            except Exception:
+                pass
 
-    def set_volume(self, value: int):
+    def play_url(self, url: str) -> bool:
+        if not self.is_ready():
+            # Keep backward compatibility with UI error handling
+            self._emit('libvlc_init_failed', None)
+            # Also emit as generic error with code for older handlers, if any
+            self._emit('error', None)
+            return False
         try:
-            self._player.audio_set_volume(int(value))
+            assert self.instance is not None and self.player is not None
+            media = self.instance.media_new(url)
+            self.player.set_media(media)
+            self.player.play()
+            return True
         except Exception:
-            pass
+            self._emit('error', None)
+            return False
 
-    def set_mute(self, mute: bool):
+    def stop(self) -> None:
+        if not self.is_ready():
+            self._emit('libvlc_init_failed', None)
+            return
         try:
-            self._player.audio_set_mute(bool(mute))
+            assert self.player is not None
+            self.player.stop()
         except Exception:
-            pass
+            self._emit('error', None)
+
+    def pause_toggle(self) -> None:
+        if not self.is_ready():
+            self._emit('libvlc_init_failed', None)
+            return
+        try:
+            assert self.player is not None
+            self.player.pause()
+        except Exception:
+            self._emit('error', None)
+
+    def set_volume(self, vol: int) -> None:
+        self._volume = max(0, min(100, int(vol)))
+        if not self.is_ready():
+            return
+        try:
+            assert self.player is not None
+            self.player.audio_set_volume(self._volume)
+        except Exception:
+            self._emit('error', None)
+
+    def set_mute(self, mute: bool) -> None:
+        self._muted = bool(mute)
+        if not self.is_ready():
+            return
+        try:
+            assert self.player is not None
+            self.player.audio_set_mute(self._muted)
+        except Exception:
+            self._emit('error', None)
+
+    def get_volume(self) -> int:
+        return self._volume
+
+    def get_mute(self) -> bool:
+        return self._muted
 
     def is_playing(self) -> bool:
+        if not self.is_ready():
+            return False
         try:
-            st = self._player.get_state()
+            st = self.player.get_state()
             return st in (vlc.State.Playing, vlc.State.Buffering, vlc.State.Opening)
         except Exception:
             return False
 
-    # ------------- Event handling -------------
+    # VLC event handler
     def _handle_event(self, event):
-        if not self._on_event:
+        if vlc is None:
             return
         et = event.type
         if et == vlc.EventType.MediaPlayerOpening:
-            self._on_event('opening', None)
+            self._emit('opening', None)
         elif et == vlc.EventType.MediaPlayerBuffering:
+            # Try to extract percentage
             pct = None
             try:
-                pct = getattr(getattr(event, 'u', None), 'new_cache', None)
-                if pct is not None:
-                    pct = int(pct)
+                pct = int(getattr(getattr(event, 'u', None), 'new_cache', 0))
             except Exception:
                 pct = None
-            self._on_event('buffering', pct)
+            self._emit('buffering', pct)
         elif et == vlc.EventType.MediaPlayerPlaying:
-            self._on_event('playing', None)
+            self._emit('playing', None)
         elif et == vlc.EventType.MediaPlayerPaused:
-            self._on_event('paused', None)
+            self._emit('paused', None)
         elif et == vlc.EventType.MediaPlayerStopped:
-            self._on_event('stopped', None)
+            self._emit('stopped', None)
         elif et == vlc.EventType.MediaPlayerEndReached:
-            self._on_event('ended', None)
+            self._emit('ended', None)
         elif et == vlc.EventType.MediaPlayerEncounteredError:
-            self._on_event('error', None)
-
-    # ------------- Expose underlying when needed -------------
-    @property
-    def raw_player(self):
-        return self._player
+            self._emit('error', None)
