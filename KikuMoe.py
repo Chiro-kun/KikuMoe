@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QComboBox, QProgressBar, QShortcut, QFileDialog, QMessageBox,
-    QSystemTrayIcon, QMenu, QAction, QStyle
+    QSystemTrayIcon, QMenu, QAction, QStyle, QDialog
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
 from PyQt5.QtGui import QKeySequence, QIcon
@@ -11,6 +11,7 @@ from i18n import I18n
 from ws_client import NowPlayingWS
 from player_vlc import PlayerVLC
 from config import STREAMS
+from settings import SettingsDialog
 
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
@@ -63,6 +64,9 @@ class ListenMoePlayer(QWidget):
         # Add VLC Path button for configurable libvlc
         self.vlc_button = QPushButton(self.i18n.t('libvlc_button'))
         self.vlc_button.clicked.connect(self.choose_libvlc_path)
+        # Settings button
+        self.settings_button = QPushButton(self.i18n.t('settings_button'))
+        self.settings_button.clicked.connect(self.open_settings)
         # Indicatore stato VLC (icona + testo)
         self.vlc_status_icon = QLabel("")
         self.vlc_status_icon.setFixedSize(10, 10)
@@ -82,6 +86,7 @@ class ListenMoePlayer(QWidget):
         lang_row.addWidget(self.lang_label)
         lang_row.addWidget(self.lang_combo)
         lang_row.addWidget(self.vlc_button)
+        lang_row.addWidget(self.settings_button)
         lang_row.addWidget(self.vlc_status_icon)
         lang_row.addWidget(self.vlc_status)
         self.layout.addLayout(lang_row)
@@ -180,27 +185,36 @@ class ListenMoePlayer(QWidget):
 
         # System Tray Icon e menu
         try:
-            self.tray = QSystemTrayIcon(self)
-            self.update_tray_icon()
-            self.tray_menu = QMenu(self)
-            self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
-            self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
-            self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
-            self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
-            self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
-            self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
-            self.tray_menu.addAction(self.action_show)
-            self.tray_menu.addAction(self.action_hide)
-            self.tray_menu.addSeparator()
-            self.tray_menu.addAction(self.action_play_pause)
-            self.tray_menu.addAction(self.action_stop)
-            self.tray_menu.addAction(self.action_mute)
-            self.tray_menu.addSeparator()
-            self.tray_menu.addAction(self.action_quit)
-            self.tray.setContextMenu(self.tray_menu)
-            self.tray.setToolTip(self.i18n.t('app_title'))
-            self.tray.activated.connect(self._on_tray_activated)
-            self.tray.show()
+            self._tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
+            if self._tray_enabled:
+                self.tray = QSystemTrayIcon(self)
+                self.update_tray_icon()
+                self.tray_menu = QMenu(self)
+                self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
+                self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
+                self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
+                self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
+                self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
+                self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
+                self.tray_menu.addAction(self.action_show)
+                self.tray_menu.addAction(self.action_hide)
+                self.tray_menu.addSeparator()
+                self.tray_menu.addAction(self.action_play_pause)
+                self.tray_menu.addAction(self.action_stop)
+                self.tray_menu.addAction(self.action_mute)
+                self.tray_menu.addSeparator()
+                self.tray_menu.addAction(self.action_quit)
+                self.tray.setContextMenu(self.tray_menu)
+                self.tray.setToolTip(self.i18n.t('app_title'))
+                self.tray.activated.connect(self._on_tray_activated)
+                self.tray.show()
+        except Exception:
+            pass
+
+        # Autoplay on startup
+        try:
+            if self.settings.value('autoplay', 'false') == 'true':
+                QTimer.singleShot(0, self.play_stream)
         except Exception:
             pass
 
@@ -227,6 +241,8 @@ class ListenMoePlayer(QWidget):
         # Translate VLC path button
         if hasattr(self, 'vlc_button'):
             self.vlc_button.setText(self.i18n.t('libvlc_button'))
+        if hasattr(self, 'settings_button'):
+            self.settings_button.setText(self.i18n.t('settings_button'))
         self.update_header_label()
         self.update_now_playing_label()
         # Aggiorna label stato VLC secondo lingua corrente
@@ -237,7 +253,70 @@ class ListenMoePlayer(QWidget):
         # Aggiorna testi del Tray
         self.update_tray_texts()
 
-    # ------------------- Helpers -------------------
+    # ------------------- Settings dialog -------------------
+    def open_settings(self):
+        try:
+            prev_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
+            dlg = SettingsDialog(self)
+            if dlg.exec_() == QDialog.Accepted:
+                # Applica lingua
+                lang = self.settings.value('lang', 'it')
+                self.i18n.set_lang('it' if lang not in ('it','en') else lang)
+                self.lang_combo.setCurrentIndex(0 if self.i18n.lang == 'it' else 1)
+                self.apply_translations()
+                # Canale/Formato
+                self.channel_combo.setCurrentIndex(0 if self.settings.value('channel', 'J-POP') == 'J-POP' else 1)
+                self.format_combo.setCurrentIndex(0 if self.settings.value('format', 'Vorbis') == 'Vorbis' else 1)
+                # Volume/Muto
+                self.volume_slider.setValue(int(self.settings.value('volume', 80)))
+                self.mute_button.setChecked(self.settings.value('mute', 'false') == 'true')
+                # Percorso VLC
+                new_path = self.settings.value('libvlc_path', '') or None
+                if self.player.reinitialize(new_path):
+                    self.update_vlc_status_label()
+                    self.update_vlc_details()
+                else:
+                    self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
+                    self.update_vlc_status_label()
+                # Tray enable/disable
+                new_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
+                if new_tray_enabled and (not hasattr(self, 'tray') or self.tray is None):
+                    try:
+                        self._tray_enabled = True
+                        self.tray = QSystemTrayIcon(self)
+                        self.update_tray_icon()
+                        self.tray_menu = QMenu(self)
+                        self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
+                        self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
+                        self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
+                        self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
+                        self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
+                        self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
+                        self.tray_menu.addAction(self.action_show)
+                        self.tray_menu.addAction(self.action_hide)
+                        self.tray_menu.addSeparator()
+                        self.tray_menu.addAction(self.action_play_pause)
+                        self.tray_menu.addAction(self.action_stop)
+                        self.tray_menu.addAction(self.action_mute)
+                        self.tray_menu.addSeparator()
+                        self.tray_menu.addAction(self.action_quit)
+                        self.tray.setContextMenu(self.tray_menu)
+                        self.tray.setToolTip(self.i18n.t('app_title'))
+                        self.tray.activated.connect(self._on_tray_activated)
+                        self.tray.show()
+                    except Exception:
+                        pass
+                elif (not new_tray_enabled) and hasattr(self, 'tray') and self.tray is not None:
+                    try:
+                        self.tray.hide()
+                        self.tray.setContextMenu(None)
+                    except Exception:
+                        pass
+                    self.tray = None
+                # Notifiche tray sono lette al volo in _on_now_playing
+        except Exception:
+            pass
+
     def t(self, key: str, **kwargs) -> str:
         return self.i18n.t(key, **kwargs)
 
@@ -490,6 +569,14 @@ class ListenMoePlayer(QWidget):
         self._current_title = title or self.t('unknown')
         self._current_artist = artist or ''
         QTimer.singleShot(0, self.update_now_playing_label)
+        # Tray notification
+        try:
+            if hasattr(self, 'tray') and self.tray and (self.settings.value('tray_notifications', 'true') == 'true') and (self.settings.value('tray_enabled', 'true') == 'true'):
+                msg_title = self.i18n.t('now_playing_prefix')
+                body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
+                self.tray.showMessage(msg_title, body, QSystemTrayIcon.Information, 3000)
+        except Exception:
+            pass
 
     def _on_ws_error_text(self, error_text: str):
         self.now_playing_changed.emit(self.t('ws_error_prefix') + error_text)
