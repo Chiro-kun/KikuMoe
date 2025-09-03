@@ -3,8 +3,8 @@ from PyQt5.QtWidgets import (
     QSlider, QComboBox, QProgressBar, QShortcut, QFileDialog, QMessageBox,
     QSystemTrayIcon, QMenu, QAction, QStyle
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings
-from PyQt5.QtGui import QKeySequence
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
+from PyQt5.QtGui import QKeySequence, QIcon
 import os
 
 from i18n import I18n
@@ -67,6 +67,18 @@ class ListenMoePlayer(QWidget):
         self.vlc_status_icon = QLabel("")
         self.vlc_status_icon.setFixedSize(10, 10)
         self.vlc_status = QLabel("")
+        # Icone SVG (tray e stato VLC)
+        try:
+            base_dir = os.path.dirname(__file__)
+            self._icon_play = QIcon(os.path.join(base_dir, 'icons', 'app_play.svg'))
+            self._icon_stop = QIcon(os.path.join(base_dir, 'icons', 'app_stop.svg'))
+            self._icon_status_ok = QIcon(os.path.join(base_dir, 'icons', 'status_ok.svg'))
+            self._icon_status_bad = QIcon(os.path.join(base_dir, 'icons', 'status_error.svg'))
+            # Imposta icona finestra di default
+            if not self._icon_stop.isNull():
+                self.setWindowIcon(self._icon_stop)
+        except Exception:
+            pass
         lang_row.addWidget(self.lang_label)
         lang_row.addWidget(self.lang_combo)
         lang_row.addWidget(self.vlc_button)
@@ -257,8 +269,17 @@ class ListenMoePlayer(QWidget):
             self.vlc_status.setText(text)
             self.vlc_status.setStyleSheet(f"color: {color}; font-weight: bold;")
             self.vlc_status.setVisible(True)
-            # Dot icon styling
-            self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+            # Icona SVG di stato (fallback al dot colorato se mancante)
+            try:
+                icon = self._icon_status_ok if is_ok else self._icon_status_bad
+                if icon and not icon.isNull():
+                    self.vlc_status_icon.setStyleSheet("")
+                    self.vlc_status_icon.setPixmap(icon.pixmap(10, 10))
+                else:
+                    self.vlc_status_icon.clear()
+                    self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+            except Exception:
+                self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
             self.vlc_status_icon.setToolTip(self.i18n.t('libvlc_hint'))
             self.vlc_status.setToolTip(self.i18n.t('libvlc_hint'))
             # Aggiorna dettagli
@@ -343,7 +364,7 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.t('status_opening'))
             self.buffering_visible.emit(True)
             self.buffering_progress.emit(0)
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_tray_icon)
         elif code == 'buffering':
             if value is not None:
                 self.buffering_visible.emit(True)
@@ -355,29 +376,29 @@ class ListenMoePlayer(QWidget):
         elif code == 'playing':
             self.status_changed.emit(self.t('status_playing'))
             self.buffering_visible.emit(False)
-            self.update_vlc_status_label()
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_vlc_status_label)
+            QTimer.singleShot(0, self.update_tray_icon)
         elif code == 'paused':
             self.status_changed.emit(self.t('status_paused'))
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_tray_icon)
         elif code == 'stopped':
             self.status_changed.emit(self.t('status_stopped'))
             self.buffering_visible.emit(False)
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_tray_icon)
         elif code == 'ended':
             self.status_changed.emit(self.t('status_ended'))
             self.buffering_visible.emit(False)
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_tray_icon)
         elif code == 'libvlc_init_failed':
             self.status_changed.emit(self.t('libvlc_init_failed'))
             self.buffering_visible.emit(False)
-            self.update_vlc_status_label()
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_vlc_status_label)
+            QTimer.singleShot(0, self.update_tray_icon)
         elif code == 'error':
             # Fallback generic error
             self.status_changed.emit(self.t('status_error'))
             self.buffering_visible.emit(False)
-            self.update_tray_icon()
+            QTimer.singleShot(0, self.update_tray_icon)
 
     # ------------------- Playback -------------------
     def play_stream(self):
@@ -443,14 +464,24 @@ class ListenMoePlayer(QWidget):
         try:
             if not hasattr(self, 'tray') or self.tray is None:
                 return
-            style = self.style()
             icon = None
-            # Usa icone standard del sistema per evitare file esterni
-            if self.player and self.player.is_playing():
-                icon = style.standardIcon(QStyle.SP_MediaPlay)
-            else:
-                icon = style.standardIcon(QStyle.SP_MediaStop)
+            # Usa icone SVG personalizzate se disponibili, altrimenti fallback a icone di sistema
+            try:
+                if self.player and self.player.is_playing():
+                    icon = self._icon_play if hasattr(self, '_icon_play') else None
+                else:
+                    icon = self._icon_stop if hasattr(self, '_icon_stop') else None
+            except Exception:
+                icon = None
+            if not icon or icon.isNull():
+                style = self.style()
+                icon = style.standardIcon(QStyle.SP_MediaPlay if (self.player and self.player.is_playing()) else QStyle.SP_MediaStop)
             self.tray.setIcon(icon)
+            # Aggiorna anche l'icona della finestra
+            try:
+                self.setWindowIcon(icon)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -458,7 +489,7 @@ class ListenMoePlayer(QWidget):
     def _on_now_playing(self, title: str, artist: str):
         self._current_title = title or self.t('unknown')
         self._current_artist = artist or ''
-        self.update_now_playing_label()
+        QTimer.singleShot(0, self.update_now_playing_label)
 
     def _on_ws_error_text(self, error_text: str):
         self.now_playing_changed.emit(self.t('ws_error_prefix') + error_text)
