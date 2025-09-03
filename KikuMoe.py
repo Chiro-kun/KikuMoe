@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
 from PyQt5.QtGui import QKeySequence, QIcon
 import os
-
+import sys
 from i18n import I18n
 from ws_client import NowPlayingWS
 from player_vlc import PlayerVLC
@@ -57,7 +57,7 @@ class ListenMoePlayer(QWidget):
         top_row = QHBoxLayout()
         # Icone SVG (app)
         try:
-            base_dir = os.path.dirname(__file__)
+            base_dir = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
             self._icon_play = QIcon(os.path.join(base_dir, 'icons', 'app_play.svg'))
             self._icon_stop = QIcon(os.path.join(base_dir, 'icons', 'app_stop.svg'))
             self._icon_status_ok = QIcon(os.path.join(base_dir, 'icons', 'status_ok.svg'))

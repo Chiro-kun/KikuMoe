@@ -54,3 +54,54 @@ L’interfaccia mostra uno stato testuale e un’icona che indicano se libVLC è
 ## Stato attuale
 - Implementati: Tray icon con menu, indicatore stato VLC, scorciatoie, i18n IT/EN, percorso libVLC configurabile dalle Impostazioni, riavvio automatico dello stream dopo modifica impostazioni.
 - Note: I dettagli avanzati di VLC (versione, percorso) non sono più mostrati nella finestra principale; è presente un indicatore di stato semplice e chiaro.
+
+## Build/Packaging (PyInstaller)
+
+Vuoi creare un eseguibile Windows (.exe) senza dipendenze esterne di Python? Ecco come fare con PyInstaller.
+
+- Requisiti (da eseguire nell'ambiente dove hai installato le dipendenze del progetto):
+  - pip install --upgrade pyinstaller pyinstaller-hooks-contrib
+- Nota: l'app carica automaticamente le icone dal bundle grazie al fallback su sys._MEIPASS, quindi funziona sia in onefile che onedir.
+
+Build "onefile" (singolo .exe):
+
+- pyinstaller --noconfirm --clean --windowed --onefile --name "KikuMoe" --add-data "KikuMoe\icons;icons" KikuMoe\KikuMoe.py
+
+Build "onedir" (cartella con eseguibile e risorse a fianco):
+
+- pyinstaller --noconfirm --clean --windowed --onedir --name "KikuMoe" --add-data "KikuMoe\icons;icons" KikuMoe\KikuMoe.py
+
+Dove trovare l'eseguibile:
+
+- Al termine, l'eseguibile sarà in dist\KikuMoe\KikuMoe.exe (onedir) oppure dist\KikuMoe.exe (onefile).
+
+Suggerimenti e note:
+
+- Se all'avvio non parte l'audio, apri Impostazioni e imposta correttamente il percorso di libVLC (es: C:\\Program Files\\VideoLAN\\VLC). L'app mostrerà lo stato nella barra (VLC presente / non trovato).
+- Per includere anche il runtime VLC direttamente nel pacchetto (opzionale e avanzato), puoi aggiungere:
+  - --add-binary "C:\\Program Files\\VideoLAN\\VLC\\libvlc.dll;."
+  - --add-binary "C:\\Program Files\\VideoLAN\\VLC\\plugins;plugins"
+  In questo caso, ti conviene mantenere impostato in Impostazioni un percorso libVLC lasciato vuoto (userà quello bundled) o configurarlo verso la cartella estratta. In alcune configurazioni potrebbe essere necessario impostare la variabile d'ambiente VLC_PLUGIN_PATH al percorso dei plugins all'avvio tramite uno script o un runtime hook.
+- Le icone dell'app sono SVG. Se vuoi assegnare un'icona al file .exe, fornisci un .ico a PyInstaller con --icon "path\\to\\icon.ico" (opzionale).
+
+### Build con file .spec e script PowerShell
+
+Sono stati aggiunti un file .spec e uno script di build per semplificare il packaging:
+
+- kikumoe.spec: definisce gli asset da includere (icone) e un runtime hook per VLC.
+- build.ps1: esegue PyInstaller in modalità onefile e/o onedir, con opzione per includere libVLC e plugins.
+
+Esempi d’uso:
+
+- Esegui entrambe le build:
+  ./build.ps1
+- Solo onefile:
+  ./build.ps1 -OneFile
+- Solo onedir:
+  ./build.ps1 -Onedir
+- Includi VLC dal percorso predefinito (o da $env:VLC_DIR):
+  ./build.ps1 -BundleVlc
+- Includi VLC da un percorso specifico:
+  ./build.ps1 -BundleVlc -VlcDir "C:\\Program Files\\VideoLAN\\VLC"
+
+Nota: lo script usa il runtime hook pyi_rthook_vlc.py per impostare PATH e VLC_PLUGIN_PATH quando si esegue dal bundle, così libVLC e i plugins vengono risolti correttamente se sono stati inclusi.
