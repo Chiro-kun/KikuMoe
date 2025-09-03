@@ -144,18 +144,7 @@ class ListenMoePlayer(QWidget):
         self.now_playing_changed.connect(self.now_playing_label.setText)
         self.buffering_progress.connect(self.buffer_bar.setValue)
         self.buffering_visible.connect(self.buffer_bar.setVisible)
-        # self.channel_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
-        # self.format_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
-        # Restore saved channel/format (non più necessario: usiamo QSettings direttamente)
-        # saved_channel = self.settings.value('channel', 'J-POP')
-        # saved_format = self.settings.value('format', 'Vorbis')
-        # Canale/Formato sono mostrati come testo (self.channel_value/self.format_value)
-        # self.channel_combo.setCurrentIndex(0 if saved_channel == 'J-POP' else 1)
-        # self.format_combo.setCurrentIndex(0 if saved_format == 'Vorbis' else 1)
-        # Restore saved language selector index (UI removed)
-        # lang_index = 0 if (saved_lang == 'it') else 1
-        # self.lang_combo.setCurrentIndex(lang_index)
-
+        
         # Player wrapper with optional libvlc path
         libvlc_path = self.settings.value('libvlc_path', None)
         self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path)
@@ -166,9 +155,7 @@ class ListenMoePlayer(QWidget):
         self.player.set_mute(self.mute_button.isChecked())
         # Aggiorna indicatore stato VLC all'avvio
         self.update_vlc_status_label()
-        # Remove VLC status/details UI updates on main window
-        # self.update_vlc_details()
-
+        
         # Track cache for i18n rerender
         self._current_title = None
         self._current_artist = None
@@ -586,4 +573,3 @@ if __name__ == "__main__":
             window.close()
         except Exception:
             pass
-        pass
