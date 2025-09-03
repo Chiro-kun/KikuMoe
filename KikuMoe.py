@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
-    QSlider, QComboBox, QProgressBar, QShortcut, QFileDialog, QMessageBox,
+    QSlider, QProgressBar, QShortcut,
     QSystemTrayIcon, QMenu, QAction, QStyle, QDialog
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
@@ -41,18 +41,16 @@ class ListenMoePlayer(QWidget):
         self.layout.addWidget(self.status_label)
         self.layout.addWidget(self.now_playing_label)
 
-        # Stream selectors (Channel + Format)
+        # Stream info (Channel + Format) - non editable
         sel_row = QHBoxLayout()
         self.channel_label = QLabel(self.i18n.t('channel_label'))
-        self.channel_combo = QComboBox()
-        self.channel_combo.addItems(["J-POP", "K-POP"])
+        self.channel_value = QLabel(self.settings.value('channel', 'J-POP'))
         self.format_label = QLabel(self.i18n.t('format_label'))
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["Vorbis", "MP3"])  # Vorbis consigliato; MP3 per compatibilità
+        self.format_value = QLabel(self.settings.value('format', 'Vorbis'))
         sel_row.addWidget(self.channel_label)
-        sel_row.addWidget(self.channel_combo)
+        sel_row.addWidget(self.channel_value)
         sel_row.addWidget(self.format_label)
-        sel_row.addWidget(self.format_combo)
+        sel_row.addWidget(self.format_value)
         self.layout.addLayout(sel_row)
 
         # Barra superiore: solo pulsante Impostazioni
@@ -75,6 +73,17 @@ class ListenMoePlayer(QWidget):
         top_row.addStretch(1)
         top_row.addWidget(self.settings_button)
         self.layout.addLayout(top_row)
+
+        # Indicatore stato VLC (icona + testo)
+        status_row = QHBoxLayout()
+        self.vlc_status_icon = QLabel()
+        self.vlc_status_icon.setFixedSize(10, 10)
+        self.vlc_status_icon.setStyleSheet("background-color: #c62828; border-radius: 5px;")
+        self.vlc_status = QLabel(self.i18n.t('vlc_not_found'))
+        status_row.addWidget(self.vlc_status_icon)
+        status_row.addWidget(self.vlc_status)
+        status_row.addStretch(1)
+        self.layout.addLayout(status_row)
 
         # Buffering progress bar
         self.buffer_bar = QProgressBar()
@@ -128,15 +137,14 @@ class ListenMoePlayer(QWidget):
         self.now_playing_changed.connect(self.now_playing_label.setText)
         self.buffering_progress.connect(self.buffer_bar.setValue)
         self.buffering_visible.connect(self.buffer_bar.setVisible)
-        self.channel_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
-        self.format_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
-        # self.lang_combo.currentIndexChanged.connect(self.on_lang_changed)  # removed: language moved to Settings
-
-        # Restore saved channel/format
-        saved_channel = self.settings.value('channel', 'J-POP')
-        saved_format = self.settings.value('format', 'Vorbis')
-        self.channel_combo.setCurrentIndex(0 if saved_channel == 'J-POP' else 1)
-        self.format_combo.setCurrentIndex(0 if saved_format == 'Vorbis' else 1)
+        # self.channel_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
+        # self.format_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
+        # Restore saved channel/format (non più necessario: usiamo QSettings direttamente)
+        # saved_channel = self.settings.value('channel', 'J-POP')
+        # saved_format = self.settings.value('format', 'Vorbis')
+        # Canale/Formato sono mostrati come testo (self.channel_value/self.format_value)
+        # self.channel_combo.setCurrentIndex(0 if saved_channel == 'J-POP' else 1)
+        # self.format_combo.setCurrentIndex(0 if saved_format == 'Vorbis' else 1)
         # Restore saved language selector index (UI removed)
         # lang_index = 0 if (saved_lang == 'it') else 1
         # self.lang_combo.setCurrentIndex(lang_index)
@@ -149,8 +157,9 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
         self.player.set_volume(self.volume_slider.value())
         self.player.set_mute(self.mute_button.isChecked())
+        # Aggiorna indicatore stato VLC all'avvio
+        self.update_vlc_status_label()
         # Remove VLC status/details UI updates on main window
-        # self.update_vlc_status_label()
         # self.update_vlc_details()
 
         # Track cache for i18n rerender
@@ -223,30 +232,30 @@ class ListenMoePlayer(QWidget):
             self.settings_button.setText(self.i18n.t('settings_button'))
         self.update_header_label()
         self.update_now_playing_label()
-        # Aggiorna testi del Tray
         self.update_tray_texts()
+        self.update_vlc_status_label()
 
-    # ------------------- Settings dialog -------------------
     def open_settings(self):
         try:
             prev_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
             dlg = SettingsDialog(self)
             if dlg.exec_() == QDialog.Accepted:
-                # Applica lingua
+                # Lingua
                 lang = self.settings.value('lang', 'it')
                 self.i18n.set_lang('it' if lang not in ('it','en') else lang)
                 self.apply_translations()
-                # Canale/Formato
-                self.channel_combo.setCurrentIndex(0 if self.settings.value('channel', 'J-POP') == 'J-POP' else 1)
-                self.format_combo.setCurrentIndex(0 if self.settings.value('format', 'Vorbis') == 'Vorbis' else 1)
-                # Volume/Muto
-                self.volume_slider.setValue(int(self.settings.value('volume', 80)))
-                self.mute_button.setChecked(self.settings.value('mute', 'false') == 'true')
+                # Aggiorna header e valori visivi canale/formato da QSettings
+                self.update_header_label()
+                if hasattr(self, 'channel_value'):
+                    self.channel_value.setText(self.settings.value('channel', 'J-POP'))
+                if hasattr(self, 'format_value'):
+                    self.format_value.setText(self.settings.value('format', 'Vorbis'))
                 # Percorso VLC
                 new_path = self.settings.value('libvlc_path', '') or None
-                if not self.player.reinitialize(new_path):
-                    self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
-                # Tray enable/disable
+                if self.player.get_configured_path() != new_path:
+                    if not self.player.reinitialize(new_path):
+                        self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
+                # Tray enable/disable come da prima
                 new_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
                 if new_tray_enabled and (not hasattr(self, 'tray') or self.tray is None):
                     try:
@@ -281,9 +290,9 @@ class ListenMoePlayer(QWidget):
                         self.tray = None
                     except Exception:
                         pass
-                # Aggiorna testi/icone del tray
                 self.update_tray_texts()
                 self.update_tray_icon()
+                self.update_vlc_status_label()
         except Exception:
             pass
 
@@ -291,17 +300,18 @@ class ListenMoePlayer(QWidget):
         return self.i18n.t(key, **kwargs)
 
     def get_selected_stream_url(self) -> str:
-        channel = self.channel_combo.currentText()
-        fmt = self.format_combo.currentText()
-        # persist selection
-        self.settings.setValue('channel', channel)
-        self.settings.setValue('format', fmt)
+        channel = self.settings.value('channel', 'J-POP')
+        fmt = self.settings.value('format', 'Vorbis')
         return STREAMS.get(channel, {}).get(fmt, STREAMS["J-POP"]["Vorbis"])
 
     def update_header_label(self):
-        channel = self.channel_combo.currentText()
-        fmt = self.format_combo.currentText()
+        channel = self.settings.value('channel', 'J-POP')
+        fmt = self.settings.value('format', 'Vorbis')
         self.label.setText(self.t('header').format(channel=channel, format=fmt))
+        if hasattr(self, 'channel_value'):
+            self.channel_value.setText(channel)
+        if hasattr(self, 'format_value'):
+            self.format_value.setText(fmt)
 
     def update_now_playing_label(self):
         title = self._current_title or '–'
@@ -318,7 +328,6 @@ class ListenMoePlayer(QWidget):
             self.vlc_status.setText(text)
             self.vlc_status.setStyleSheet(f"color: {color}; font-weight: bold;")
             self.vlc_status.setVisible(True)
-            # Icona SVG di stato (fallback al dot colorato se mancante)
             try:
                 icon = self._icon_status_ok if is_ok else self._icon_status_bad
                 if icon and not icon.isNull():
@@ -331,20 +340,12 @@ class ListenMoePlayer(QWidget):
                 self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
             self.vlc_status_icon.setToolTip(self.i18n.t('libvlc_hint'))
             self.vlc_status.setToolTip(self.i18n.t('libvlc_hint'))
-            # Aggiorna dettagli
-            self.update_vlc_details()
         except Exception:
             pass
 
     def update_vlc_details(self):
-        try:
-            ver = self.player.get_version() if self.player else None
-            path = self.player.get_configured_path() if self.player else None
-            ver_txt = ver or self.t('unknown')
-            path_txt = path or self.t('vlc_path_system')
-            self.vlc_details.setText(f"{self.t('vlc_version_label')} {ver_txt}    {self.t('vlc_path_label')} {path_txt}")
-        except Exception:
-            pass
+        # Disabilitato: dettagli VLC non mostrati nella finestra principale
+        return
 
     def on_stream_selection_changed(self):
         self.update_header_label()
@@ -358,21 +359,8 @@ class ListenMoePlayer(QWidget):
 
     # ------------------- Configurazione VLC -------------------
     def choose_libvlc_path(self):
-        start_dir = self.settings.value('libvlc_path', None) or os.path.expandvars(r"C:\\Program Files\\VideoLAN\\VLC")
-        chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
-        if not chosen:
-            return
-        if self.player.reinitialize(chosen):
-            self.settings.setValue('libvlc_path', chosen)
-            QMessageBox.information(self, 'VLC', self.i18n.t('libvlc_saved_ok') + '\n' + self.i18n.t('libvlc_hint'))
-            self.status_changed.emit("")
-            self.update_vlc_status_label()
-            self.update_vlc_details()
-        else:
-            QMessageBox.warning(self, 'VLC', self.i18n.t('libvlc_saved_fail') + '\n' + self.i18n.t('libvlc_hint'))
-            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
-            self.update_vlc_status_label()
-            self.update_vlc_details()
+        # Non più utilizzato: il percorso di libVLC si imposta dalle Impostazioni
+        return
 
     # ------------------- Player controls -------------------
     def volume_changed(self, value: int):
@@ -453,19 +441,17 @@ class ListenMoePlayer(QWidget):
     def play_stream(self):
         try:
             if not self.player.is_ready():
-                # Try reinitialize with saved path, if any
                 saved_path = self.settings.value('libvlc_path', None)
                 if not self.player.reinitialize(saved_path):
                     self.status_changed.emit(self.t('libvlc_not_ready'))
                     self.update_vlc_status_label()
-                    self.update_vlc_details()
                     return
             self.status_changed.emit(self.t('status_opening'))
             self.player.play_url(self.get_selected_stream_url())
             self.player.set_volume(self.volume_slider.value())
             self.player.set_mute(self.mute_button.isChecked())
+            # Aggiorna indicatore stato VLC
             self.update_vlc_status_label()
-            self.update_vlc_details()
             self.update_tray_icon()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")

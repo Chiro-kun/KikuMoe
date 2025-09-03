@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox,
-    QSlider, QPushButton, QLineEdit, QFileDialog
+    QPushButton, QLineEdit, QFileDialog
 )
 from PyQt5.QtCore import Qt, QSettings
 from i18n import I18n
@@ -45,19 +45,6 @@ class SettingsDialog(QDialog):
         self.cmb_format.setCurrentText(self.settings.value('format', 'Vorbis'))
         fmt_row.addWidget(self.cmb_format)
         layout.addLayout(fmt_row)
-
-        # Volume & Mute
-        vol_row = QHBoxLayout()
-        vol_row.addWidget(QLabel(self.i18n.t('settings_volume')))
-        self.sld_volume = QSlider(Qt.Horizontal)
-        self.sld_volume.setRange(0, 100)
-        self.sld_volume.setValue(int(self.settings.value('volume', 80)))
-        vol_row.addWidget(self.sld_volume)
-        layout.addLayout(vol_row)
-
-        self.chk_mute = QCheckBox(self.i18n.t('settings_mute'))
-        self.chk_mute.setChecked(self.settings.value('mute', 'false') == 'true')
-        layout.addWidget(self.chk_mute)
 
         # VLC Path
         vlc_row = QHBoxLayout()
@@ -115,8 +102,6 @@ class SettingsDialog(QDialog):
         self.settings.setValue('lang', 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue('channel', self.cmb_channel.currentText())
         self.settings.setValue('format', self.cmb_format.currentText())
-        self.settings.setValue('volume', int(self.sld_volume.value()))
-        self.settings.setValue('mute', 'true' if self.chk_mute.isChecked() else 'false')
         path = self.txt_vlc_path.text().strip()
         self.settings.setValue('libvlc_path', path if path else '')
         self.settings.setValue('tray_enabled', 'true' if self.chk_tray_enabled.isChecked() else 'false')
