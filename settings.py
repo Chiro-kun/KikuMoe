@@ -82,10 +82,13 @@ class SettingsDialog(QDialog):
         btn_row = QHBoxLayout()
         self.btn_ok = QPushButton(self.i18n.t('settings_ok'))
         self.btn_cancel = QPushButton(self.i18n.t('settings_cancel'))
+        self.btn_apply = QPushButton(self.i18n.t('settings_apply'))
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_cancel.clicked.connect(self.reject)
+        self.btn_apply.clicked.connect(self._on_apply)
         btn_row.addStretch(1)
         btn_row.addWidget(self.btn_cancel)
+        btn_row.addWidget(self.btn_apply)
         btn_row.addWidget(self.btn_ok)
         layout.addLayout(btn_row)
 
@@ -97,8 +100,17 @@ class SettingsDialog(QDialog):
         if chosen:
             self.txt_vlc_path.setText(chosen)
 
+    def _on_apply(self):
+        """Salva i valori senza chiudere la finestra."""
+        self._save_settings()
+
     def _on_ok(self):
-        # Persist values
+        """Salva i valori e chiude la finestra."""
+        self._save_settings()
+        self.accept()
+
+    def _save_settings(self):
+        """Logica comune per salvare le impostazioni."""
         self.settings.setValue('autoplay', 'true' if self.chk_autoplay.isChecked() else 'false')
         self.settings.setValue('lang', 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue('channel', self.cmb_channel.currentText())
@@ -109,4 +121,3 @@ class SettingsDialog(QDialog):
         self.settings.setValue('libvlc_path', path if path else '')
         self.settings.setValue('tray_enabled', 'true' if self.chk_tray_enabled.isChecked() else 'false')
         self.settings.setValue('tray_notifications', 'true' if self.chk_tray_notifications.isChecked() else 'false')
-        self.accept()

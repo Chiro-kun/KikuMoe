@@ -55,23 +55,9 @@ class ListenMoePlayer(QWidget):
         sel_row.addWidget(self.format_combo)
         self.layout.addLayout(sel_row)
 
-        # Language selector
-        lang_row = QHBoxLayout()
-        self.lang_label = QLabel(self.i18n.t('language_label'))
-        self.lang_combo = QComboBox()
-        self.lang_combo.addItems(["Italiano", "English"])
-        self.lang_combo.setCurrentIndex(0)
-        # Add VLC Path button for configurable libvlc
-        self.vlc_button = QPushButton(self.i18n.t('libvlc_button'))
-        self.vlc_button.clicked.connect(self.choose_libvlc_path)
-        # Settings button
-        self.settings_button = QPushButton(self.i18n.t('settings_button'))
-        self.settings_button.clicked.connect(self.open_settings)
-        # Indicatore stato VLC (icona + testo)
-        self.vlc_status_icon = QLabel("")
-        self.vlc_status_icon.setFixedSize(10, 10)
-        self.vlc_status = QLabel("")
-        # Icone SVG (tray e stato VLC)
+        # Barra superiore: solo pulsante Impostazioni
+        top_row = QHBoxLayout()
+        # Icone SVG (app)
         try:
             base_dir = os.path.dirname(__file__)
             self._icon_play = QIcon(os.path.join(base_dir, 'icons', 'app_play.svg'))
@@ -83,16 +69,12 @@ class ListenMoePlayer(QWidget):
                 self.setWindowIcon(self._icon_stop)
         except Exception:
             pass
-        lang_row.addWidget(self.lang_label)
-        lang_row.addWidget(self.lang_combo)
-        lang_row.addWidget(self.vlc_button)
-        lang_row.addWidget(self.settings_button)
-        lang_row.addWidget(self.vlc_status_icon)
-        lang_row.addWidget(self.vlc_status)
-        self.layout.addLayout(lang_row)
-        # Dettagli VLC (versione e percorso)
-        self.vlc_details = QLabel("")
-        self.layout.addWidget(self.vlc_details)
+        # Pulsante Impostazioni
+        self.settings_button = QPushButton(self.i18n.t('settings_button'))
+        self.settings_button.clicked.connect(self.open_settings)
+        top_row.addStretch(1)
+        top_row.addWidget(self.settings_button)
+        self.layout.addLayout(top_row)
 
         # Buffering progress bar
         self.buffer_bar = QProgressBar()
@@ -148,16 +130,16 @@ class ListenMoePlayer(QWidget):
         self.buffering_visible.connect(self.buffer_bar.setVisible)
         self.channel_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
         self.format_combo.currentIndexChanged.connect(self.on_stream_selection_changed)
-        self.lang_combo.currentIndexChanged.connect(self.on_lang_changed)
+        # self.lang_combo.currentIndexChanged.connect(self.on_lang_changed)  # removed: language moved to Settings
 
         # Restore saved channel/format
         saved_channel = self.settings.value('channel', 'J-POP')
         saved_format = self.settings.value('format', 'Vorbis')
         self.channel_combo.setCurrentIndex(0 if saved_channel == 'J-POP' else 1)
         self.format_combo.setCurrentIndex(0 if saved_format == 'Vorbis' else 1)
-        # Restore saved language selector index
-        lang_index = 0 if (saved_lang == 'it') else 1
-        self.lang_combo.setCurrentIndex(lang_index)
+        # Restore saved language selector index (UI removed)
+        # lang_index = 0 if (saved_lang == 'it') else 1
+        # self.lang_combo.setCurrentIndex(lang_index)
 
         # Player wrapper with optional libvlc path
         libvlc_path = self.settings.value('libvlc_path', None)
@@ -167,9 +149,9 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
         self.player.set_volume(self.volume_slider.value())
         self.player.set_mute(self.mute_button.isChecked())
-        # Aggiorna indicatore stato VLC e dettagli
-        self.update_vlc_status_label()
-        self.update_vlc_details()
+        # Remove VLC status/details UI updates on main window
+        # self.update_vlc_status_label()
+        # self.update_vlc_details()
 
         # Track cache for i18n rerender
         self._current_title = None
@@ -232,24 +214,15 @@ class ListenMoePlayer(QWidget):
         self.setWindowTitle(self.i18n.t('app_title'))
         self.channel_label.setText(self.i18n.t('channel_label'))
         self.format_label.setText(self.i18n.t('format_label'))
-        self.lang_label.setText(self.i18n.t('language_label'))
         self.play_button.setText(self.i18n.t('play'))
         self.pause_button.setText(self.i18n.t('pause'))
         self.stop_button.setText(self.i18n.t('stop'))
         self.volume_label.setText(self.i18n.t('volume'))
         self.mute_button.setText(self.i18n.t('unmute') if self.mute_button.isChecked() else self.i18n.t('mute'))
-        # Translate VLC path button
-        if hasattr(self, 'vlc_button'):
-            self.vlc_button.setText(self.i18n.t('libvlc_button'))
         if hasattr(self, 'settings_button'):
             self.settings_button.setText(self.i18n.t('settings_button'))
         self.update_header_label()
         self.update_now_playing_label()
-        # Aggiorna label stato VLC secondo lingua corrente
-        if hasattr(self, 'vlc_status'):
-            self.update_vlc_status_label()
-        if hasattr(self, 'vlc_details'):
-            self.update_vlc_details()
         # Aggiorna testi del Tray
         self.update_tray_texts()
 
@@ -262,7 +235,6 @@ class ListenMoePlayer(QWidget):
                 # Applica lingua
                 lang = self.settings.value('lang', 'it')
                 self.i18n.set_lang('it' if lang not in ('it','en') else lang)
-                self.lang_combo.setCurrentIndex(0 if self.i18n.lang == 'it' else 1)
                 self.apply_translations()
                 # Canale/Formato
                 self.channel_combo.setCurrentIndex(0 if self.settings.value('channel', 'J-POP') == 'J-POP' else 1)
@@ -272,12 +244,8 @@ class ListenMoePlayer(QWidget):
                 self.mute_button.setChecked(self.settings.value('mute', 'false') == 'true')
                 # Percorso VLC
                 new_path = self.settings.value('libvlc_path', '') or None
-                if self.player.reinitialize(new_path):
-                    self.update_vlc_status_label()
-                    self.update_vlc_details()
-                else:
+                if not self.player.reinitialize(new_path):
                     self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
-                    self.update_vlc_status_label()
                 # Tray enable/disable
                 new_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
                 if new_tray_enabled and (not hasattr(self, 'tray') or self.tray is None):
@@ -309,11 +277,13 @@ class ListenMoePlayer(QWidget):
                 elif (not new_tray_enabled) and hasattr(self, 'tray') and self.tray is not None:
                     try:
                         self.tray.hide()
-                        self.tray.setContextMenu(None)
+                        self.tray.deleteLater()
+                        self.tray = None
                     except Exception:
                         pass
-                    self.tray = None
-                # Notifiche tray sono lette al volo in _on_now_playing
+                # Aggiorna testi/icone del tray
+                self.update_tray_texts()
+                self.update_tray_icon()
         except Exception:
             pass
 

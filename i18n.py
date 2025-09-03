@@ -60,6 +60,7 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_tray_notifications': 'Notifiche brano in tray',
         'settings_ok': 'OK',
         'settings_cancel': 'Annulla',
+        'settings_apply': 'Applica',
     },
     'en': {
         'app_title': 'LISTEN.moe Player (VLC)',
@@ -120,6 +121,7 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_tray_notifications': 'Song notifications in tray',
         'settings_ok': 'OK',
         'settings_cancel': 'Cancel',
+        'settings_apply': 'Apply',
     },
 }
 
