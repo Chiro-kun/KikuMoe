@@ -237,6 +237,11 @@ class ListenMoePlayer(QWidget):
 
     def open_settings(self):
         try:
+            # Salva stato precedente
+            was_playing = bool(self.player and self.player.is_playing())
+            prev_channel = self.settings.value('channel', 'J-POP')
+            prev_format = self.settings.value('format', 'Vorbis')
+            prev_path = self.player.get_configured_path()
             prev_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
             dlg = SettingsDialog(self)
             if dlg.exec_() == QDialog.Accepted:
@@ -252,7 +257,8 @@ class ListenMoePlayer(QWidget):
                     self.format_value.setText(self.settings.value('format', 'Vorbis'))
                 # Percorso VLC
                 new_path = self.settings.value('libvlc_path', '') or None
-                if self.player.get_configured_path() != new_path:
+                path_changed = (prev_path != new_path)
+                if path_changed:
                     if not self.player.reinitialize(new_path):
                         self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
                 # Tray enable/disable come da prima
@@ -293,6 +299,14 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
                 self.update_tray_icon()
                 self.update_vlc_status_label()
+                # Autoriavvio se servono cambiamenti
+                new_channel = self.settings.value('channel', 'J-POP')
+                new_format = self.settings.value('format', 'Vorbis')
+                selection_changed = (new_channel != prev_channel) or (new_format != prev_format)
+                if was_playing and (selection_changed or path_changed):
+                    self.status_changed.emit(self.t('status_restarting'))
+                    self.stop_stream()
+                    QTimer.singleShot(50, self.play_stream)
         except Exception:
             pass
 
