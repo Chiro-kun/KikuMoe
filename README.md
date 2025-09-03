@@ -55,53 +55,32 @@ L’interfaccia mostra uno stato testuale e un’icona che indicano se libVLC è
 - Implementati: Tray icon con menu, indicatore stato VLC, scorciatoie, i18n IT/EN, percorso libVLC configurabile dalle Impostazioni, riavvio automatico dello stream dopo modifica impostazioni.
 - Note: I dettagli avanzati di VLC (versione, percorso) non sono più mostrati nella finestra principale; è presente un indicatore di stato semplice e chiaro.
 
-## Build/Packaging (PyInstaller)
+## Packaging (OneFile, zero-config)
 
-Vuoi creare un eseguibile Windows (.exe) senza dipendenze esterne di Python? Ecco come fare con PyInstaller.
+Da ora in poi è supportata e consigliata solo la build "onefile" (singolo .exe), che include automaticamente libVLC e i plugins per un'esperienza zero-config.
 
-- Requisiti (da eseguire nell'ambiente dove hai installato le dipendenze del progetto):
-  - pip install --upgrade pyinstaller pyinstaller-hooks-contrib
-- Nota: l'app carica automaticamente le icone dal bundle grazie al fallback su sys._MEIPASS, quindi funziona sia in onefile che onedir.
+Prerequisiti (nell’ambiente in cui hai installato le dipendenze del progetto):
+- `pip install --upgrade pyinstaller pyinstaller-hooks-contrib` (lo script di build lo esegue comunque in automatico)
 
-Build "onefile" (singolo .exe):
+Come creare il pacchetto:
+1. Facoltativo: se VLC non è installato nel percorso predefinito `C:\\Program Files\\VideoLAN\\VLC`, imposta la variabile d’ambiente prima del build:
+   - PowerShell:
+     ```powershell
+     $env:VLC_DIR = "C:\\Percorso\\alla\\tua\\installazione\\VLC"
+     ```
+2. Esegui lo script dalla root del repository:
+   ```powershell
+   ./build.ps1
+   ```
 
-- pyinstaller --noconfirm --clean --windowed --onefile --name "KikuMoe" --add-data "KikuMoe\icons;icons" KikuMoe\KikuMoe.py
+Output:
+- L’eseguibile sarà in `dist\KikuMoe-1.0.exe`.
 
-Build "onedir" (cartella con eseguibile e risorse a fianco):
+Dettagli tecnici:
+- Il file `kikumoe.spec` forza la modalità onefile e include automaticamente:
+  - `libvlc.dll` e `libvlccore.dll`
+  - l’intera cartella `plugins` di VLC
+- Il runtime hook `pyi_rthook_vlc.py` imposta le variabili d’ambiente necessarie (`PATH` e `VLC_PLUGIN_PATH`) durante l’esecuzione del bundle, così non è richiesta alcuna configurazione aggiuntiva lato utente.
+- In caso di antivirus troppo aggressivi, l’eseguibile onefile può richiedere un’approvazione/whitelist. Il primo avvio potrebbe essere leggermente più lento perché i contenuti vengono estratti in una cartella temporanea.
 
-- pyinstaller --noconfirm --clean --windowed --onedir --name "KikuMoe" --add-data "KikuMoe\icons;icons" KikuMoe\KikuMoe.py
-
-Dove trovare l'eseguibile:
-
-- Al termine, l'eseguibile sarà in dist\KikuMoe\KikuMoe.exe (onedir) oppure dist\KikuMoe.exe (onefile).
-
-Suggerimenti e note:
-
-- Se all'avvio non parte l'audio, apri Impostazioni e imposta correttamente il percorso di libVLC (es: C:\\Program Files\\VideoLAN\\VLC). L'app mostrerà lo stato nella barra (VLC presente / non trovato).
-- Per includere anche il runtime VLC direttamente nel pacchetto (opzionale e avanzato), puoi aggiungere:
-  - --add-binary "C:\\Program Files\\VideoLAN\\VLC\\libvlc.dll;."
-  - --add-binary "C:\\Program Files\\VideoLAN\\VLC\\plugins;plugins"
-  In questo caso, ti conviene mantenere impostato in Impostazioni un percorso libVLC lasciato vuoto (userà quello bundled) o configurarlo verso la cartella estratta. In alcune configurazioni potrebbe essere necessario impostare la variabile d'ambiente VLC_PLUGIN_PATH al percorso dei plugins all'avvio tramite uno script o un runtime hook.
-- Le icone dell'app sono SVG. Se vuoi assegnare un'icona al file .exe, fornisci un .ico a PyInstaller con --icon "path\\to\\icon.ico" (opzionale).
-
-### Build con file .spec e script PowerShell
-
-Sono stati aggiunti un file .spec e uno script di build per semplificare il packaging:
-
-- kikumoe.spec: definisce gli asset da includere (icone) e un runtime hook per VLC.
-- build.ps1: esegue PyInstaller in modalità onefile e/o onedir, con opzione per includere libVLC e plugins.
-
-Esempi d’uso:
-
-- Esegui entrambe le build:
-  ./build.ps1
-- Solo onefile:
-  ./build.ps1 -OneFile
-- Solo onedir:
-  ./build.ps1 -Onedir
-- Includi VLC dal percorso predefinito (o da $env:VLC_DIR):
-  ./build.ps1 -BundleVlc
-- Includi VLC da un percorso specifico:
-  ./build.ps1 -BundleVlc -VlcDir "C:\\Program Files\\VideoLAN\\VLC"
-
-Nota: lo script usa il runtime hook pyi_rthook_vlc.py per impostare PATH e VLC_PLUGIN_PATH quando si esegue dal bundle, così libVLC e i plugins vengono risolti correttamente se sono stati inclusi.
+Nota: le precedenti istruzioni per build manuali con `pyinstaller ... --onefile/--onedir` e le opzioni dello script (es. `-OneFile`, `-Onedir`, `-BundleVlc`) non sono più necessarie né supportate: usare esclusivamente `./build.ps1`, che esegue `pyinstaller kikumoe.spec`.
