@@ -13,6 +13,11 @@ from player_vlc import PlayerVLC
 from config import STREAMS
 from settings import SettingsDialog
 
+# App identity
+APP_NAME = "KikuMoe"
+APP_VERSION = "1.0"
+APP_TITLE = f"{APP_NAME} {APP_VERSION}"
+
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
     now_playing_changed = pyqtSignal(str)
@@ -30,7 +35,9 @@ class ListenMoePlayer(QWidget):
         self.i18n = I18n(saved_lang if saved_lang in ('it', 'en') else 'it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
 
-        self.setWindowTitle(self.i18n.t('app_title'))
+        self.setWindowTitle(APP_TITLE)
+        self.resize(600, 420)
+        self.setMinimumSize(500, 380)
         self.layout = QVBoxLayout()
 
         # Header + Now playing
@@ -220,7 +227,8 @@ class ListenMoePlayer(QWidget):
         self.apply_translations()
 
     def apply_translations(self):
-        self.setWindowTitle(self.i18n.t('app_title'))
+        # Mantieni titolo costante
+        self.setWindowTitle(APP_TITLE)
         self.channel_label.setText(self.i18n.t('channel_label'))
         self.format_label.setText(self.i18n.t('format_label'))
         self.play_button.setText(self.i18n.t('play'))
