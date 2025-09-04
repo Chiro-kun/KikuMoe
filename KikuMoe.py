@@ -25,6 +25,7 @@ from constants import (
     KEY_TRAY_ENABLED,
     KEY_TRAY_NOTIFICATIONS,
     KEY_LIBVLC_PATH,
+    KEY_NETWORK_CACHING,
 )
 
 class ListenMoePlayer(QWidget):
@@ -45,7 +46,8 @@ class ListenMoePlayer(QWidget):
         self._lang_map = {"Italiano": 'it', "English": 'en'}
 
         self.setWindowTitle(APP_TITLE)
-        self.resize(600, 420)
+        # Riduci leggermente la dimensione iniziale della finestra
+        self.resize(560, 400)
         self.setMinimumSize(500, 380)
         self.layout = QVBoxLayout()
 
@@ -156,7 +158,11 @@ class ListenMoePlayer(QWidget):
         
         # Player wrapper with optional libvlc path
         libvlc_path = self.settings.value(KEY_LIBVLC_PATH, None)
-        self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path)
+        try:
+            network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+        except Exception:
+            network_caching = 1000
+        self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
         if not self.player.is_ready():
             # Show a clear message explaining what to do
             self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
@@ -226,6 +232,10 @@ class ListenMoePlayer(QWidget):
             prev_format = self.settings.value(KEY_FORMAT, 'Vorbis')
             prev_path = self.player.get_configured_path()
             prev_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+            try:
+                prev_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+            except Exception:
+                prev_nc = 1000
             dlg = SettingsDialog(self)
             if dlg.exec_() == QDialog.Accepted:
                 # Lingua
@@ -241,8 +251,13 @@ class ListenMoePlayer(QWidget):
                 # Percorso VLC
                 new_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
                 path_changed = (prev_path != new_path)
-                if path_changed:
-                    if not self.player.reinitialize(new_path):
+                try:
+                    new_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+                except Exception:
+                    new_nc = 1000
+                nc_changed = (new_nc != prev_nc)
+                if path_changed or nc_changed:
+                    if not self.player.reinitialize(new_path, network_caching_ms=new_nc):
                         self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
                 # Tray enable/disable come da prima
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
@@ -254,7 +269,7 @@ class ListenMoePlayer(QWidget):
                 new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
                 new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
                 selection_changed = (new_channel != prev_channel) or (new_format != prev_format)
-                if was_playing and (selection_changed or path_changed):
+                if was_playing and (selection_changed or path_changed or nc_changed):
                     self.status_changed.emit(self.t('status_restarting'))
                     self.stop_stream()
                     QTimer.singleShot(50, self.play_stream)
@@ -410,7 +425,11 @@ class ListenMoePlayer(QWidget):
         try:
             if not self.player.is_ready():
                 saved_path = self.settings.value(KEY_LIBVLC_PATH, None)
-                if not self.player.reinitialize(saved_path):
+                try:
+                    nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+                except Exception:
+                    nc = 1000
+                if not self.player.reinitialize(saved_path, network_caching_ms=nc):
                     self.status_changed.emit(self.t('libvlc_not_ready'))
                     self.update_vlc_status_label()
                     return

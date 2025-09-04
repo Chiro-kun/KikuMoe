@@ -9,9 +9,10 @@ except Exception:
 
 
 class PlayerVLC:
-    def __init__(self, libvlc_path: Optional[str] = None, on_event: Optional[Callable[[str, Optional[int]], None]] = None) -> None:
+    def __init__(self, libvlc_path: Optional[str] = None, on_event: Optional[Callable[[str, Optional[int]], None]] = None, network_caching_ms: Optional[int] = None) -> None:
         self._vlc_path = libvlc_path
         self._on_event = on_event
+        self._network_caching_ms: Optional[int] = int(network_caching_ms) if network_caching_ms is not None else None
         self.instance: Optional['vlc.Instance'] = None
         self.player: Optional['vlc.MediaPlayer'] = None
         self._muted: bool = False
@@ -30,7 +31,15 @@ class PlayerVLC:
             except Exception:
                 pass
         try:
-            self.instance = vlc.Instance()
+            # Build instance options (e.g., network caching)
+            inst_opts = []
+            if self._network_caching_ms is not None:
+                try:
+                    nc = max(0, int(self._network_caching_ms))
+                    inst_opts.append(f"--network-caching={nc}")
+                except Exception:
+                    pass
+            self.instance = vlc.Instance(inst_opts) if inst_opts else vlc.Instance()
             self.player = self.instance.media_player_new()
             # Hook events for UI feedback
             try:
@@ -56,8 +65,13 @@ class PlayerVLC:
     def is_ready(self) -> bool:
         return bool(self._ready and self.instance is not None and self.player is not None)
 
-    def reinitialize(self, libvlc_path: Optional[str]) -> bool:
+    def reinitialize(self, libvlc_path: Optional[str], network_caching_ms: Optional[int] = None) -> bool:
         self._vlc_path = libvlc_path
+        if network_caching_ms is not None:
+            try:
+                self._network_caching_ms = int(network_caching_ms)
+            except Exception:
+                pass
         self._init_vlc()
         return self.is_ready()
 

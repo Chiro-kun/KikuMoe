@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox,
-    QPushButton, QLineEdit, QFileDialog
+    QPushButton, QLineEdit, QFileDialog, QSpinBox
 )
 from PyQt5.QtCore import Qt, QSettings
 from i18n import I18n
@@ -14,6 +14,7 @@ from constants import (
     KEY_TRAY_ENABLED,
     KEY_TRAY_NOTIFICATIONS,
     KEY_LIBVLC_PATH,
+    KEY_NETWORK_CACHING,
 )
 
 class SettingsDialog(QDialog):
@@ -67,6 +68,20 @@ class SettingsDialog(QDialog):
         vlc_row.addWidget(self.btn_browse_vlc)
         layout.addLayout(vlc_row)
 
+        # Network caching (ms)
+        nc_row = QHBoxLayout()
+        nc_row.addWidget(QLabel(self.i18n.t('settings_network_caching')))
+        self.spin_network_caching = QSpinBox()
+        self.spin_network_caching.setRange(0, 20000)
+        self.spin_network_caching.setSingleStep(250)
+        try:
+            default_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+        except Exception:
+            default_nc = 1000
+        self.spin_network_caching.setValue(default_nc)
+        nc_row.addWidget(self.spin_network_caching)
+        layout.addLayout(nc_row)
+
         # Tray options
         self.chk_tray_enabled = QCheckBox(self.i18n.t('settings_tray_enable'))
         self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, 'true') == 'true')
@@ -115,5 +130,6 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())
         path = self.txt_vlc_path.text().strip()
         self.settings.setValue(KEY_LIBVLC_PATH, path if path else '')
+        self.settings.setValue(KEY_NETWORK_CACHING, int(self.spin_network_caching.value()))
         self.settings.setValue(KEY_TRAY_ENABLED, 'true' if self.chk_tray_enabled.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_NOTIFICATIONS, 'true' if self.chk_tray_notifications.isChecked() else 'false')
