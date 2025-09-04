@@ -74,7 +74,7 @@ Come creare il pacchetto:
    ```
 
 Output:
-- L’eseguibile sarà in `dist\KikuMoe-1.0.exe`.
+- L’eseguibile sarà in `dist\KikuMoe-1.5.exe`.
 
 Dettagli tecnici:
 - Il file `kikumoe.spec` forza la modalità onefile e include automaticamente:
