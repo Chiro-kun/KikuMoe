@@ -45,6 +45,8 @@ I18N: Dict[str, Dict[str, str]] = {
         'tray_stop': 'Stop',
         'tray_mute': 'Muto',
         'tray_unmute': 'Riattiva audio',
+        'tray_channel': 'Canale',
+        'tray_format': 'Formato (codec)',
         'tray_quit': 'Esci',
         # Chiavi per finestra impostazioni
         'settings_button': 'Impostazioni',
@@ -108,6 +110,8 @@ I18N: Dict[str, Dict[str, str]] = {
         'tray_stop': 'Stop',
         'tray_mute': 'Mute',
         'tray_unmute': 'Unmute',
+        'tray_channel': 'Channel',
+        'tray_format': 'Format/Codec',
         'tray_quit': 'Quit',
         # Keys for settings window
         'settings_button': 'Settings',

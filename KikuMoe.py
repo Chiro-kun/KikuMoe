@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut,
-    QSystemTrayIcon, QMenu, QAction, QStyle, QDialog
+    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
 from PyQt5.QtGui import QKeySequence, QIcon
@@ -47,7 +47,7 @@ class ListenMoePlayer(QWidget):
 
         self.setWindowTitle(APP_TITLE)
         # Riduci leggermente la dimensione iniziale della finestra
-        self.resize(560, 400)
+        self.resize(480, 390)
         self.setMinimumSize(500, 380)
         self.layout = QVBoxLayout()
 
@@ -176,10 +176,12 @@ class ListenMoePlayer(QWidget):
         self._current_artist = None
 
         # WebSocket wrapper
+        init_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
         self.ws = NowPlayingWS(
             on_now_playing=self._on_now_playing,
             on_error_text=self._on_ws_error_text,
             on_closed_text=self._on_ws_closed_text,
+            ws_url=self._get_ws_url_for_channel(init_channel),
         )
         self.ws.start()
 
@@ -269,6 +271,23 @@ class ListenMoePlayer(QWidget):
                 new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
                 new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
                 selection_changed = (new_channel != prev_channel) or (new_format != prev_format)
+                # Se cambia il canale, riavvia anche il WebSocket verso l'endpoint corretto
+                if new_channel != prev_channel:
+                    try:
+                        if hasattr(self, 'ws') and self.ws:
+                            self.ws.shutdown()
+                    except Exception:
+                        pass
+                    try:
+                        self.ws = NowPlayingWS(
+                            on_now_playing=self._on_now_playing,
+                            on_error_text=self._on_ws_error_text,
+                            on_closed_text=self._on_ws_closed_text,
+                            ws_url=self._get_ws_url_for_channel(new_channel),
+                        )
+                        self.ws.start()
+                    except Exception:
+                        pass
                 if was_playing and (selection_changed or path_changed or nc_changed):
                     self.status_changed.emit(self.t('status_restarting'))
                     self.stop_stream()
@@ -286,6 +305,14 @@ class ListenMoePlayer(QWidget):
         channel = self.settings.value(KEY_CHANNEL, 'J-POP')
         fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
         return STREAMS.get(channel, {}).get(fmt, STREAMS["J-POP"]["Vorbis"])
+
+    def _get_ws_url_for_channel(self, channel: str) -> str:
+        try:
+            if str(channel).upper().startswith('K'):
+                return 'wss://listen.moe/kpop/gateway_v2'
+        except Exception:
+            pass
+        return 'wss://listen.moe/gateway_v2'
 
     def update_header_label(self):
         channel = self.settings.value(KEY_CHANNEL, 'J-POP')
@@ -358,6 +385,7 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, 'action_mute'):
                 self.action_mute.setText(self.i18n.t('tray_unmute') if checked else self.i18n.t('tray_mute'))
+                self._update_tray_action_icons()
         except Exception:
             pass
 
@@ -463,18 +491,55 @@ class ListenMoePlayer(QWidget):
             self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
             self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
             self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
+
+            # Sottomenu Canale
+            self.menu_channel = QMenu(self.i18n.t('tray_channel'), self.tray_menu)
+            self.channel_group = QActionGroup(self)
+            self.channel_group.setExclusive(True)
+            self.action_channel_jpop = QAction("J-POP", self, checkable=True)
+            self.action_channel_kpop = QAction("K-POP", self, checkable=True)
+            self.channel_group.addAction(self.action_channel_jpop)
+            self.channel_group.addAction(self.action_channel_kpop)
+            self.menu_channel.addAction(self.action_channel_jpop)
+            self.menu_channel.addAction(self.action_channel_kpop)
+            self.action_channel_jpop.triggered.connect(lambda: self._on_tray_channel_select("J-POP"))
+            self.action_channel_kpop.triggered.connect(lambda: self._on_tray_channel_select("K-POP"))
+
+            # Sottomenu Formato (codec)
+            self.menu_format = QMenu(self.i18n.t('tray_format'), self.tray_menu)
+            self.format_group = QActionGroup(self)
+            self.format_group.setExclusive(True)
+            self.action_format_vorbis = QAction("Vorbis", self, checkable=True)
+            self.action_format_mp3 = QAction("MP3", self, checkable=True)
+            self.format_group.addAction(self.action_format_vorbis)
+            self.format_group.addAction(self.action_format_mp3)
+            self.menu_format.addAction(self.action_format_vorbis)
+            self.menu_format.addAction(self.action_format_mp3)
+            self.action_format_vorbis.triggered.connect(lambda: self._on_tray_format_select("Vorbis"))
+            self.action_format_mp3.triggered.connect(lambda: self._on_tray_format_select("MP3"))
+
+            # Monta menu
             self.tray_menu.addAction(self.action_show)
             self.tray_menu.addAction(self.action_hide)
+            self.tray_menu.addSeparator()
+            self.tray_menu.addMenu(self.menu_channel)
+            self.tray_menu.addMenu(self.menu_format)
             self.tray_menu.addSeparator()
             self.tray_menu.addAction(self.action_play_pause)
             self.tray_menu.addAction(self.action_stop)
             self.tray_menu.addAction(self.action_mute)
             self.tray_menu.addSeparator()
             self.tray_menu.addAction(self.action_quit)
+
             self.tray.setContextMenu(self.tray_menu)
             self.tray.setToolTip(APP_TITLE)
             self.tray.activated.connect(self._on_tray_activated)
             self.tray.show()
+
+            # Stato iniziale check sottomenu
+            self._update_tray_stream_checks()
+            # Aggiorna icone dopo la costruzione del menu
+            self._update_tray_action_icons()
         except Exception:
             pass
 
@@ -517,10 +582,128 @@ class ListenMoePlayer(QWidget):
                 self.action_mute.setText(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'))
             if hasattr(self, 'action_quit'):
                 self.action_quit.setText(self.i18n.t('tray_quit'))
+            if hasattr(self, 'menu_channel'):
+                self.menu_channel.setTitle(self.i18n.t('tray_channel'))
+            if hasattr(self, 'menu_format'):
+                self.menu_format.setTitle(self.i18n.t('tray_format'))
             if hasattr(self, 'tray'):
                 self.tray.setToolTip(APP_TITLE)
+            # Aggiorna check su cambio lingua
+            self._update_tray_stream_checks()
+            # Aggiorna icone su cambio lingua/stato
+            self._update_tray_action_icons()
         except Exception:
             pass
+
+    def _update_tray_stream_checks(self):
+         try:
+             ch = self.settings.value(KEY_CHANNEL, 'J-POP')
+             fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
+             if hasattr(self, 'action_channel_jpop'):
+                 is_j = str(ch).upper().startswith('J')
+                 self.action_channel_jpop.setChecked(is_j)
+                 try:
+                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
+                     self.action_channel_jpop.setIcon(icon_ok if (icon_ok and is_j) else QIcon())
+                 except Exception:
+                     pass
+             if hasattr(self, 'action_channel_kpop'):
+                 is_k = str(ch).upper().startswith('K')
+                 self.action_channel_kpop.setChecked(is_k)
+                 try:
+                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
+                     self.action_channel_kpop.setIcon(icon_ok if (icon_ok and is_k) else QIcon())
+                 except Exception:
+                     pass
+             if hasattr(self, 'action_format_vorbis'):
+                 is_v = (fmt == 'Vorbis')
+                 self.action_format_vorbis.setChecked(is_v)
+                 try:
+                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
+                     self.action_format_vorbis.setIcon(icon_ok if (icon_ok and is_v) else QIcon())
+                 except Exception:
+                     pass
+             if hasattr(self, 'action_format_mp3'):
+                 is_m = (fmt == 'MP3')
+                 self.action_format_mp3.setChecked(is_m)
+                 try:
+                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
+                     self.action_format_mp3.setIcon(icon_ok if (icon_ok and is_m) else QIcon())
+                 except Exception:
+                     pass
+         except Exception:
+             pass
+
+    def _tray_notify_selection(self):
+         try:
+             if hasattr(self, 'tray') and self.tray and self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                 ch = self.settings.value(KEY_CHANNEL, 'J-POP')
+                 fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
+                 title = APP_TITLE
+                 body = f"{self.i18n.t('channel_label')} {ch} — {self.i18n.t('format_label')} {fmt}"
+                 self.tray.showMessage(title, body, QSystemTrayIcon.Information, 2500)
+         except Exception:
+             pass
+
+    def _on_tray_channel_select(self, channel: str):
+         try:
+             prev_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+             if channel == prev_channel:
+                 self._update_tray_stream_checks()
+                 return
+             was_playing = bool(self.player and self.player.is_playing())
+             # Aggiorna settings e UI
+             self.settings.setValue(KEY_CHANNEL, channel)
+             self.update_header_label()
+             # Riavvia WS per endpoint corretto
+             try:
+                 if hasattr(self, 'ws') and self.ws:
+                     self.ws.shutdown()
+             except Exception:
+                 pass
+             try:
+                 self.ws = NowPlayingWS(
+                     on_now_playing=self._on_now_playing,
+                     on_error_text=self._on_ws_error_text,
+                     on_closed_text=self._on_ws_closed_text,
+                     ws_url=self._get_ws_url_for_channel(channel),
+                 )
+                 self.ws.start()
+             except Exception:
+                 pass
+             # Aggiorna check e icone
+             self._update_tray_stream_checks()
+             # Notifica selezione
+             self._tray_notify_selection()
+             # Riavvio stream se serve
+             if was_playing:
+                 self.status_changed.emit(self.t('status_restarting'))
+                 self.stop_stream()
+                 QTimer.singleShot(50, self.play_stream)
+         except Exception:
+             pass
+
+    def _on_tray_format_select(self, fmt: str):
+         try:
+             prev_fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
+             if fmt == prev_fmt:
+                 self._update_tray_stream_checks()
+                 return
+             was_playing = bool(self.player and self.player.is_playing())
+             # Aggiorna settings e UI
+             self.settings.setValue(KEY_FORMAT, fmt)
+             self.update_header_label()
+             # Aggiorna check e icone
+             self._update_tray_stream_checks()
+             # Notifica selezione
+             self._tray_notify_selection()
+             # Riavvio stream se serve
+             if was_playing:
+                 self.status_changed.emit(self.t('status_restarting'))
+                 self.stop_stream()
+                 QTimer.singleShot(50, self.play_stream)
+         except Exception:
+             pass
 
     def update_tray_icon(self):
         try:
@@ -544,6 +727,8 @@ class ListenMoePlayer(QWidget):
                 self.setWindowIcon(icon)
             except Exception:
                 pass
+            # Mantieni icone azioni sincronizzate con lo stato
+            self._update_tray_action_icons()
         except Exception:
             pass
 

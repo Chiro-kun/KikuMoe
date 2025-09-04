@@ -9,7 +9,9 @@ class NowPlayingWS:
     def __init__(self,
                  on_now_playing: Callable[[str, str], None],
                  on_error_text: Callable[[str], None],
-                 on_closed_text: Callable[[str], None]):
+                 on_closed_text: Callable[[str], None],
+                 channel_filter: Optional[Callable[[dict], bool]] = None,
+                 ws_url: Optional[str] = None):
         self.ws_app: Optional[WebSocketApp] = None
         self.ws_thread: Optional[threading.Thread] = None
         self.ws_heartbeat_interval_ms: Optional[int] = None
@@ -18,6 +20,8 @@ class NowPlayingWS:
         self.on_now_playing = on_now_playing
         self.on_error_text = on_error_text
         self.on_closed_text = on_closed_text
+        self.channel_filter = channel_filter
+        self.ws_url = ws_url or WS_URL
 
     def start(self):
         def on_open(ws):
@@ -39,6 +43,13 @@ class NowPlayingWS:
                 d = data.get("d", {})
                 t = data.get("t")
                 if t in ("TRACK_UPDATE", "TRACK_UPDATE_REQUEST"):
+                    # Filtra per canale se richiesto
+                    try:
+                        if self.channel_filter is not None and not self.channel_filter(d):
+                            return
+                    except Exception:
+                        # In caso di errore nel filtro, non bloccare l'aggiornamento
+                        pass
                     song = d.get("song") or {}
                     title = song.get("title") or "Unknown"
                     artists = song.get("artists") or []
@@ -54,7 +65,7 @@ class NowPlayingWS:
                 threading.Timer(5.0, self.start).start()
 
         self.ws_app = WebSocketApp(
-            WS_URL,
+            self.ws_url,
             on_open=on_open,
             on_message=on_message,
             on_error=on_error,
