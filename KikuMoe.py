@@ -12,11 +12,20 @@ from ws_client import NowPlayingWS
 from player_vlc import PlayerVLC
 from config import STREAMS
 from settings import SettingsDialog
-
-# App identity
-APP_NAME = "KikuMoe"
-APP_VERSION = "1.0"
-APP_TITLE = f"{APP_NAME} {APP_VERSION}"
+from constants import (
+    APP_TITLE,
+    ORG_NAME,
+    APP_SETTINGS,
+    KEY_LANG,
+    KEY_VOLUME,
+    KEY_MUTE,
+    KEY_CHANNEL,
+    KEY_FORMAT,
+    KEY_AUTOPLAY,
+    KEY_TRAY_ENABLED,
+    KEY_TRAY_NOTIFICATIONS,
+    KEY_LIBVLC_PATH,
+)
 
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
@@ -28,10 +37,10 @@ class ListenMoePlayer(QWidget):
         super().__init__()
 
         # settings
-        self.settings = QSettings('KikuMoe', 'ListenMoePlayer')
+        self.settings = QSettings(ORG_NAME, APP_SETTINGS)
 
         # i18n
-        saved_lang = self.settings.value('lang', 'it')
+        saved_lang = self.settings.value(KEY_LANG, 'it')
         self.i18n = I18n(saved_lang if saved_lang in ('it', 'en') else 'it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
 
@@ -51,9 +60,9 @@ class ListenMoePlayer(QWidget):
         # Stream info (Channel + Format) - non editable
         sel_row = QHBoxLayout()
         self.channel_label = QLabel(self.i18n.t('channel_label'))
-        self.channel_value = QLabel(self.settings.value('channel', 'J-POP'))
+        self.channel_value = QLabel(self.settings.value(KEY_CHANNEL, 'J-POP'))
         self.format_label = QLabel(self.i18n.t('format_label'))
-        self.format_value = QLabel(self.settings.value('format', 'Vorbis'))
+        self.format_value = QLabel(self.settings.value(KEY_FORMAT, 'Vorbis'))
         sel_row.addWidget(self.channel_label)
         sel_row.addWidget(self.channel_value)
         sel_row.addWidget(self.format_label)
@@ -107,10 +116,10 @@ class ListenMoePlayer(QWidget):
         self.volume_label = QLabel(self.i18n.t('volume'))
         self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(int(self.settings.value('volume', 80)))
+        self.volume_slider.setValue(int(self.settings.value(KEY_VOLUME, 80)))
         self.mute_button = QPushButton(self.i18n.t('mute'))
         self.mute_button.setCheckable(True)
-        self.mute_button.setChecked(self.settings.value('mute', 'false') == 'true')
+        self.mute_button.setChecked(self._get_bool(KEY_MUTE, False))
         vol_row.addWidget(self.volume_label)
         vol_row.addWidget(self.volume_slider)
         vol_row.addWidget(self.mute_button)
@@ -146,7 +155,7 @@ class ListenMoePlayer(QWidget):
         self.buffering_visible.connect(self.buffer_bar.setVisible)
         
         # Player wrapper with optional libvlc path
-        libvlc_path = self.settings.value('libvlc_path', None)
+        libvlc_path = self.settings.value(KEY_LIBVLC_PATH, None)
         self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path)
         if not self.player.is_ready():
             # Show a clear message explaining what to do
@@ -170,35 +179,14 @@ class ListenMoePlayer(QWidget):
 
         # System Tray Icon e menu
         try:
-            self._tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
-            if self._tray_enabled:
-                self.tray = QSystemTrayIcon(self)
-                self.update_tray_icon()
-                self.tray_menu = QMenu(self)
-                self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
-                self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
-                self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
-                self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
-                self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
-                self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
-                self.tray_menu.addAction(self.action_show)
-                self.tray_menu.addAction(self.action_hide)
-                self.tray_menu.addSeparator()
-                self.tray_menu.addAction(self.action_play_pause)
-                self.tray_menu.addAction(self.action_stop)
-                self.tray_menu.addAction(self.action_mute)
-                self.tray_menu.addSeparator()
-                self.tray_menu.addAction(self.action_quit)
-                self.tray.setContextMenu(self.tray_menu)
-                self.tray.setToolTip(self.i18n.t('app_title'))
-                self.tray.activated.connect(self._on_tray_activated)
-                self.tray.show()
+            self._tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+            self._ensure_tray(self._tray_enabled)
         except Exception:
             pass
 
         # Autoplay on startup
         try:
-            if self.settings.value('autoplay', 'false') == 'true':
+            if self._get_bool(KEY_AUTOPLAY, False):
                 QTimer.singleShot(0, self.play_stream)
         except Exception:
             pass
@@ -207,10 +195,10 @@ class ListenMoePlayer(QWidget):
 
     # ------------------- i18n -------------------
     def on_lang_changed(self, idx: int):
-        display = self.lang_combo.currentText()
-        self.i18n.set_lang(self._lang_map.get(display, 'it'))
-        # persist language code
-        self.settings.setValue('lang', self.i18n.lang)
+        # Legge e applica la lingua da QSettings (widget lingua rimosso)
+        lang = self.settings.value(KEY_LANG, 'it')
+        self.i18n.set_lang('it' if lang not in ('it', 'en') else lang)
+        self.settings.setValue(KEY_LANG, self.i18n.lang)
         self.apply_translations()
 
     def apply_translations(self):
@@ -234,69 +222,37 @@ class ListenMoePlayer(QWidget):
         try:
             # Salva stato precedente
             was_playing = bool(self.player and self.player.is_playing())
-            prev_channel = self.settings.value('channel', 'J-POP')
-            prev_format = self.settings.value('format', 'Vorbis')
+            prev_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+            prev_format = self.settings.value(KEY_FORMAT, 'Vorbis')
             prev_path = self.player.get_configured_path()
-            prev_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
+            prev_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
             dlg = SettingsDialog(self)
             if dlg.exec_() == QDialog.Accepted:
                 # Lingua
-                lang = self.settings.value('lang', 'it')
+                lang = self.settings.value(KEY_LANG, 'it')
                 self.i18n.set_lang('it' if lang not in ('it','en') else lang)
                 self.apply_translations()
                 # Aggiorna header e valori visivi canale/formato da QSettings
                 self.update_header_label()
                 if hasattr(self, 'channel_value'):
-                    self.channel_value.setText(self.settings.value('channel', 'J-POP'))
+                    self.channel_value.setText(self.settings.value(KEY_CHANNEL, 'J-POP'))
                 if hasattr(self, 'format_value'):
-                    self.format_value.setText(self.settings.value('format', 'Vorbis'))
+                    self.format_value.setText(self.settings.value(KEY_FORMAT, 'Vorbis'))
                 # Percorso VLC
-                new_path = self.settings.value('libvlc_path', '') or None
+                new_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
                 path_changed = (prev_path != new_path)
                 if path_changed:
                     if not self.player.reinitialize(new_path):
                         self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
                 # Tray enable/disable come da prima
-                new_tray_enabled = (self.settings.value('tray_enabled', 'true') == 'true')
-                if new_tray_enabled and (not hasattr(self, 'tray') or self.tray is None):
-                    try:
-                        self._tray_enabled = True
-                        self.tray = QSystemTrayIcon(self)
-                        self.update_tray_icon()
-                        self.tray_menu = QMenu(self)
-                        self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
-                        self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
-                        self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
-                        self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
-                        self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
-                        self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
-                        self.tray_menu.addAction(self.action_show)
-                        self.tray_menu.addAction(self.action_hide)
-                        self.tray_menu.addSeparator()
-                        self.tray_menu.addAction(self.action_play_pause)
-                        self.tray_menu.addAction(self.action_stop)
-                        self.tray_menu.addAction(self.action_mute)
-                        self.tray_menu.addSeparator()
-                        self.tray_menu.addAction(self.action_quit)
-                        self.tray.setContextMenu(self.tray_menu)
-                        self.tray.setToolTip(self.i18n.t('app_title'))
-                        self.tray.activated.connect(self._on_tray_activated)
-                        self.tray.show()
-                    except Exception:
-                        pass
-                elif (not new_tray_enabled) and hasattr(self, 'tray') and self.tray is not None:
-                    try:
-                        self.tray.hide()
-                        self.tray.deleteLater()
-                        self.tray = None
-                    except Exception:
-                        pass
+                new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+                self._ensure_tray(new_tray_enabled)
                 self.update_tray_texts()
                 self.update_tray_icon()
                 self.update_vlc_status_label()
                 # Autoriavvio se servono cambiamenti
-                new_channel = self.settings.value('channel', 'J-POP')
-                new_format = self.settings.value('format', 'Vorbis')
+                new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+                new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
                 selection_changed = (new_channel != prev_channel) or (new_format != prev_format)
                 if was_playing and (selection_changed or path_changed):
                     self.status_changed.emit(self.t('status_restarting'))
@@ -308,14 +264,17 @@ class ListenMoePlayer(QWidget):
     def t(self, key: str, **kwargs) -> str:
         return self.i18n.t(key, **kwargs)
 
+    def _get_bool(self, key: str, default: bool = True) -> bool:
+        return (self.settings.value(key, 'true' if default else 'false') == 'true')
+
     def get_selected_stream_url(self) -> str:
-        channel = self.settings.value('channel', 'J-POP')
-        fmt = self.settings.value('format', 'Vorbis')
+        channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+        fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
         return STREAMS.get(channel, {}).get(fmt, STREAMS["J-POP"]["Vorbis"])
 
     def update_header_label(self):
-        channel = self.settings.value('channel', 'J-POP')
-        fmt = self.settings.value('format', 'Vorbis')
+        channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+        fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
         self.label.setText(self.t('header').format(channel=channel, format=fmt))
         if hasattr(self, 'channel_value'):
             self.channel_value.setText(channel)
@@ -374,12 +333,12 @@ class ListenMoePlayer(QWidget):
     # ------------------- Player controls -------------------
     def volume_changed(self, value: int):
         self.player.set_volume(int(value))
-        self.settings.setValue('volume', int(value))
+        self.settings.setValue(KEY_VOLUME, int(value))
 
     def mute_toggled(self, checked: bool):
         self.player.set_mute(bool(checked))
         self.mute_button.setText(self.t('unmute') if checked else self.t('mute'))
-        self.settings.setValue('mute', 'true' if checked else 'false')
+        self.settings.setValue(KEY_MUTE, 'true' if checked else 'false')
         # Aggiorna testo azione tray per mute
         try:
             if hasattr(self, 'action_mute'):
@@ -450,7 +409,7 @@ class ListenMoePlayer(QWidget):
     def play_stream(self):
         try:
             if not self.player.is_ready():
-                saved_path = self.settings.value('libvlc_path', None)
+                saved_path = self.settings.value(KEY_LIBVLC_PATH, None)
                 if not self.player.reinitialize(saved_path):
                     self.status_changed.emit(self.t('libvlc_not_ready'))
                     self.update_vlc_status_label()
@@ -474,6 +433,46 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     # ------------------- Tray helpers -------------------
+    def _create_tray(self):
+        try:
+            self.tray = QSystemTrayIcon(self)
+            self.update_tray_icon()
+            self.tray_menu = QMenu(self)
+            self.action_show = QAction(self.i18n.t('tray_show'), self, triggered=lambda: (self.showNormal(), self.activateWindow()))
+            self.action_hide = QAction(self.i18n.t('tray_hide'), self, triggered=self.hide)
+            self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self, triggered=self.pause_resume)
+            self.action_stop = QAction(self.i18n.t('tray_stop'), self, triggered=self.stop_stream)
+            self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self, triggered=self.toggle_mute_shortcut)
+            self.action_quit = QAction(self.i18n.t('tray_quit'), self, triggered=QApplication.instance().quit)
+            self.tray_menu.addAction(self.action_show)
+            self.tray_menu.addAction(self.action_hide)
+            self.tray_menu.addSeparator()
+            self.tray_menu.addAction(self.action_play_pause)
+            self.tray_menu.addAction(self.action_stop)
+            self.tray_menu.addAction(self.action_mute)
+            self.tray_menu.addSeparator()
+            self.tray_menu.addAction(self.action_quit)
+            self.tray.setContextMenu(self.tray_menu)
+            self.tray.setToolTip(APP_TITLE)
+            self.tray.activated.connect(self._on_tray_activated)
+            self.tray.show()
+        except Exception:
+            pass
+
+    def _destroy_tray(self):
+        try:
+            if hasattr(self, 'tray') and self.tray is not None:
+                self.tray.hide()
+                self.tray.deleteLater()
+                self.tray = None
+        except Exception:
+            pass
+
+    def _ensure_tray(self, enabled: bool):
+        if enabled and (not hasattr(self, 'tray') or self.tray is None):
+            self._create_tray()
+        elif (not enabled) and hasattr(self, 'tray') and self.tray is not None:
+            self._destroy_tray()
     def _on_tray_activated(self, reason):
         try:
             if reason == QSystemTrayIcon.Trigger:
@@ -500,7 +499,7 @@ class ListenMoePlayer(QWidget):
             if hasattr(self, 'action_quit'):
                 self.action_quit.setText(self.i18n.t('tray_quit'))
             if hasattr(self, 'tray'):
-                self.tray.setToolTip(self.i18n.t('app_title'))
+                self.tray.setToolTip(APP_TITLE)
         except Exception:
             pass
 
@@ -536,7 +535,7 @@ class ListenMoePlayer(QWidget):
         QTimer.singleShot(0, self.update_now_playing_label)
         # Tray notification
         try:
-            if hasattr(self, 'tray') and self.tray and (self.settings.value('tray_notifications', 'true') == 'true') and (self.settings.value('tray_enabled', 'true') == 'true'):
+            if hasattr(self, 'tray') and self.tray and self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
                 msg_title = self.i18n.t('now_playing_prefix')
                 body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
                 self.tray.showMessage(msg_title, body, QSystemTrayIcon.Information, 3000)
