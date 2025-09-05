@@ -1,7 +1,7 @@
 # Application constants and settings keys
 
 APP_NAME = "KikuMoe"
-APP_VERSION = "1.0"
+APP_VERSION = "1.5"
 APP_TITLE = f"{APP_NAME} {APP_VERSION}"
 
 # QSettings scope
