@@ -1,11 +1,12 @@
 # KikuMoe
 
-Un semplice player desktop per LISTEN.moe basato su PyQt5 e VLC (python-vlc). Offre riproduzione dei flussi J-POP/K-POP, scorciatoie da tastiera, tray icon, indicatore di stato di VLC e interfaccia bilingue (Italiano/Inglese). Supporta il riavvio automatico dello stream quando cambi canale, formato o percorso di libVLC dalle Impostazioni.
+Un semplice player desktop per LISTEN.moe basato su PyQt5, con backend audio predefinito FFmpeg e fallback a VLC (python-vlc). Offre riproduzione dei flussi J-POP/K-POP, scorciatoie da tastiera, tray icon, indicatore di stato del backend e interfaccia bilingue (Italiano/Inglese). Supporta il riavvio automatico dello stream quando cambi canale, formato o percorso di libVLC dalle Impostazioni.
 
 ## Requisiti
 - Python 3.8+
-- VLC Desktop installato (stessa architettura di Python: x64 con x64, x86 con x86),
-  oppure percorso di libVLC configurato manualmente dalle Impostazioni dell’app.
+- FFmpeg installato e presente nel PATH di sistema (consigliato, è il backend predefinito)
+- In alternativa: VLC Desktop installato (stessa architettura di Python: x64 con x64, x86 con x86),
+  oppure percorso di libVLC configurato manualmente dalle Impostazioni dell’app
 
 ## Installazione
 1. Clona o scarica il repository.
@@ -23,7 +24,7 @@ python KikuMoe.py
 ```
 
 ## Uso
-- Se libVLC è correttamente rilevato, vedrai l’indicatore in verde ("VLC è presente"). In caso contrario, apri Impostazioni e imposta il percorso libVLC (la cartella che contiene `libvlc.dll`, ad es. `C:/Program Files/VideoLAN/VLC`).
+- Se il backend è correttamente rilevato (FFmpeg o VLC), vedrai l’indicatore in verde. Se FFmpeg non è nel PATH e VLC non è configurato, apri Impostazioni e imposta il percorso libVLC oppure installa FFmpeg.
 - I valori di Canale (J-POP/K-POP) e Formato (Vorbis/MP3) sono mostrati nella finestra principale come etichette non modificabili: per cambiarli, apri Impostazioni.
 - Premi Riproduci per avviare lo stream. Puoi usare Pausa/Riprendi, Stop, il controllo Volume e il pulsante Muto.
 - La Tray Icon (area di notifica) offre un menu rapido con Mostra/Nascondi, Play/Pausa, Stop, Muto/Unmute ed Esci.
@@ -36,34 +37,33 @@ python KikuMoe.py
 ## Impostazioni
 - Lingua (IT/EN)
 - Canale e Formato dello stream
-- Percorso libVLC (opzionale, se VLC non è nel PATH)
+- Percorso libVLC (opzionale; utile se si usa il fallback VLC o se FFmpeg non è disponibile)
 - Avvio automatico all’apertura (se abilitato)
 - Tray Icon abilitata e notifiche tray
 
 Quando chiudi la finestra delle Impostazioni con OK, se lo stream era in riproduzione e hai cambiato Canale, Formato o il percorso di libVLC, l’app mostra "Riavvio dello stream…" e riavvia automaticamente la riproduzione.
 
-## Indicatore stato VLC
-L’interfaccia mostra uno stato testuale e un’icona che indicano se libVLC è disponibile. Se non lo è, passa il mouse sull’indicatore per leggere un suggerimento su come configurarlo.
+## Indicatore stato backend
+L’interfaccia mostra uno stato testuale e un’icona che indicano se il backend audio è disponibile: FFmpeg (predefinito) o VLC (fallback). Se non è disponibile alcun backend, passa il mouse sull’indicatore per leggere un suggerimento su come configurare FFmpeg o libVLC.
 
 ## Risoluzione problemi
-- Se compare "VLC non pronto" o la riproduzione non parte:
-  - Verifica di avere VLC Desktop installato.
-  - Assicurati che l’architettura (x64/x86) corrisponda a quella di Python.
-  - In alternativa, imposta il percorso libVLC nelle Impostazioni (cartella contenente `libvlc.dll`).
+- Se la riproduzione non parte:
+  - Verifica che FFmpeg sia installato e che il comando `ffmpeg -version` funzioni dal terminale (FFmpeg deve essere nel PATH).
+  - In alternativa, installa VLC Desktop e/o imposta il percorso libVLC nelle Impostazioni (cartella contenente `libvlc.dll`, ad es. `C:/Program Files/VideoLAN/VLC`).
 
 ## Stato attuale
-- Implementati: Tray icon con menu, indicatore stato VLC, scorciatoie, i18n IT/EN, percorso libVLC configurabile dalle Impostazioni, riavvio automatico dello stream dopo modifica impostazioni.
+- Implementati: Tray icon con menu, indicatore stato backend (FFmpeg/VLC), scorciatoie, i18n IT/EN, percorso libVLC configurabile dalle Impostazioni, riavvio automatico dello stream dopo modifica impostazioni.
 - Note: I dettagli avanzati di VLC (versione, percorso) non sono più mostrati nella finestra principale; è presente un indicatore di stato semplice e chiaro.
 
 ## Packaging (OneFile, zero-config)
 
-Da ora in poi è supportata e consigliata solo la build "onefile" (singolo .exe), che include automaticamente libVLC e i plugins per un'esperienza zero-config.
+Da ora in poi è supportata e consigliata solo la build "onefile" (singolo .exe). Il pacchetto include automaticamente VLC (libVLC e plugins) per garantire un’esperienza zero-config anche in assenza di FFmpeg nel sistema: l’eseguibile utilizza il backend VLC out‑of‑the‑box.
 
 Prerequisiti (nell’ambiente in cui hai installato le dipendenze del progetto):
 - `pip install --upgrade pyinstaller pyinstaller-hooks-contrib` (lo script di build lo esegue comunque in automatico)
 
 Come creare il pacchetto:
-1. Facoltativo: se VLC non è installato nel percorso predefinito `C:\\Program Files\\VideoLAN\\VLC`, imposta la variabile d’ambiente prima del build:
+1. Facoltativo: se VLC non è installato nel percorso predefinito `C:\\ Program Files\\VideoLAN\\VLC`, imposta la variabile d’ambiente prima del build:
    - PowerShell:
      ```powershell
      $env:VLC_DIR = "C:\\Percorso\\alla\\tua\\installazione\\VLC"

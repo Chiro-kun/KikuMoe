@@ -1,3 +1,8 @@
+# Runtime GUI
 PyQt5>=5.15.4
+# WebSocket client for Now Playing updates
 websocket-client>=1.6.0
+# VLC fallback backend (python binding) — optional at runtime if FFmpeg is present, but required for packaging fallback
 python-vlc>=3.0.0
+# Audio output via PortAudio
+pyaudio>=0.2.11
