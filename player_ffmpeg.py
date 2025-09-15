@@ -370,6 +370,12 @@ class PlayerFFmpeg:
                         frames_per_buffer=1024
                     )
                     print("[DEBUG] _stream_worker: PyAudio stream opened")
+                    try:
+                        if hasattr(self._audio_stream, "start_stream"):
+                            self._audio_stream.start_stream()
+                            print("[DEBUG] _stream_worker: PyAudio stream started")
+                    except Exception as se:
+                        print("[DEBUG] _stream_worker: could not start PyAudio stream:", se)
                 except Exception as e:
                     print("[DEBUG] _stream_worker: failed to open PyAudio stream:", e)
                     self._emit('error', None)
@@ -399,9 +405,12 @@ class PlayerFFmpeg:
                 '-reconnect', '1',
                 '-reconnect_streamed', '1',
                 '-reconnect_delay_max', '5',
+                '-reconnect_at_eof', '1',
+                '-reconnect_on_network_error', '1',
                 '-rw_timeout', '15000000',
                 '-user_agent', 'KikuMoe/1.5',
-                '-headers', 'Connection: close\r\n',
+                # Removed custom Connection: close header to allow persistent streaming
+                # '-headers', 'Connection: close\r\n',
                 '-i', safe_url,
                 '-vn',
                 '-fflags', 'nobuffer',
@@ -436,20 +445,25 @@ class PlayerFFmpeg:
 
             started_streaming = False
             chunk_size = 4096
+            empty_reads = 0
+            max_empty_reads_before_check = 100  # ~5s at 50ms sleep
             while True:
                 with self._state_lock:
                     if self._stop_event.is_set():
                         print("[DEBUG] _stream_worker: stop event set, breaking loop")
                         break
                     proc = self._ffmpeg_process
-                if proc is None or proc.poll() is not None:
-                    print("[DEBUG] _stream_worker: ffmpeg process ended or missing")
-                    print("[DEBUG] ffmpeg poll:", proc.poll() if proc else None)
+                if proc is None:
+                    print("[DEBUG] _stream_worker: ffmpeg process missing")
+                    break
+                if proc.poll() is not None:
+                    print("[DEBUG] _stream_worker: ffmpeg process ended with code:", proc.poll())
                     # Try to read stderr if possible
                     try:
-                        if proc and proc.stderr:
+                        if proc.stderr:
                             err = proc.stderr.read()
-                            print("[DEBUG] ffmpeg stderr:", err.decode(errors='ignore'))
+                            if err:
+                                print("[DEBUG] ffmpeg stderr:", err.decode(errors='ignore'))
                     except Exception as e:
                         print("[DEBUG] error reading ffmpeg stderr:", e)
                     break
@@ -465,9 +479,19 @@ class PlayerFFmpeg:
                     break
 
                 if not chunk:
-                    print("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk")
-                    break
+                    empty_reads += 1
+                    # If ffmpeg is still running, wait a bit and retry instead of breaking immediately
+                    if proc.poll() is None:
+                        if empty_reads % 20 == 0:
+                            print(f"[DEBUG] _stream_worker: empty chunk (x{empty_reads}), waiting for data...")
+                        time.sleep(0.05)
+                        continue
+                    else:
+                        print("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk after process ended")
+                        break
 
+                # got data
+                empty_reads = 0
                 if not started_streaming:
                     started_streaming = True
                     self._emit('playing', None)

@@ -2,12 +2,13 @@ import json
 import threading
 from typing import Callable, Optional
 from websocket import WebSocketApp
+from datetime import datetime, timezone
 
 WS_URL = "wss://listen.moe/gateway_v2"
 
 class NowPlayingWS:
     def __init__(self,
-                 on_now_playing: Callable[[str, str], None],
+                 on_now_playing: Callable[[str, str, Optional[int], Optional[float]], None],
                  on_error_text: Callable[[str], None],
                  on_closed_text: Callable[[str], None],
                  channel_filter: Optional[Callable[[dict], bool]] = None,
@@ -54,7 +55,25 @@ class NowPlayingWS:
                     title = song.get("title") or "Unknown"
                     artists = song.get("artists") or []
                     artist_name = artists[0].get("name") if artists else ""
-                    self.on_now_playing(title, artist_name)
+                    # Durata (secondi) se presente nel payload
+                    duration = song.get("duration")
+                    try:
+                        duration = int(duration) if duration is not None else None
+                    except Exception:
+                        duration = None
+                    # startTime ISO8601 (UTC) -> epoch seconds
+                    start_ts = None
+                    try:
+                        start_time_iso = d.get("startTime")
+                        if isinstance(start_time_iso, str):
+                            iso = start_time_iso.replace("Z", "+00:00")
+                            dt = datetime.fromisoformat(iso)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            start_ts = dt.timestamp()
+                    except Exception:
+                        start_ts = None
+                    self.on_now_playing(title, artist_name, duration, start_ts)
 
         def on_error(ws, error):
             self.on_error_text(str(error))

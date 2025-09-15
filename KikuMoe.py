@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
 from PyQt5.QtGui import QKeySequence, QIcon
+from typing import Optional
 import os
 import sys
 import re
@@ -36,6 +37,11 @@ class ListenMoePlayer(QWidget):
     now_playing_changed = pyqtSignal(str)
     buffering_progress = pyqtSignal(int)
     buffering_visible = pyqtSignal(bool)
+    # New signals to marshal calls to UI thread safely
+    label_refresh = pyqtSignal()
+    tray_icon_refresh = pyqtSignal()
+    backend_status_refresh = pyqtSignal()
+    notify_tray = pyqtSignal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -165,10 +171,15 @@ class ListenMoePlayer(QWidget):
         self.now_playing_changed.connect(self.now_playing_label.setText)
         self.buffering_progress.connect(self.buffer_bar.setValue)
         self.buffering_visible.connect(self.buffer_bar.setVisible)
+        # New cross-thread safe connections
+        self.label_refresh.connect(self.update_now_playing_label)
+        self.tray_icon_refresh.connect(self.update_tray_icon)
+        self.backend_status_refresh.connect(self.update_vlc_status_label)
+        self.notify_tray.connect(self._notify_tray)
         
         # Player wrapper - try ffmpeg first, fallback to VLC
         try:
-            self.player = PlayerFFmpeg(on_event=self._on_player_event)
+            self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
             if not self.player.is_ready():
                 # Fallback to VLC if ffmpeg player not available
                 libvlc_path = self.settings.value(KEY_LIBVLC_PATH, None)
@@ -176,7 +187,7 @@ class ListenMoePlayer(QWidget):
                     network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
                 except Exception:
                     network_caching = 1000
-                self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
+                self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=libvlc_path, network_caching_ms=network_caching)
         except Exception:
             # Fallback to VLC
             libvlc_path = self.settings.value(KEY_LIBVLC_PATH, None)
@@ -184,7 +195,7 @@ class ListenMoePlayer(QWidget):
                 network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
             except Exception:
                 network_caching = 1000
-            self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
+            self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=libvlc_path, network_caching_ms=network_caching)
         
         if not self.player.is_ready():
             # Show a clear message explaining what to do
@@ -197,6 +208,16 @@ class ListenMoePlayer(QWidget):
         # Track cache for i18n rerender
         self._current_title = None
         self._current_artist = None
+        self._current_duration_seconds: Optional[int] = None
+        self._current_start_epoch: Optional[float] = None
+        # Create progress timer in UI thread and keep it available
+        self._progress_timer: Optional[QTimer] = QTimer(self)
+        try:
+            self._progress_timer.setInterval(1000)
+            self._progress_timer.timeout.connect(self.update_now_playing_label)
+            self._progress_timer.start()
+        except Exception:
+            pass
 
         # WebSocket wrapper
         init_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
@@ -248,6 +269,22 @@ class ListenMoePlayer(QWidget):
         self.update_now_playing_label()
         self.update_tray_texts()
         self.update_vlc_status_label()
+
+    def update_header_label(self):
+        try:
+            channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+            fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
+            # Aggiorna intestazione principale
+            self.label.setText(self.i18n.t('header').format(channel=channel, format=fmt))
+            # Aggiorna etichette statiche dei valori
+            if hasattr(self, 'channel_value'):
+                self.channel_value.setText(channel)
+            if hasattr(self, 'format_value'):
+                self.format_value.setText(fmt)
+            # Mantieni titolo finestra fisso
+            self.setWindowTitle(APP_TITLE)
+        except Exception:
+            pass
 
     def open_settings(self):
         try:
@@ -312,230 +349,353 @@ class ListenMoePlayer(QWidget):
     def t(self, key: str, **kwargs) -> str:
         return self.i18n.t(key, **kwargs)
 
-    def _get_bool(self, key: str, default: bool = True) -> bool:
-        """Return boolean from QSettings handling str/bool/int variants."""
+    def _get_ws_url_for_channel(self, channel: str):
+        # Al momento il gateway WS è unico per canali J-POP/K-POP.
+        # Manteniamo un helper per futura estensibilità o URL differenziati.
         try:
-            val = self.settings.value(key, None)
-            if val is None:
-                return bool(default)
-            if isinstance(val, bool):
-                return val
-            if isinstance(val, (int, float)):
-                return bool(int(val))
-            s = str(val).strip().lower()
-            if s in ('1', 'true', 'yes', 'on'):
-                return True
-            if s in ('0', 'false', 'no', 'off'):
-                return False
+            return "wss://listen.moe/gateway_v2"
         except Exception:
-            pass
-        return bool(default)
+            return "wss://listen.moe/gateway_v2"
 
     def get_selected_stream_url(self) -> str:
-        channel = self.settings.value(KEY_CHANNEL, 'J-POP')
-        fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
-        return STREAMS.get(channel, {}).get(fmt, STREAMS["J-POP"]["Vorbis"])
-
-    def _get_ws_url_for_channel(self, channel: str) -> str:
+        """Restituisce l'URL dello stream in base a canale e formato nelle impostazioni."""
         try:
-            if str(channel).upper().startswith('K'):
-                return 'wss://listen.moe/kpop/gateway_v2'
+            channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+            fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
+            urls = STREAMS.get(channel)
+            if isinstance(urls, dict):
+                url = urls.get(fmt)
+                if url:
+                    return url
+                # fallback: prova Vorbis, altrimenti il primo disponibile
+                url = urls.get('Vorbis') or (next(iter(urls.values())) if urls else None)
+                if url:
+                    return url
+            # fallback globale noto
+            jpop = STREAMS.get('J-POP', {})
+            return jpop.get('Vorbis') or (next(iter(jpop.values())) if jpop else "https://listen.moe/stream")
         except Exception:
-            pass
-        return 'wss://listen.moe/gateway_v2'
+            return "https://listen.moe/stream"
 
-    def update_header_label(self):
-        channel = self.settings.value(KEY_CHANNEL, 'J-POP')
-        fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
-        self.label.setText(self.t('header').format(channel=channel, format=fmt))
-        if hasattr(self, 'channel_value'):
-            self.channel_value.setText(channel)
-        if hasattr(self, 'format_value'):
-            self.format_value.setText(fmt)
+    def _get_bool(self, key: str, default: bool) -> bool:
+        try:
+            val = self.settings.value(key, default)
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, int):
+                return bool(val)
+            if isinstance(val, str):
+                v = val.strip().lower()
+                if v in ("1", "true", "yes", "on"):
+                    return True
+                if v in ("0", "false", "no", "off"):
+                    return False
+                # fallback: any non-empty string is True
+                return len(v) > 0
+            return bool(val) if val is not None else default
+        except Exception:
+            return default
+
+    def _format_mmss(self, seconds: int) -> str:
+        """Format seconds as M:SS, capped at 0 if negative."""
+        try:
+            total = int(seconds)
+            if total < 0:
+                total = 0
+            m, s = divmod(total, 60)
+            return f"{m}:{s:02d}"
+        except Exception:
+            return ""
 
     def update_now_playing_label(self):
-        title = self._current_title or '–'
+        title = self._current_title or self.t('unknown')
         artist = self._current_artist or ''
         prefix = self.t('now_playing_prefix')
         text = f"{prefix} {title}" + (f" — {artist}" if artist and title != '–' else "")
-        self.now_playing_changed.emit(text)
-
-    def update_vlc_status_label(self):
+        # Append remaining or total duration
         try:
-            is_ok = bool(self.player and self.player.is_ready())
-            text = self.t('vlc_present') if is_ok else self.t('vlc_not_found')
-            color = "#2e7d32" if is_ok else "#c62828"
-            self.vlc_status.setText(text)
-            self.vlc_status.setStyleSheet(f"color: {color}; font-weight: bold;")
-            self.vlc_status.setVisible(True)
-            try:
-                icon = self._icon_status_ok if is_ok else self._icon_status_bad
-                if icon and not icon.isNull():
-                    self.vlc_status_icon.setStyleSheet("")
-                    self.vlc_status_icon.setPixmap(icon.pixmap(10, 10))
+            if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
+                # If we have start time, show remaining; else show total
+                remaining = None
+                if self._current_start_epoch is not None:
+                    import time
+                    elapsed = int(time.time() - int(self._current_start_epoch))
+                    if elapsed < 0:
+                        elapsed = 0
+                    remaining_calc = int(self._current_duration_seconds) - elapsed
+                    if remaining_calc < 0:
+                        remaining_calc = 0
+                    remaining = remaining_calc
+                if remaining is not None:
+                    mmss = self._format_mmss(remaining)
                 else:
-                    self.vlc_status_icon.clear()
-                    self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
-            except Exception:
-                self.vlc_status_icon.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
-            self.vlc_status_icon.setToolTip(self.i18n.t('libvlc_hint'))
-            self.vlc_status.setToolTip(self.i18n.t('libvlc_hint'))
+                    mmss = self._format_mmss(int(self._current_duration_seconds))
+                if mmss:
+                    text += f" [{mmss}]"
+        except Exception:
+            pass
+        self.now_playing_changed.emit(text)
+        # Update window title too
+        try:
+            base = APP_TITLE
+            self.setWindowTitle(f"{base} — {title}")
         except Exception:
             pass
 
-    def update_vlc_details(self):
-        # Disabilitato: dettagli VLC non mostrati nella finestra principale
-        return
+    def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
+        self._current_title = title or self.t('unknown')
+        self._current_artist = artist or ''
+        try:
+            self._current_duration_seconds = int(duration) if duration is not None else None
+            if self._current_duration_seconds is not None and self._current_duration_seconds <= 0:
+                self._current_duration_seconds = None
+        except Exception:
+            self._current_duration_seconds = None
+        # store start time
+        try:
+            self._current_start_epoch = float(start_ts) if start_ts is not None else None
+        except Exception:
+            self._current_start_epoch = None
+        # Ask UI to update label safely
+        try:
+            self.label_refresh.emit()
+        except Exception:
+            pass
+        # Tray notification unchanged (static) but invoked on UI thread via signal
+        try:
+            notify_enabled = (self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True))
+            if notify_enabled:
+                msg_title = self.i18n.t('now_playing_prefix')
+                body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
+                try:
+                    if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
+                        mmss = self._format_mmss(int(self._current_duration_seconds))
+                        if mmss:
+                            body += f" [{mmss}]"
+                except Exception:
+                    pass
+                self.notify_tray.emit(msg_title, body)
+        except Exception:
+            pass
 
-    def on_stream_selection_changed(self):
-        self.update_header_label()
-        if self.player.is_playing():
+    def _notify_tray(self, msg_title: str, body: str) -> None:
+        try:
+            tray = getattr(self, 'tray', None)
+            if not tray:
+                return
+            tray.showMessage(msg_title, body)
+        except Exception:
+            pass
+
+    # ------------------- Player events (from backends) -------------------
+    def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
+        try:
+            c = (code or '').lower()
+        except Exception:
+            c = str(code).lower() if code is not None else ''
+        try:
+            if c == 'opening':
+                self.status_changed.emit(self.t('status_opening'))
+                self.buffering_visible.emit(True)
+                self.buffering_progress.emit(0)
+            elif c == 'buffering':
+                self.buffering_visible.emit(True)
+                pct = None
+                try:
+                    pct = int(value) if value is not None else None
+                except Exception:
+                    pct = None
+                if pct is not None:
+                    self.buffering_progress.emit(max(0, min(100, pct)))
+                    try:
+                        self.status_changed.emit(self.i18n.t('status_buffering_pct').format(pct=pct))
+                    except Exception:
+                        self.status_changed.emit(self.t('status_buffering'))
+                else:
+                    self.status_changed.emit(self.t('status_buffering'))
+            elif c == 'playing':
+                self.buffering_visible.emit(False)
+                self.status_changed.emit(self.t('status_playing'))
+                self.tray_icon_refresh.emit()
+            elif c == 'paused':
+                self.status_changed.emit(self.t('status_paused'))
+            elif c == 'stopped':
+                self.buffering_visible.emit(False)
+                self.status_changed.emit(self.t('status_stopped'))
+                self.tray_icon_refresh.emit()
+            elif c == 'ended':
+                self.status_changed.emit(self.t('status_ended'))
+            elif c == 'libvlc_init_failed':
+                self.backend_status_refresh.emit()
+                try:
+                    self.status_changed.emit(self.i18n.t('vlc_not_found'))
+                except Exception:
+                    self.status_changed.emit(self.t('status_error'))
+            elif c == 'error':
+                self.buffering_visible.emit(False)
+                self.status_changed.emit(self.t('status_error'))
+            else:
+                # Unknown code, no-op
+                pass
+        except Exception:
+            # Defensive: never raise from callback
             try:
-                # Stop completely before switching streams
-                self.stop_stream()
-                # Wait a moment for complete stop
-                import time
-                time.sleep(0.5)
-                # Force cleanup to ensure no connections remain
-                self.player.force_cleanup()
-                # Start new stream
-                self.play_stream()
+                self.status_changed.emit(self.t('status_error'))
             except Exception:
                 pass
-
-    # ------------------- Configurazione VLC -------------------
-    def choose_libvlc_path(self):
-        # Non più utilizzato: il percorso di libVLC si imposta dalle Impostazioni
-        return
-
-    # ------------------- Player controls -------------------
-    def volume_changed(self, value: int):
-        self.player.set_volume(int(value))
-        self.settings.setValue(KEY_VOLUME, int(value))
-
-    def mute_toggled(self, checked: bool):
-        self.player.set_mute(bool(checked))
-        self.mute_button.setText(self.t('unmute') if checked else self.t('mute'))
-        self.settings.setValue(KEY_MUTE, 'true' if checked else 'false')
-        # Aggiorna testo azione tray per mute
+        # Update backend status indicator opportunistically
         try:
-            if hasattr(self, 'action_mute'):
-                self.action_mute.setText(self.i18n.t('tray_unmute') if checked else self.i18n.t('tray_mute'))
-                self._update_tray_action_icons()
+            self.backend_status_refresh.emit()
         except Exception:
             pass
 
-    def pause_resume(self):
+    # ------------------- WebSocket text handlers -------------------
+    def _on_ws_error_text(self, text: str) -> None:
         try:
-            # Se è in pausa (supportato dal backend ffmpeg), riprendi
-            if hasattr(self.player, 'is_paused') and self.player.is_paused():
-                self.player.pause_toggle()
-                return
-            # Se sta riproducendo, fai toggle pausa
-            if self.player.is_playing():
-                self.player.pause_toggle()
-                return
-            # Altrimenti, se non sta riproducendo, avvia lo stream
-            self.play_stream()
-        except Exception as e:
-            self.status_changed.emit(f"{self.t('status_error')} {e}")
+            self.status_changed.emit(str(text))
+        except Exception:
+            pass
 
-    def toggle_mute_shortcut(self):
-        # Simula il click del pulsante per mantenere la UI e le impostazioni in sync
+    def _on_ws_closed_text(self, text: str) -> None:
         try:
-            self.mute_button.toggle()
-        except Exception as e:
-            self.status_changed.emit(f"{self.t('status_error')} {e}")
+            self.status_changed.emit(str(text))
+        except Exception:
+            pass
 
-    def _on_player_event(self, code: str, value):
-        if code == 'opening':
-            self.status_changed.emit(self.t('status_opening'))
-            self.buffering_visible.emit(True)
-            self.buffering_progress.emit(0)
-            QTimer.singleShot(0, self.update_tray_icon)
-        elif code == 'buffering':
-            if value is not None:
-                self.buffering_visible.emit(True)
-                self.buffering_progress.emit(int(value))
-                self.status_changed.emit(self.t('status_buffering_pct', pct=int(value)))
+    # ------------------- Tray helpers (static) -------------------
+    def update_tray_texts(self) -> None:
+        try:
+            tray = getattr(self, 'tray', None)
+            if not tray:
+                return
+            # Tooltip statico: solo header e now playing attuale, senza stato dinamico
+            header = self.label.text() if hasattr(self, 'label') else APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tray.setToolTip(f"{header}\n{now}" if now else header)
+        except Exception:
+            pass
+
+    def update_tray_icon(self) -> None:
+        try:
+            tray = getattr(self, 'tray', None)
+            if not tray:
+                return
+            # Icona statica: usa l'icona della finestra corrente
+            tray.setIcon(self.windowIcon())
+        except Exception:
+            pass
+
+    def _ensure_tray(self, enabled: bool) -> None:
+        try:
+            if enabled:
+                if not hasattr(self, 'tray') or self.tray is None:
+                    self.tray = QSystemTrayIcon(self.windowIcon(), self)
+                    menu = QMenu()
+                    act_show = QAction(self.i18n.t('show_window'), self)
+                    act_show.triggered.connect(self.show)
+                    menu.addAction(act_show)
+                    act_quit = QAction(self.i18n.t('quit') if hasattr(self.i18n, 't') else 'Quit', self)
+                    act_quit.triggered.connect(QApplication.instance().quit)
+                    menu.addAction(act_quit)
+                    self.tray.setContextMenu(menu)
+                    self.tray.setVisible(True)
+                else:
+                    self.tray.setVisible(True)
+                self.update_tray_icon()
+                self.update_tray_texts()
             else:
-                self.buffering_visible.emit(True)
-                self.status_changed.emit(self.t('status_buffering'))
-        elif code == 'playing':
-            self.status_changed.emit(self.t('status_playing'))
-            self.buffering_visible.emit(False)
-            QTimer.singleShot(0, self.update_vlc_status_label)
-            QTimer.singleShot(0, self.update_tray_icon)
-        elif code == 'paused':
-            self.status_changed.emit(self.t('status_paused'))
-            QTimer.singleShot(0, self.update_tray_icon)
-        elif code == 'stopped':
-            self.status_changed.emit(self.t('status_stopped'))
-            self.buffering_visible.emit(False)
-            QTimer.singleShot(0, self.update_tray_icon)
-        elif code == 'ended':
-            self.status_changed.emit(self.t('status_ended'))
-            self.buffering_visible.emit(False)
-            QTimer.singleShot(0, self.update_tray_icon)
-        elif code == 'libvlc_init_failed':
-            self.status_changed.emit(self.t('libvlc_init_failed'))
-            self.buffering_visible.emit(False)
-            QTimer.singleShot(0, self.update_vlc_status_label)
-            QTimer.singleShot(0, self.update_tray_icon)
-        elif code == 'error':
-            # Fallback generic error
-            self.status_changed.emit(self.t('status_error'))
-            self.buffering_visible.emit(False)
-            QTimer.singleShot(0, self.update_tray_icon)
+                if hasattr(self, 'tray') and self.tray:
+                    try:
+                        self.tray.setVisible(False)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
-    # ------------------- Playback -------------------
-    def play_stream(self):
+    # ------------------- Backend status -------------------
+    def update_vlc_status_label(self) -> None:
+        try:
+            ok = bool(self.player and self.player.is_ready())
+            # Aggiorna pallino colore
+            try:
+                self.vlc_status_icon.setStyleSheet(
+                    "background-color: #2e7d32; border-radius: 5px;" if ok else
+                    "background-color: #c62828; border-radius: 5px;"
+                )
+            except Exception:
+                pass
+            # Testo: se disponibile versione, mostralo
+            txt = None
+            try:
+                ver = self.player.get_version()
+                if ver:
+                    txt = f"{ver}"
+            except Exception:
+                txt = None
+            if not ok:
+                self.vlc_status.setText(self.i18n.t('vlc_not_found'))
+            else:
+                self.vlc_status.setText(txt or "Audio backend OK")
+        except Exception:
+            pass
+
+    # ------------------- Player controls -------------------
+    def play_stream(self) -> None:
         try:
             with self._playback_lock:
-                if not self.player.is_ready():
-                    return
-                # Non impostare 'opening' se è in pausa: in quel caso si fa toggle
-                if hasattr(self.player, 'is_paused') and self.player.is_paused():
-                    print("[DEBUG] play_stream: player is paused, resuming instead of opening new stream")
-                    self.player.pause_toggle()
-                    # Allinea UI e tray
-                    self.player.set_volume(self.volume_slider.value())
-                    self.player.set_mute(self.mute_button.isChecked())
-                    self.update_vlc_status_label()
-                    self.update_tray_icon()
-                    self.status_changed.emit(self.t('status_playing'))
-                    return
-                # Se è già in riproduzione, non mostrare 'apertura'
-                if self.player.is_playing():
-                    print("[DEBUG] play_stream: player is already playing, no re-open.")
-                    # Sincronizza UI e stato
-                    self.player.set_volume(self.volume_slider.value())
-                    self.player.set_mute(self.mute_button.isChecked())
-                    self.update_vlc_status_label()
-                    self.update_tray_icon()
-                    self.status_changed.emit(self.t('status_playing'))
-                    return
-                # Solo qui stiamo veramente aprendo un nuovo stream
-                self.status_changed.emit(self.t('status_opening'))
-                raw_url = self.get_selected_stream_url()
-                # Sanitize URL robusta: prova prima ad estrarre direttamente da raw, poi fallback a filtro/regex
-                pattern = r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+"
-                m_raw = re.search(pattern, raw_url)
-                if m_raw:
-                    safe_url = m_raw.group(0)
+                url = self.get_selected_stream_url()
+                self.status_changed.emit(self.t('status_connecting') if hasattr(self, 't') else 'Connecting...')
+                ok = self.player.play_url(url)
+                if not ok:
+                    self.status_changed.emit(self.t('status_error'))
                 else:
-                    filtered = ''.join(ch for ch in raw_url if (ch.isalnum() or ch in "-._~:/?#[]@!$&()*+,;=%"))
-                    m_f = re.search(pattern, filtered)
-                    safe_url = m_f.group(0) if m_f else filtered.strip()
-                print(f"[DEBUG] play_stream: sanitized url before play: {safe_url!r} from raw: {raw_url!r}")
-                self.player.play_url(safe_url)
-                # Allinea UI e tray dopo l'avvio
-                self.player.set_volume(self.volume_slider.value())
-                self.player.set_mute(self.mute_button.isChecked())
-                self.update_vlc_status_label()
-                self.update_tray_icon()
+                    try:
+                        if hasattr(self, '_icon_play') and not self._icon_play.isNull():
+                            self.setWindowIcon(self._icon_play)
+                    except Exception:
+                        pass
+                    self.tray_icon_refresh.emit()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
+
+    def pause_resume(self) -> None:
+        try:
+            with self._playback_lock:
+                self.player.pause_toggle()
+        except Exception as e:
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
+
+    def volume_changed(self, value: int) -> None:
+        try:
+            self.player.set_volume(int(value))
+            self.settings.setValue(KEY_VOLUME, int(value))
+        except Exception:
+            pass
+
+    def mute_toggled(self, checked: bool) -> None:
+        try:
+            self.player.set_mute(bool(checked))
+            try:
+                self.mute_button.setText(self.i18n.t('unmute') if checked else self.i18n.t('mute'))
+            except Exception:
+                pass
+            self.settings.setValue(KEY_MUTE, bool(checked))
+        except Exception:
+            pass
+
+    def toggle_mute_shortcut(self) -> None:
+        try:
+            self.mute_button.setChecked(not self.mute_button.isChecked())
+        except Exception:
+            pass
+
+    def force_stop_all(self) -> None:
+        try:
+            self.player.force_cleanup()
+            self.status_changed.emit(self.t('status_force_stop') if hasattr(self, 't') else 'Force stop executed')
+            self.tray_icon_refresh.emit()
+        except Exception:
+            pass
 
     def stop_stream(self):
         try:
@@ -543,376 +703,16 @@ class ListenMoePlayer(QWidget):
             with self._playback_lock:
                 self.player.stop()
                 self.status_changed.emit(self.t('status_stopped'))
-                self.update_tray_icon()
+                self.tray_icon_refresh.emit()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
-    
-    def force_stop_all(self):
-        """Emergency stop - force kill all VLC processes."""
+        
+        # Reset window title (timer keeps running in UI thread)
         try:
-            self.player.force_kill_all_vlc()
-            self.status_changed.emit("Force stopped all VLC processes")
-            self.update_tray_icon()
-        except Exception as e:
-            self.status_changed.emit(f"Force stop error: {e}")
-
-    # ------------------- Tray helpers -------------------
-    def _create_tray(self):
-        try:
-            self.tray = QSystemTrayIcon(self)
-            self.update_tray_icon()
-            self.tray_menu = QMenu(self)
-            # Create actions without using constructor overloads that type-checkers flag
-            self.action_show = QAction(self.i18n.t('tray_show'), self)
-            self.action_show.triggered.connect(self._tray_show)
-            self.action_hide = QAction(self.i18n.t('tray_hide'), self)
-            self.action_hide.triggered.connect(self.hide)
-            self.action_play_pause = QAction(self.i18n.t('tray_play_pause'), self)
-            self.action_play_pause.triggered.connect(self.pause_resume)
-            self.action_stop = QAction(self.i18n.t('tray_stop'), self)
-            self.action_stop.triggered.connect(self.stop_stream)
-            self.action_mute = QAction(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'), self)
-            self.action_mute.triggered.connect(self.toggle_mute_shortcut)
-            self.action_quit = QAction(self.i18n.t('tray_quit'), self)
-            try:
-                app_quit = getattr(QApplication.instance(), "quit", None)
-                if callable(app_quit):
-                    def _tray_quit_slot():
-                        app_quit()
-                        return None
-                    self.action_quit.triggered.connect(_tray_quit_slot)
-            except Exception:
-                pass
-
-            # Sottomenu Canale
-            self.menu_channel = QMenu(self.i18n.t('tray_channel'), self.tray_menu)
-            self.channel_group = QActionGroup(self)
-            self.channel_group.setExclusive(True)
-            self.action_channel_jpop = QAction("J-POP", self)
-            self.action_channel_jpop.setCheckable(True)
-            self.action_channel_kpop = QAction("K-POP", self)
-            self.action_channel_kpop.setCheckable(True)
-            self.channel_group.addAction(self.action_channel_jpop)
-            self.channel_group.addAction(self.action_channel_kpop)
-            self.menu_channel.addAction(self.action_channel_jpop)
-            self.menu_channel.addAction(self.action_channel_kpop)
-            # use small named functions instead of lambdas to keep slot type simple for Pylance
-            def _tray_select_jpop() -> None:
-                try:
-                    self._on_tray_channel_select("J-POP")
-                except Exception:
-                    pass
-
-            def _tray_select_kpop() -> None:
-                try:
-                    self._on_tray_channel_select("K-POP")
-                except Exception:
-                    pass
-
-            self.action_channel_jpop.triggered.connect(_tray_select_jpop)
-            self.action_channel_kpop.triggered.connect(_tray_select_kpop)
-
-            # Sottomenu Formato (codec)
-            self.menu_format = QMenu(self.i18n.t('tray_format'), self.tray_menu)
-            self.format_group = QActionGroup(self)
-            self.format_group.setExclusive(True)
-            self.action_format_vorbis = QAction("Vorbis", self)
-            self.action_format_vorbis.setCheckable(True)
-            self.action_format_mp3 = QAction("MP3", self)
-            self.action_format_mp3.setCheckable(True)
-            self.format_group.addAction(self.action_format_vorbis)
-            self.format_group.addAction(self.action_format_mp3)
-            self.menu_format.addAction(self.action_format_vorbis)
-            self.menu_format.addAction(self.action_format_mp3)
-            def _tray_select_vorbis() -> None:
-                try:
-                    self._on_tray_format_select("Vorbis")
-                except Exception:
-                    pass
-
-            def _tray_select_mp3() -> None:
-                try:
-                    self._on_tray_format_select("MP3")
-                except Exception:
-                    pass
-
-            self.action_format_vorbis.triggered.connect(_tray_select_vorbis)
-            self.action_format_mp3.triggered.connect(_tray_select_mp3)
-
-            # Monta menu
-            self.tray_menu.addAction(self.action_show)
-            self.tray_menu.addAction(self.action_hide)
-            self.tray_menu.addSeparator()
-            self.tray_menu.addMenu(self.menu_channel)
-            self.tray_menu.addMenu(self.menu_format)
-            self.tray_menu.addSeparator()
-            self.tray_menu.addAction(self.action_play_pause)
-            self.tray_menu.addAction(self.action_stop)
-            self.tray_menu.addAction(self.action_mute)
-            self.tray_menu.addSeparator()
-            self.tray_menu.addAction(self.action_quit)
-
-            self.tray.setContextMenu(self.tray_menu)
-            try:
-                if hasattr(self, 'tray') and self.tray:
-                    self.tray.setToolTip(APP_TITLE)
-            except Exception:
-                pass
-            self.tray.activated.connect(self._on_tray_activated)
-            self.tray.show()
-
-            # Stato iniziale check sottomenu
-            self._update_tray_stream_checks()
-            # Aggiorna icone dopo la costruzione del menu
-            self._update_tray_action_icons()
+            self.setWindowTitle(APP_TITLE)
         except Exception:
             pass
 
-    def _tray_show(self) -> None:
-        # metodo separato per compatibilità con i type-stub (evita lambda che ritorna tuple)
-        try:
-            self.showNormal()
-            self.activateWindow()
-        except Exception:
-            pass
-
-    def _destroy_tray(self):
-        try:
-            if hasattr(self, 'tray') and self.tray is not None:
-                self.tray.hide()
-                self.tray.deleteLater()
-                self.tray = None
-        except Exception:
-            pass
-
-    def _ensure_tray(self, enabled: bool):
-        if enabled and (not hasattr(self, 'tray') or self.tray is None):
-            self._create_tray()
-        elif (not enabled) and hasattr(self, 'tray') and self.tray is not None:
-            self._destroy_tray()
-    def _on_tray_activated(self, reason):
-        try:
-            if reason == getattr(QSystemTrayIcon, 'Trigger', reason):
-                if self.isHidden():
-                    self.showNormal()
-                    self.activateWindow()
-                else:
-                    self.hide()
-        except Exception:
-            pass
-
-    def update_tray_texts(self):
-        try:
-            if hasattr(self, 'action_show'):
-                self.action_show.setText(self.i18n.t('tray_show'))
-            if hasattr(self, 'action_hide'):
-                self.action_hide.setText(self.i18n.t('tray_hide'))
-            if hasattr(self, 'action_play_pause'):
-                self.action_play_pause.setText(self.i18n.t('tray_play_pause'))
-            if hasattr(self, 'action_stop'):
-                self.action_stop.setText(self.i18n.t('tray_stop'))
-            if hasattr(self, 'action_mute'):
-                self.action_mute.setText(self.i18n.t('tray_unmute') if self.mute_button.isChecked() else self.i18n.t('tray_mute'))
-            if hasattr(self, 'action_quit'):
-                self.action_quit.setText(self.i18n.t('tray_quit'))
-            if hasattr(self, 'menu_channel'):
-                self.menu_channel.setTitle(self.i18n.t('tray_channel'))
-            if hasattr(self, 'menu_format'):
-                self.menu_format.setTitle(self.i18n.t('tray_format'))
-            # guard self.tray to avoid "possibly None" diagnostics
-            tray = getattr(self, 'tray', None)
-            if tray:
-                try:
-                    tray.setToolTip(APP_TITLE)
-                except Exception:
-                    pass
-            # Aggiorna check su cambio lingua
-            self._update_tray_stream_checks()
-            # Aggiorna icone su cambio lingua/stato
-            self._update_tray_action_icons()
-        except Exception:
-            pass
-
-    def _update_tray_stream_checks(self):
-         try:
-             ch = self.settings.value(KEY_CHANNEL, 'J-POP')
-             fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
-             if hasattr(self, 'action_channel_jpop'):
-                 is_j = str(ch).upper().startswith('J')
-                 self.action_channel_jpop.setChecked(is_j)
-                 try:
-                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
-                     self.action_channel_jpop.setIcon(icon_ok if (icon_ok and is_j) else QIcon())
-                 except Exception:
-                     pass
-             if hasattr(self, 'action_channel_kpop'):
-                 is_k = str(ch).upper().startswith('K')
-                 self.action_channel_kpop.setChecked(is_k)
-                 try:
-                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
-                     self.action_channel_kpop.setIcon(icon_ok if (icon_ok and is_k) else QIcon())
-                 except Exception:
-                     pass
-             if hasattr(self, 'action_format_vorbis'):
-                 is_v = (fmt == 'Vorbis')
-                 self.action_format_vorbis.setChecked(is_v)
-                 try:
-                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
-                     self.action_format_vorbis.setIcon(icon_ok if (icon_ok and is_v) else QIcon())
-                 except Exception:
-                     pass
-             if hasattr(self, 'action_format_mp3'):
-                 is_m = (fmt == 'MP3')
-                 self.action_format_mp3.setChecked(is_m)
-                 try:
-                     icon_ok = self._icon_status_ok if hasattr(self, '_icon_status_ok') else None
-                     self.action_format_mp3.setIcon(icon_ok if (icon_ok and is_m) else QIcon())
-                 except Exception:
-                     pass
-         except Exception:
-             pass
-
-    def _tray_notify_selection(self):
-        try:
-            tray = getattr(self, 'tray', None)
-            if not tray:
-                return
-            if not (self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True)):
-                return
-            ch = self.settings.value(KEY_CHANNEL, 'J-POP')
-            fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
-            title = APP_TITLE
-            body = f"{self.i18n.t('channel_label')} {ch} — {self.i18n.t('format_label')} {fmt}"
-            try:
-                tray.showMessage(title, body)
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    # Handlers invoked from tray menu (were missing and caused crashes)
-    def _on_tray_channel_select(self, channel: str) -> None:
-        try:
-            # Persist selection
-            self.settings.setValue(KEY_CHANNEL, channel)
-            # Update UI & tray checks
-            self._update_tray_stream_checks()
-            self.update_header_label()
-            # Notify via tray
-            self._tray_notify_selection()
-            # If currently playing, trigger a safe restart
-            try:
-                if self.player and self.player.is_playing():
-                    # use QTimer to avoid blocking the tray callback stack
-                    QTimer.singleShot(50, self.on_stream_selection_changed)
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    def _on_tray_format_select(self, fmt: str) -> None:
-        try:
-            # Persist selection
-            self.settings.setValue(KEY_FORMAT, fmt)
-            # Update UI & tray checks
-            self._update_tray_stream_checks()
-            self.update_header_label()
-            # Notify via tray
-            self._tray_notify_selection()
-            # If currently playing, trigger a safe restart
-            try:
-                if self.player and self.player.is_playing():
-                    QTimer.singleShot(50, self.on_stream_selection_changed)
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    # Minimal tray icon updater used in several places
-    def update_tray_icon(self) -> None:
-        try:
-            tray = getattr(self, 'tray', None)
-            if not tray:
-                return
-            # Prefer play icon when playing, stop icon otherwise (fallback guarded)
-            icon = None
-            try:
-                icon = self._icon_play if (self.player and self.player.is_playing()) else self._icon_stop
-            except Exception:
-                icon = getattr(self, '_icon_stop', None)
-            if icon and not icon.isNull():
-                tray.setIcon(icon)
-        except Exception:
-            pass
-
-    def _update_tray_action_icons(self) -> None:
-        try:
-            # Update a few common action icons if available (no crash if absent)
-            icon_play = getattr(self, '_icon_play', None)
-            icon_stop = getattr(self, '_icon_stop', None)
-            icon_ok = getattr(self, '_icon_status_ok', None)
-            if hasattr(self, 'action_play_pause') and icon_play and not icon_play.isNull():
-                try:
-                    self.action_play_pause.setIcon(icon_play)
-                except Exception:
-                    pass
-            if hasattr(self, 'action_stop') and icon_stop and not icon_stop.isNull():
-                try:
-                    self.action_stop.setIcon(icon_stop)
-                except Exception:
-                    pass
-            # Decorative check icons for channel/format actions
-            try:
-                if hasattr(self, 'action_channel_jpop') and icon_ok:
-                    self.action_channel_jpop.setIcon(icon_ok if self.action_channel_jpop.isChecked() else QIcon())
-                if hasattr(self, 'action_channel_kpop') and icon_ok:
-                    self.action_channel_kpop.setIcon(icon_ok if self.action_channel_kpop.isChecked() else QIcon())
-                if hasattr(self, 'action_format_vorbis') and icon_ok:
-                    self.action_format_vorbis.setIcon(icon_ok if self.action_format_vorbis.isChecked() else QIcon())
-                if hasattr(self, 'action_format_mp3') and icon_ok:
-                    self.action_format_mp3.setIcon(icon_ok if self.action_format_mp3.isChecked() else QIcon())
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    def _on_now_playing(self, title: str, artist: str):
-        self._current_title = title or self.t('unknown')
-        self._current_artist = artist or ''
-        QTimer.singleShot(0, self.update_now_playing_label)
-        # Tray notification: schedule on main (GUI) thread to avoid crashes from WS thread
-        try:
-            # prepare strings now (safe to compute in WS thread)
-            msg_title = self.i18n.t('now_playing_prefix')
-            body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
-            notify_enabled = (self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True))
-            if not notify_enabled:
-                return
-
-            # Use QTimer.singleShot(0, ...) so the actual tray API runs on the Qt main thread
-            def _do_notify(msg_title=msg_title, body=body):
-                try:
-                    tray = getattr(self, 'tray', None)
-                    if not tray:
-                        return
-                    try:
-                        tray.showMessage(msg_title, body)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-
-            QTimer.singleShot(0, _do_notify)
-        except Exception:
-            pass
-
-    def _on_ws_error_text(self, error_text: str):
-        self.now_playing_changed.emit(self.t('ws_error_prefix') + error_text)
-
-    def _on_ws_closed_text(self, _):
-        self.now_playing_changed.emit(self.t('ws_closed_reconnect'))
-
-    # ------------------- Window -------------------
     def closeEvent(self, a0):
         # usare nome a0 per compatibilità con gli stub Qt e Pylance
         try:
