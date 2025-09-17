@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
-    QSlider, QProgressBar, QShortcut,
-    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog
+    QSlider, QProgressBar, QShortcut, QSpinBox,
+    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog, QMessageBox
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
 from PyQt5.QtGui import QKeySequence, QIcon
@@ -29,6 +29,8 @@ from constants import (
     KEY_TRAY_NOTIFICATIONS,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
+    KEY_DARK_MODE,
+    KEY_SLEEP_MINUTES,
 )
 import threading
 
@@ -42,6 +44,8 @@ class ListenMoePlayer(QWidget):
     tray_icon_refresh = pyqtSignal()
     backend_status_refresh = pyqtSignal()
     notify_tray = pyqtSignal(str, str)
+    # Control QProgressBar range (determinate vs indeterminate)
+    buffering_indeterminate = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__()
@@ -57,8 +61,8 @@ class ListenMoePlayer(QWidget):
 
         self.setWindowTitle(APP_TITLE)
         # Riduci leggermente la dimensione iniziale della finestra
-        self.resize(480, 390)
-        self.setMinimumSize(500, 380)
+        self.resize(480, 430)
+        self.setMinimumSize(500, 400)
         # uso _layout per non sovrascrivere QWidget.layout()
         self._layout = QVBoxLayout()
 
@@ -145,6 +149,32 @@ class ListenMoePlayer(QWidget):
         self._layout.addWidget(self.stop_button)
         self._layout.addWidget(self.force_stop_button)
         self._layout.addLayout(vol_row)
+
+        # Sleep Timer row
+        sleep_row = QHBoxLayout()
+        self.sleep_title = QLabel(self.i18n.t('sleep_timer'))
+        self.sleep_minutes_label = QLabel(self.i18n.t('sleep_minutes'))
+        self.spin_sleep = QSpinBox()
+        self.spin_sleep.setRange(1, 300)
+        try:
+            default_sleep = int(self.settings.value(KEY_SLEEP_MINUTES, 30))
+        except Exception:
+            default_sleep = 30
+        self.spin_sleep.setValue(default_sleep)
+        self.btn_sleep_start = QPushButton(self.i18n.t('sleep_start'))
+        self.btn_sleep_cancel = QPushButton(self.i18n.t('sleep_cancel'))
+        self.btn_sleep_start.clicked.connect(self.sleep_start_clicked)
+        self.btn_sleep_cancel.clicked.connect(self.sleep_cancel_clicked)
+        sleep_row.addWidget(self.sleep_title)
+        sleep_row.addStretch(1)
+        sleep_row.addWidget(self.sleep_minutes_label)
+        sleep_row.addWidget(self.spin_sleep)
+        sleep_row.addWidget(self.btn_sleep_start)
+        sleep_row.addWidget(self.btn_sleep_cancel)
+        self._layout.addLayout(sleep_row)
+        self.sleep_label = QLabel("")
+        self._layout.addWidget(self.sleep_label)
+
         self.setLayout(self._layout)
 
         # Shortcuts
@@ -169,32 +199,38 @@ class ListenMoePlayer(QWidget):
         self.mute_button.toggled.connect(self.mute_toggled)
         self.status_changed.connect(self.status_label.setText)
         self.now_playing_changed.connect(self.now_playing_label.setText)
-        self.buffering_progress.connect(self.buffer_bar.setValue)
-        self.buffering_visible.connect(self.buffer_bar.setVisible)
-        # New cross-thread safe connections
-        self.label_refresh.connect(self.update_now_playing_label)
-        self.tray_icon_refresh.connect(self.update_tray_icon)
-        self.backend_status_refresh.connect(self.update_vlc_status_label)
-        self.notify_tray.connect(self._notify_tray)
-        
-        # Player wrapper - try ffmpeg first, fallback to VLC
+        # Reconnect buffering and cross-thread UI signals
         try:
-            self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
-            if not self.player.is_ready():
-                # Fallback to VLC if ffmpeg player not available
-                libvlc_path = self.settings.value(KEY_LIBVLC_PATH, None)
-                try:
-                    network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
-                except Exception:
-                    network_caching = 1000
-                self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=libvlc_path, network_caching_ms=network_caching)
+            self.buffering_progress.connect(self.buffer_bar.setValue)
+            self.buffering_visible.connect(self.buffer_bar.setVisible)
+            self.buffering_indeterminate.connect(self._set_buffer_bar_indeterminate)
+            self.label_refresh.connect(self.update_now_playing_label)
+            self.tray_icon_refresh.connect(self.update_tray_icon)
+            self.backend_status_refresh.connect(self.update_vlc_status_label)
+            self.notify_tray.connect(self._notify_tray)
         except Exception:
-            # Fallback to VLC
-            libvlc_path = self.settings.value(KEY_LIBVLC_PATH, None)
-            try:
-                network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
-            except Exception:
-                network_caching = 1000
+            pass
+
+        # Sleep timer runtime
+        self._sleep_timer: Optional[QTimer] = QTimer(self)
+        try:
+            self._sleep_timer.setInterval(1000)
+            self._sleep_timer.timeout.connect(self._sleep_tick)
+        except Exception:
+            pass
+        self._sleep_remaining_sec: int = 0
+        self._sleep_fadeout_sec: int = 15
+        self._sleep_saved_volume: Optional[int] = None
+
+        # Initialize audio backend
+        libvlc_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
+        try:
+            network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+        except Exception:
+            network_caching = 1000
+        try:
+            self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None), network_caching_ms=network_caching)
+        except Exception:
             self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=libvlc_path, network_caching_ms=network_caching)
         
         if not self.player.is_ready():
@@ -244,14 +280,11 @@ class ListenMoePlayer(QWidget):
             pass
 
         self.update_header_label()
-
-    # ------------------- i18n -------------------
-    def on_lang_changed(self, idx: int):
-        # Legge e applica la lingua da QSettings (widget lingua rimosso)
-        lang = self.settings.value(KEY_LANG, 'it')
-        self.i18n.set_lang('it' if lang not in ('it', 'en') else lang)
-        self.settings.setValue(KEY_LANG, self.i18n.lang)
-        self.apply_translations()
+        # Apply theme (dark/light)
+        try:
+            self.apply_theme()
+        except Exception:
+            pass
 
     def apply_translations(self):
         # Mantieni titolo costante
@@ -265,10 +298,54 @@ class ListenMoePlayer(QWidget):
         self.mute_button.setText(self.i18n.t('unmute') if self.mute_button.isChecked() else self.i18n.t('mute'))
         if hasattr(self, 'settings_button'):
             self.settings_button.setText(self.i18n.t('settings_button'))
+        # Sleep UI texts
+        if hasattr(self, 'sleep_title'):
+            self.sleep_title.setText(self.i18n.t('sleep_timer'))
+        if hasattr(self, 'sleep_minutes_label'):
+            self.sleep_minutes_label.setText(self.i18n.t('sleep_minutes'))
+        if hasattr(self, 'btn_sleep_start'):
+            self.btn_sleep_start.setText(self.i18n.t('sleep_start'))
+        if hasattr(self, 'btn_sleep_cancel'):
+            self.btn_sleep_cancel.setText(self.i18n.t('sleep_cancel'))
         self.update_header_label()
         self.update_now_playing_label()
         self.update_tray_texts()
         self.update_vlc_status_label()
+
+    def apply_theme(self) -> None:
+        try:
+            dark = self._get_bool(KEY_DARK_MODE, False)
+            app = QApplication.instance()
+            if not app:
+                return
+            if dark:
+                app.setStyleSheet(
+                    """
+                    QWidget { background-color: #121212; color: #e0e0e0; }
+                    QPushButton { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px; }
+                    QPushButton:hover { background-color: #2a2a2a; }
+                    QLineEdit, QSpinBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; }
+                    QComboBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; }
+                    QMenu { background-color: #121212; color: #e0e0e0; }
+                    QProgressBar { background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; }
+                    QProgressBar::chunk { background-color: #3a86ff; }
+                    QSlider::groove:horizontal { height: 6px; background: #333; }
+                    QSlider::handle:horizontal { background: #ddd; width: 12px; margin: -4px 0; border-radius: 6px; }
+                    """
+                )
+            else:
+                app.setStyleSheet("")
+        except Exception:
+            pass
+
+    def _set_buffer_bar_indeterminate(self, active: bool) -> None:
+        try:
+            if active:
+                self.buffer_bar.setRange(0, 0)
+            else:
+                self.buffer_bar.setRange(0, 100)
+        except Exception:
+            pass
 
     def update_header_label(self):
         try:
@@ -298,6 +375,7 @@ class ListenMoePlayer(QWidget):
                 prev_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
             except Exception:
                 prev_nc = 1000
+            prev_dark = self._get_bool(KEY_DARK_MODE, False)
             dlg = SettingsDialog(self)
             if dlg.exec_() == QDialog.Accepted:
                 # Lingua
@@ -313,41 +391,115 @@ class ListenMoePlayer(QWidget):
                 # Percorso VLC
                 new_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
                 path_changed = (prev_path != new_path)
+                # Theme
+                new_dark = self._get_bool(KEY_DARK_MODE, False)
+                if new_dark != prev_dark:
+                    self.apply_theme()
+                # Ricalibra network caching status
+                self.update_vlc_status_label()
+                # Se backend/path è cambiato o network-caching è variato sensibile, riavvia
                 try:
                     new_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
                 except Exception:
                     new_nc = 1000
-                nc_changed = (new_nc != prev_nc)
-                if path_changed or nc_changed:
-                    if not self.player.reinitialize(new_path, network_caching_ms=new_nc):
-                        self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
-                # Tray enable/disable come da prima
-                new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
-                self._ensure_tray(new_tray_enabled)
-                self.update_tray_texts()
-                self.update_tray_icon()
-                self.update_vlc_status_label()
-                # Autoriavvio se servono cambiamenti
-                new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
-                new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
-                selection_changed = (new_channel != prev_channel) or (new_format != prev_format)
-                # Se cambia il canale, riavvia anche il WebSocket verso l'endpoint corretto
-                if new_channel != prev_channel:
-                    # ... (riavvio websocket) ...
-                    pass
-                # SOLO se serve, ferma e riavvia lo stream
-                if was_playing and (selection_changed or path_changed or nc_changed):
+                if path_changed or new_nc != prev_nc:
                     self.status_changed.emit(self.t('status_restarting'))
-                    self.stop_stream()
                     import time
                     time.sleep(0.5)
-                    self.player.force_cleanup()
-                    QTimer.singleShot(100, self.play_stream)
+                    # Recreate player with new settings
+                    try:
+                        self.player.stop()
+                    except Exception:
+                        pass
+                    try:
+                        self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None), network_caching_ms=new_nc)
+                    except Exception:
+                        self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
+                    self.player.set_volume(self.volume_slider.value())
+                    self.player.set_mute(self.mute_button.isChecked())
+                    self.update_vlc_status_label()
+                # Tray visibility may have changed
+                new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+                if new_tray_enabled != prev_tray_enabled:
+                    self._ensure_tray(new_tray_enabled)
         except Exception:
             pass
 
     def t(self, key: str, **kwargs) -> str:
-        return self.i18n.t(key, **kwargs)
+        try:
+            return self.i18n.t(key, **kwargs)
+        except Exception:
+            return key
+
+    # Sleep timer logic
+    def sleep_start_clicked(self) -> None:
+        try:
+            minutes = int(self.spin_sleep.value()) if hasattr(self, 'spin_sleep') else 0
+            if minutes <= 0:
+                minutes = 1
+            self.settings.setValue(KEY_SLEEP_MINUTES, int(minutes))
+            self._sleep_remaining_sec = int(minutes * 60)
+            self._sleep_fadeout_sec = min(30, max(10, int(0.2 * self._sleep_remaining_sec))) if self._sleep_remaining_sec > 60 else min(15, self._sleep_remaining_sec)
+            self._sleep_saved_volume = int(self.volume_slider.value()) if hasattr(self, 'volume_slider') else 80
+            try:
+                if self._sleep_timer and not self._sleep_timer.isActive():
+                    self._sleep_timer.start()
+                elif self._sleep_timer:
+                    # restart
+                    self._sleep_timer.stop()
+                    self._sleep_timer.start()
+            except Exception:
+                pass
+            if hasattr(self, 'sleep_label'):
+                self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+        except Exception:
+            pass
+
+    def sleep_cancel_clicked(self) -> None:
+        try:
+            if self._sleep_timer and self._sleep_timer.isActive():
+                self._sleep_timer.stop()
+            # restore volume if we had saved it
+            if self._sleep_saved_volume is not None and hasattr(self, 'volume_slider'):
+                try:
+                    self.volume_slider.setValue(int(self._sleep_saved_volume))
+                except Exception:
+                    pass
+            self._sleep_remaining_sec = 0
+            self._sleep_saved_volume = None
+            if hasattr(self, 'sleep_label'):
+                self.sleep_label.setText("")
+        except Exception:
+            pass
+
+    def _sleep_tick(self) -> None:
+        try:
+            if self._sleep_remaining_sec <= 0:
+                # Finalize
+                if self._sleep_timer and self._sleep_timer.isActive():
+                    self._sleep_timer.stop()
+                if hasattr(self, 'sleep_label'):
+                    self.sleep_label.setText("")
+                self._sleep_saved_volume = None
+                try:
+                    self.stop_stream()
+                except Exception:
+                    pass
+                return
+            # Decrement
+            self._sleep_remaining_sec -= 1
+            # Fade-out near the end
+            if self._sleep_saved_volume is not None and self._sleep_remaining_sec <= self._sleep_fadeout_sec:
+                try:
+                    new_vol = max(0, int(self._sleep_saved_volume * self._sleep_remaining_sec / max(1, self._sleep_fadeout_sec)))
+                    if hasattr(self, 'volume_slider'):
+                        self.volume_slider.setValue(new_vol)
+                except Exception:
+                    pass
+            if hasattr(self, 'sleep_label'):
+                self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+        except Exception:
+            pass
 
     def _get_ws_url_for_channel(self, channel: str):
         # Al momento il gateway WS è unico per canali J-POP/K-POP.
@@ -496,34 +648,54 @@ class ListenMoePlayer(QWidget):
         try:
             if c == 'opening':
                 self.status_changed.emit(self.t('status_opening'))
+                self.buffering_indeterminate.emit(True)
                 self.buffering_visible.emit(True)
                 self.buffering_progress.emit(0)
             elif c == 'buffering':
-                self.buffering_visible.emit(True)
+                # Mostra la barra solo se non abbiamo già completato
                 pct = None
                 try:
                     pct = int(value) if value is not None else None
                 except Exception:
                     pct = None
                 if pct is not None:
+                    # Passa a modalità determinata e aggiorna progresso
+                    self.buffering_indeterminate.emit(False)
                     self.buffering_progress.emit(max(0, min(100, pct)))
+                    # Aggiorna stato con percentuale
                     try:
                         self.status_changed.emit(self.i18n.t('status_buffering_pct').format(pct=pct))
                     except Exception:
                         self.status_changed.emit(self.t('status_buffering'))
+                    # Se siamo al 100% nascondi subito la barra per evitare flicker
+                    if pct >= 100:
+                        self.buffering_visible.emit(False)
+                    else:
+                        self.buffering_visible.emit(True)
                 else:
+                    # Percentuale non disponibile: mostra stato generico e barra indeterminata
                     self.status_changed.emit(self.t('status_buffering'))
+                    self.buffering_indeterminate.emit(True)
+                    self.buffering_visible.emit(True)
             elif c == 'playing':
                 self.buffering_visible.emit(False)
+                self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_playing'))
                 self.tray_icon_refresh.emit()
             elif c == 'paused':
+                # In pausa la barra di buffering non è utile: nascondila
+                self.buffering_visible.emit(False)
+                self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_paused'))
             elif c == 'stopped':
                 self.buffering_visible.emit(False)
+                self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_stopped'))
                 self.tray_icon_refresh.emit()
             elif c == 'ended':
+                # Fine stream: nascondi la barra
+                self.buffering_visible.emit(False)
+                self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_ended'))
             elif c == 'libvlc_init_failed':
                 self.backend_status_refresh.emit()
@@ -533,6 +705,7 @@ class ListenMoePlayer(QWidget):
                     self.status_changed.emit(self.t('status_error'))
             elif c == 'error':
                 self.buffering_visible.emit(False)
+                self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_error'))
             else:
                 # Unknown code, no-op
@@ -643,6 +816,34 @@ class ListenMoePlayer(QWidget):
     def play_stream(self) -> None:
         try:
             with self._playback_lock:
+                # Safeguard: se il volume è 0 e non sei in muto, chiedi se ripristinare a 20%
+                try:
+                    vol = int(self.volume_slider.value()) if hasattr(self, 'volume_slider') else int(self.player.get_volume())
+                    is_muted = bool(self.mute_button.isChecked()) if hasattr(self, 'mute_button') else bool(self.player.get_mute())
+                except Exception:
+                    vol = 0
+                    is_muted = False
+                if vol <= 0 and not is_muted:
+                    try:
+                        msg = QMessageBox(self)
+                        msg.setWindowTitle(self.i18n.t('volume_zero_title'))
+                        msg.setText(self.i18n.t('volume_zero_text'))
+                        restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.AcceptRole)
+                        cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
+                        msg.setIcon(QMessageBox.Question)
+                        msg.exec_()
+                        if msg.clickedButton() == restore_btn:
+                            if hasattr(self, 'volume_slider'):
+                                self.volume_slider.setValue(20)
+                            else:
+                                self.player.set_volume(20)
+                            try:
+                                self.settings.setValue(KEY_VOLUME, 20)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
                 url = self.get_selected_stream_url()
                 self.status_changed.emit(self.t('status_connecting') if hasattr(self, 't') else 'Connecting...')
                 ok = self.player.play_url(url)

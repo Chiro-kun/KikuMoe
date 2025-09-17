@@ -15,6 +15,7 @@ from constants import (
     KEY_TRAY_NOTIFICATIONS,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
+    KEY_DARK_MODE,
 )
 
 class SettingsDialog(QDialog):
@@ -31,6 +32,11 @@ class SettingsDialog(QDialog):
         self.chk_autoplay = QCheckBox(self.i18n.t('settings_autoplay'))
         self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, 'false') == 'true')
         layout.addWidget(self.chk_autoplay)
+
+        # Dark Mode
+        self.chk_dark_mode = QCheckBox(self.i18n.t('settings_dark_mode'))
+        self.chk_dark_mode.setChecked(self.settings.value(KEY_DARK_MODE, 'false') == 'true')
+        layout.addWidget(self.chk_dark_mode)
 
         # Language
         lang_row = QHBoxLayout()
@@ -125,6 +131,7 @@ class SettingsDialog(QDialog):
     def _save_settings(self):
         """Logica comune per salvare le impostazioni."""
         self.settings.setValue(KEY_AUTOPLAY, 'true' if self.chk_autoplay.isChecked() else 'false')
+        self.settings.setValue(KEY_DARK_MODE, 'true' if self.chk_dark_mode.isChecked() else 'false')
         self.settings.setValue(KEY_LANG, 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())

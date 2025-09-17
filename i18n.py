@@ -65,6 +65,17 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_ok': 'OK',
         'settings_cancel': 'Annulla',
         'settings_apply': 'Applica',
+        # Sleep Timer & Dark Mode
+        'sleep_timer': 'Sleeptimer',
+        'sleep_minutes': 'Minuti:',
+        'sleep_start': 'Avvia',
+        'sleep_cancel': 'Annulla',
+        'sleep_remaining': 'Sleep tra {time}',
+        'settings_dark_mode': 'Tema scuro',
+        # Volume zero safeguard
+        'volume_zero_title': 'Volume a zero',
+        'volume_zero_text': 'Il volume è impostato a 0. Vuoi ripristinarlo al 20%?',
+        'restore': 'Ripristina',
     },
     'en': {
         'app_title': 'LISTEN.moe Player',
@@ -130,6 +141,17 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_ok': 'OK',
         'settings_cancel': 'Cancel',
         'settings_apply': 'Apply',
+        # Sleep Timer & Dark Mode
+        'sleep_timer': 'Sleep timer',
+        'sleep_minutes': 'Minutes:',
+        'sleep_start': 'Start',
+        'sleep_cancel': 'Cancel',
+        'sleep_remaining': 'Sleep in {time}',
+        'settings_dark_mode': 'Dark mode',
+        # Volume zero safeguard
+        'volume_zero_title': 'Volume is zero',
+        'volume_zero_text': 'Volume is set to 0. Do you want to restore it to 20%?',
+        'restore': 'Restore',
     },
 }
 

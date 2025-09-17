@@ -20,3 +20,6 @@ KEY_TRAY_NOTIFICATIONS = "tray_notifications"
 KEY_LIBVLC_PATH = "libvlc_path"
 KEY_WINDOW_GEOMETRY = "window_geometry"
 KEY_NETWORK_CACHING = "network_caching"
+# New settings keys
+KEY_DARK_MODE = "dark_mode"
+KEY_SLEEP_MINUTES = "sleep_minutes"
