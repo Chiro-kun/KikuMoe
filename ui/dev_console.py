@@ -1,7 +1,6 @@
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit
 from PyQt5.QtGui import QTextCursor, QTextOption
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
-import sys
 import builtins
 import logging
 
@@ -30,6 +29,19 @@ class _QtStream(QObject):
         return False
 
 
+class _DevConsoleHandler(logging.Handler):
+    def __init__(self, write_fn):
+        super().__init__()
+        self._write = write_fn
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            msg = self.format(record)
+            self._write(msg + "\n")
+        except Exception:
+            pass
+
+
 class DevConsole(QObject):
     def __init__(self, parent=None, translator=None, logger=None):
         super().__init__(parent)
@@ -38,16 +50,17 @@ class DevConsole(QObject):
         self._logger = logger
         self._console_dialog = None
         self._console_text = None
-        self._old_stdout = None
-        self._old_stderr = None
+        # monkeypatch print
         self._old_print = None
-        self._qt_stream_stdout = None
-        self._qt_stream_stderr = None
-        # Store buttons for runtime i18n updates
+        # Qt stream per append thread-safe
+        self._qt_stream = None
+        # pulsanti
         self._btn_clear = None
         self._btn_copy = None
-        # Track original streams of logging handlers to restore on close
-        self._orig_handler_streams = {}
+        # logging handler dedicato
+        self._log_handler = None
+        # elenco dei logger a cui ho agganciato l'handler (oltre al root)
+        self._attached_loggers = []
 
     def _t(self, key: str, default: str = None):
         try:
@@ -125,31 +138,18 @@ class DevConsole(QObject):
 
         # Initial message to confirm rendering
         try:
-            self._console_text.append(">>> Console pronta. I log appariranno qui se la redirezione è attiva.")
+            self._console_text.append(">>> Console pronta. I log appariranno qui.")
         except Exception:
             pass
 
-        # Debug on real stdout before redirect
+        # Prepara stream Qt per uso con print e logging handler
         try:
-            real_out = getattr(sys, '__stdout__', None) or getattr(self, '_old_stdout', None) or sys.stdout
-            if real_out:
-                real_out.write('[DEV] open_dev_console: pre-redirect reached\n')
-                try:
-                    real_out.flush()
-                except Exception:
-                    pass
+            self._qt_stream = _QtStream(self._append_console)
         except Exception:
-            pass
+            self._qt_stream = None
 
-        # Redirect stdout/stderr to the QTextEdit using a Qt-friendly stream
+        # Monkeypatch print per catturare anche librerie che usano print
         try:
-            self._old_stdout = sys.stdout
-            self._old_stderr = sys.stderr
-            self._qt_stream_stdout = _QtStream(self._append_console)
-            self._qt_stream_stderr = _QtStream(self._append_console)
-            sys.stdout = self._qt_stream_stdout
-            sys.stderr = self._qt_stream_stderr
-            # Monkeypatch print to ensure capture even if libraries bypass sys.stdout
             self._old_print = getattr(builtins, 'print', None)
 
             def _console_print(*args, **kwargs):
@@ -158,15 +158,13 @@ class DevConsole(QObject):
                     end = kwargs.get('end', '\n')
                     text = sep.join(str(a) for a in args) + end
                     try:
-                        if self._qt_stream_stdout:
-                            self._qt_stream_stdout.write(text)
+                        if self._qt_stream:
+                            self._qt_stream.write(text)
                     except Exception:
                         pass
                     try:
                         if self._old_print is not None:
                             file_kw = kwargs.copy()
-                            # mirror to the original stdout, not the redirected one
-                            file_kw['file'] = self._old_stdout
                             self._old_print(*args, **file_kw)
                     except Exception:
                         pass
@@ -177,53 +175,42 @@ class DevConsole(QObject):
                 builtins.print = _console_print
             except Exception:
                 pass
+        except Exception:
+            pass
 
-            # Redirect existing logging handlers to the console stream
-            try:
-                # Scan root and all known loggers
-                all_loggers = [logging.getLogger()]  # root
+        # Aggiungi un logging.Handler dedicato alla DevConsole
+        try:
+            if self._qt_stream and self._log_handler is None:
+                self._log_handler = _DevConsoleHandler(self._qt_stream.write)
+                self._log_handler.setLevel(logging.DEBUG)
+                fmt = logging.Formatter('[%(levelname)s] [%(name)s] %(message)s')
+                self._log_handler.setFormatter(fmt)
+                # Aggancio al root
+                root_logger = logging.getLogger()
+                if self._log_handler not in getattr(root_logger, 'handlers', []):
+                    root_logger.addHandler(self._log_handler)
+                # Aggancio a tutti i logger esistenti (propagate=False)
                 try:
                     for lname in list(logging.Logger.manager.loggerDict.keys()):
                         try:
                             lg = logging.getLogger(lname)
-                            all_loggers.append(lg)
+                            if self._log_handler not in getattr(lg, 'handlers', []):
+                                lg.addHandler(self._log_handler)
+                                self._attached_loggers.append(lg)
                         except Exception:
                             pass
                 except Exception:
                     pass
-                for lg in all_loggers:
-                    for h in getattr(lg, 'handlers', []) or []:
-                        if isinstance(h, logging.StreamHandler):
-                            try:
-                                # Save original stream to restore later
-                                if h not in self._orig_handler_streams:
-                                    try:
-                                        self._orig_handler_streams[h] = getattr(h, 'stream', None)
-                                    except Exception:
-                                        self._orig_handler_streams[h] = None
-                                # Point to our Qt stream
-                                try:
-                                    h.setStream(self._qt_stream_stdout)
-                                except Exception:
-                                    try:
-                                        h.stream = self._qt_stream_stdout
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-            except Exception:
-                pass
-
-            try:
-                if self._logger:
-                    self._logger.info('[DEV] Console sviluppatore attivata. Output reindirizzato.')
-            except Exception:
-                pass
-            QTimer.singleShot(150, lambda: self._logger and self._logger.debug('[DEV] Test timer: console attiva e redirect funzionante?'))
-            QTimer.singleShot(300, lambda: self._append_console('[DEV] Test timer (append diretto)\n'))
         except Exception:
             pass
 
+        try:
+            if self._logger:
+                self._logger.info('[DEV] Console sviluppatore attivata.')
+        except Exception:
+            pass
+        QTimer.singleShot(150, lambda: self._logger and self._logger.debug('[DEV] Test timer: console attiva?'))
+        QTimer.singleShot(300, lambda: self._append_console('[DEV] Test timer (append diretto)\n'))
         try:
             self._console_dialog.show()
             self.raise_window()
@@ -231,47 +218,34 @@ class DevConsole(QObject):
             pass
 
     def close(self):
-        # Restore print monkeypatch
+        # Ripristina print monkeypatch
         try:
             if self._old_print is not None:
                 builtins.print = self._old_print
         except Exception:
             pass
-        # Restore logging handlers' original streams
-        try:
-            if self._orig_handler_streams:
-                for h, orig in list(self._orig_handler_streams.items()):
-                    try:
-                        if isinstance(h, logging.StreamHandler):
-                            try:
-                                h.setStream(orig)
-                            except Exception:
-                                try:
-                                    h.stream = orig
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                self._orig_handler_streams.clear()
-        except Exception:
-            pass
-        # Restore sys.stdout/sys.stderr if previously redirected
-        try:
-            if self._old_stdout:
-                sys.stdout = self._old_stdout
-        except Exception:
-            pass
-        try:
-            if self._old_stderr:
-                sys.stderr = self._old_stderr
-        except Exception:
-            pass
-        self._old_stdout = None
-        self._old_stderr = None
-        self._qt_stream_stdout = None
-        self._qt_stream_stderr = None
         self._old_print = None
 
+        # Rimuovi logging handler dedicato
+        try:
+            if self._log_handler is not None:
+                try:
+                    logging.getLogger().removeHandler(self._log_handler)
+                except Exception:
+                    pass
+                try:
+                    for lg in list(self._attached_loggers):
+                        try:
+                            lg.removeHandler(self._log_handler)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._attached_loggers = []
+        self._log_handler = None
+        self._qt_stream = None
         # Cleanup dialog references
         try:
             if self._console_dialog:
