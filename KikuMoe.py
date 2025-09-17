@@ -36,6 +36,9 @@ from constants import (
     KEY_DEV_CONSOLE_ENABLED,
 )
 import threading
+from logger import get_logger
+from now_playing import compute_display_mmss
+from tray_manager import TrayManager
 
 class _QtStream(QObject):
     text_emitted = pyqtSignal(str)
@@ -243,6 +246,9 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+        # Initialize logger
+        self.log = get_logger('KikuMoe')
+
         # Sleep timer runtime
         self._sleep_timer: Optional[QTimer] = QTimer(self)
         try:
@@ -301,7 +307,17 @@ class ListenMoePlayer(QWidget):
         # System Tray Icon e menu
         try:
             self._tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
-            self._ensure_tray(self._tray_enabled)
+            # crea tray manager e applica stato iniziale
+            self.tray_mgr = TrayManager(self, self.i18n, on_show_window=self.show, on_open_settings=self.open_settings)
+            # inizializza icona/tooltip coerenti
+            tooltip = None
+            try:
+                header = self.i18n.t('header').format(channel=self.settings.value(KEY_CHANNEL, 'J-POP'), format=self.settings.value(KEY_FORMAT, 'Vorbis'))
+                now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+                tooltip = f"{header}\n{now}" if now else header
+            except Exception:
+                pass
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
         except Exception:
             pass
 
@@ -456,7 +472,7 @@ class ListenMoePlayer(QWidget):
                     except Exception:
                         pass
                     try:
-                        self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None), network_caching_ms=new_nc)
+                        self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
                     except Exception:
                         self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
                     self.player.set_volume(self.volume_slider.value())
@@ -594,28 +610,11 @@ class ListenMoePlayer(QWidget):
                     builtins.print = _console_print
                 except Exception:
                     pass
-                print('[DEV] Console sviluppatore attivata. Output reindirizzato.')
-            except Exception:
-                pass
-
-            # Ensure streams are restored when dialog closes
-            try:
-                self._console_dialog.finished.connect(lambda _: self._restore_std_streams())
-                self._console_dialog.rejected.connect(self._restore_std_streams)
-                self._console_dialog.destroyed.connect(lambda _: self._restore_std_streams())
-            except Exception:
-                pass
-
-            self._console_dialog.resize(700, 400)
-            self._console_dialog.show()
-            try:
-                self._console_dialog.raise_()
-                self._console_dialog.activateWindow()
-            except Exception:
-                pass
-            # Test asink per verificare il redirect dopo l'apertura
-            try:
-                QTimer.singleShot(150, lambda: print('[DEV] Test timer: console attiva e redirect funzionante?'))
+                try:
+                    self.log.info('[DEV] Console sviluppatore attivata. Output reindirizzato.')
+                except Exception:
+                    pass
+                QTimer.singleShot(150, lambda: self.log.debug('[DEV] Test timer: console attiva e redirect funzionante?'))
                 QTimer.singleShot(300, lambda: self._append_console('[DEV] Test timer (append diretto)\n'))
             except Exception:
                 pass
@@ -731,7 +730,7 @@ class ListenMoePlayer(QWidget):
                     should_stop = self._get_bool(KEY_SLEEP_STOP_ON_END, True)
                     if should_stop:
                         try:
-                            print("[SLEEP] time up -> stopping stream")
+                            self.log.info("[SLEEP] time up -> stopping stream")
                         except Exception:
                             pass
                         self.stop_stream()
@@ -859,7 +858,7 @@ class ListenMoePlayer(QWidget):
 
     def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
         try:
-            print(f"[WS] now_playing: title={title!r}, artist={artist!r}, duration={duration}, start_ts={start_ts}")
+            self.log.info(f"[WS] now_playing: title={title!r}, artist={artist!r}, duration={duration}, start_ts={start_ts}")
         except Exception:
             pass
         self._current_title = title or self.t('unknown')
@@ -887,24 +886,9 @@ class ListenMoePlayer(QWidget):
                 msg_title = self.i18n.t('now_playing_prefix')
                 body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
                 try:
-                    if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
-                        dur = int(self._current_duration_seconds)
-                        mmss = None
-                        if self._current_start_epoch is not None:
-                            import time
-                            try:
-                                elapsed = int(time.time()) - int(self._current_start_epoch)
-                            except Exception:
-                                elapsed = None
-                            if elapsed is not None and 0 <= elapsed <= dur + 5:
-                                remaining = dur - elapsed
-                                if remaining < 0:
-                                    remaining = 0
-                                mmss = self._format_mmss(remaining)
-                        if not mmss:
-                            mmss = self._format_mmss(dur)
-                        if mmss:
-                            body += f" [{mmss}]"
+                    mmss, _ = compute_display_mmss(self._current_duration_seconds, self._current_start_epoch)
+                    if mmss and mmss != "--:--":
+                        body += f" [{mmss}]"
                 except Exception:
                     pass
                 self.notify_tray.emit(msg_title, body)
@@ -933,7 +917,7 @@ class ListenMoePlayer(QWidget):
                 self.buffering_visible.emit(True)
                 self.buffering_progress.emit(0)
                 try:
-                    print('[EVENT] opening')
+                    self.log.info('[EVENT] opening')
                 except Exception:
                     pass
             elif c == 'buffering':
@@ -958,12 +942,11 @@ class ListenMoePlayer(QWidget):
                     else:
                         self.buffering_visible.emit(True)
                     try:
-                        print(f"[EVENT] buffering {pct}%")
+                        self.log.info(f"[EVENT] buffering {pct}%")
                     except Exception:
                         pass
                 else:
-                    # Percentuale non disponibile: mostra stato generico e barra indeterminata
-                    self.status_changed.emit(self.t('status_buffering'))
+                    # Nessun valore percentuale -> modalità indeterminata
                     self.buffering_indeterminate.emit(True)
                     self.buffering_visible.emit(True)
             elif c == 'playing':
@@ -972,7 +955,7 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(self.t('status_playing'))
                 self.tray_icon_refresh.emit()
                 try:
-                    print('[EVENT] playing')
+                    self.log.info('[EVENT] playing')
                 except Exception:
                     pass
             elif c == 'paused':
@@ -981,7 +964,7 @@ class ListenMoePlayer(QWidget):
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_paused'))
                 try:
-                    print("[EVENT] paused")
+                    self.log.info("[EVENT] paused")
                 except Exception:
                     pass
             elif c == 'stopped':
@@ -990,7 +973,7 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(self.t('status_stopped'))
                 self.tray_icon_refresh.emit()
                 try:
-                    print('[EVENT] stopped')
+                    self.log.info('[EVENT] stopped')
                 except Exception:
                     pass
             elif c == 'ended':
@@ -999,7 +982,7 @@ class ListenMoePlayer(QWidget):
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_ended'))
                 try:
-                    print('[EVENT] ended')
+                    self.log.info('[EVENT] ended')
                 except Exception:
                     pass
             elif c == 'libvlc_init_failed':
@@ -1009,7 +992,7 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     self.status_changed.emit(self.t('status_error'))
                 try:
-                    print('[EVENT] libvlc_init_failed')
+                    self.log.info('[EVENT] libvlc_init_failed')
                 except Exception:
                     pass
             elif c == 'error':
@@ -1017,7 +1000,7 @@ class ListenMoePlayer(QWidget):
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_error'))
                 try:
-                    print('[EVENT] error')
+                    self.log.info('[EVENT] error')
                 except Exception:
                     pass
             else:
@@ -1051,50 +1034,31 @@ class ListenMoePlayer(QWidget):
     # ------------------- Tray helpers (static) -------------------
     def update_tray_texts(self) -> None:
         try:
-            tray = getattr(self, 'tray', None)
-            if not tray:
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
                 return
-            # Tooltip statico: solo header e now playing attuale, senza stato dinamico
             header = self.label.text() if hasattr(self, 'label') else APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tray.setToolTip(f"{header}\n{now}" if now else header)
+            tooltip = f"{header}\n{now}" if now else header
+            self.tray_mgr.update_tooltip(tooltip)
         except Exception:
             pass
 
     def update_tray_icon(self) -> None:
         try:
-            tray = getattr(self, 'tray', None)
-            if not tray:
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
                 return
-            # Icona statica: usa l'icona della finestra corrente
-            tray.setIcon(self.windowIcon())
+            self.tray_mgr.update_icon(self.windowIcon())
         except Exception:
             pass
 
     def _ensure_tray(self, enabled: bool) -> None:
         try:
-            if enabled:
-                if not hasattr(self, 'tray') or self.tray is None:
-                    self.tray = QSystemTrayIcon(self.windowIcon(), self)
-                    menu = QMenu()
-                    act_show = QAction(self.i18n.t('show_window'), self)
-                    act_show.triggered.connect(self.show)
-                    menu.addAction(act_show)
-                    act_quit = QAction(self.i18n.t('quit') if hasattr(self.i18n, 't') else 'Quit', self)
-                    act_quit.triggered.connect(QApplication.instance().quit)
-                    menu.addAction(act_quit)
-                    self.tray.setContextMenu(menu)
-                    self.tray.setVisible(True)
-                else:
-                    self.tray.setVisible(True)
-                self.update_tray_icon()
-                self.update_tray_texts()
-            else:
-                if hasattr(self, 'tray') and self.tray:
-                    try:
-                        self.tray.setVisible(False)
-                    except Exception:
-                        pass
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
+                self.tray_mgr = TrayManager(self, self.i18n, on_show_window=self.show, on_open_settings=self.open_settings)
+            header = self.label.text() if hasattr(self, 'label') else APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tooltip = f"{header}\n{now}" if now else header
+            self.tray_mgr.ensure_tray_enabled(enabled, window_icon=self.windowIcon(), tooltip=tooltip)
         except Exception:
             pass
 
@@ -1129,38 +1093,22 @@ class ListenMoePlayer(QWidget):
     def play_stream(self) -> None:
         try:
             with self._playback_lock:
-                # Safeguard: se il volume è 0 e non sei in muto, chiedi se ripristinare a 60%
+                # Determine URL and check backend readiness
+                url = None
                 try:
-                    vol = int(self.volume_slider.value()) if hasattr(self, 'volume_slider') else int(self.player.get_volume())
-                    is_muted = bool(self.mute_button.isChecked()) if hasattr(self, 'mute_button') else bool(self.player.get_mute())
+                    url = self.get_selected_stream_url()
                 except Exception:
-                    vol = 0
-                    is_muted = False
-                if vol <= 0 and not is_muted:
+                    url = None
+                if not hasattr(self, 'player') or self.player is None or not url:
                     try:
-                        msg = QMessageBox(self)
-                        msg.setWindowTitle(self.i18n.t('volume_zero_title'))
-                        msg.setText(self.i18n.t('volume_zero_text'))
-                        restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.AcceptRole)
-                        cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
-                        msg.setIcon(QMessageBox.Question)
-                        msg.exec_()
-                        if msg.clickedButton() == restore_btn:
-                            if hasattr(self, 'volume_slider'):
-                                self.volume_slider.setValue(60)
-                            else:
-                                self.player.set_volume(60)
-                            try:
-                                self.settings.setValue(KEY_VOLUME, 60)
-                            except Exception:
-                                pass
+                        self.log.info("[UI] play_stream aborted: no player backend or url")
                     except Exception:
                         pass
-
-                url = self.get_selected_stream_url()
+                    self.status_changed.emit(self.t('status_error'))
+                    return
                 try:
-                    print(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
-                    print(f"[UI] play_stream url={url}")
+                    self.log.info(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
+                    self.log.info(f"[UI] play_stream url={url}")
                 except Exception:
                     pass
                 self.status_changed.emit(self.t('status_connecting') if hasattr(self, 't') else 'Connecting...')
@@ -1168,7 +1116,7 @@ class ListenMoePlayer(QWidget):
                 if not ok:
                     self.status_changed.emit(self.t('status_error'))
                     try:
-                        print("[UI] play_stream failed")
+                        self.log.info("[UI] play_stream failed")
                     except Exception:
                         pass
                 else:
@@ -1179,7 +1127,7 @@ class ListenMoePlayer(QWidget):
                         pass
                     self.tray_icon_refresh.emit()
                     try:
-                        print("[UI] play_stream started")
+                        self.log.info("[UI] play_stream started")
                     except Exception:
                         pass
         except Exception as e:
@@ -1189,7 +1137,7 @@ class ListenMoePlayer(QWidget):
         try:
             with self._playback_lock:
                 try:
-                    print("[UI] pause_resume clicked")
+                    self.log.info("[UI] pause_resume clicked")
                 except Exception:
                     pass
                 self.player.pause_toggle()
@@ -1199,7 +1147,7 @@ class ListenMoePlayer(QWidget):
     def stop_stream(self) -> None:
         try:
             try:
-                print("[UI] stop_stream clicked")
+                self.log.info("[UI] stop_stream clicked")
             except Exception:
                 pass
             with self._playback_lock:
@@ -1227,23 +1175,21 @@ class ListenMoePlayer(QWidget):
                     self.tray_icon_refresh.emit()
                 except Exception:
                     pass
+                try:
+                    # reset title
+                    base = APP_TITLE
+                    self.setWindowTitle(base)
+                except Exception:
+                    pass
         except Exception as e:
-            try:
-                self.status_changed.emit(f"{self.t('status_error')} {e}")
-            except Exception:
-                pass
-        # Reset window title
-        try:
-            self.setWindowTitle(APP_TITLE)
-        except Exception:
-            pass
+            self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     def volume_changed(self, value: int) -> None:
         try:
             self.player.set_volume(int(value))
             self.settings.setValue(KEY_VOLUME, int(value))
             try:
-                print(f"[UI] volume_changed -> {int(value)}")
+                self.log.info(f"[UI] volume_changed -> {int(value)}")
             except Exception:
                 pass
         except Exception:
@@ -1258,7 +1204,7 @@ class ListenMoePlayer(QWidget):
                 pass
             self.settings.setValue(KEY_MUTE, bool(checked))
             try:
-                print(f"[UI] mute_toggled -> {bool(checked)}")
+                self.log.info(f"[UI] mute_toggled -> {bool(checked)}")
             except Exception:
                 pass
         except Exception:
@@ -1296,7 +1242,7 @@ class ListenMoePlayer(QWidget):
 
     def toggle_mute_shortcut(self) -> None:
         try:
-            print("[UI] mute shortcut toggled")
+            self.log.info("[UI] mute shortcut toggled")
         except Exception:
             pass
         try:
@@ -1306,87 +1252,17 @@ class ListenMoePlayer(QWidget):
 
     def force_stop_all(self) -> None:
         try:
-            print("[UI] FORCE STOP clicked")
+            self.log.info("[UI] FORCE STOP clicked")
         except Exception:
             pass
         try:
-            with self._playback_lock:
-                try:
-                    self.player.force_cleanup()
-                except Exception:
-                    pass
-                try:
-                    self.player.stop()
-                except Exception:
-                    pass
-                self.status_changed.emit(self.t('status_stopped'))
-                self.tray_icon_refresh.emit()
-        except Exception:
-            try:
-                self.status_changed.emit(self.t('status_stopped'))
-            except Exception:
-                pass
-        
-        # Reset window title (timer keeps running in UI thread)
-        try:
-            self.setWindowTitle(APP_TITLE)
+            if hasattr(self, 'player') and self.player:
+                self.player.force_cleanup()
         except Exception:
             pass
 
-    def closeEvent(self, a0):
-        # usare nome a0 per compatibilità con gli stub Qt e Pylance
-        try:
-            try:
-                self.stop_stream()
-            except Exception:
-                pass
-        except Exception:
-            pass
-        try:
-            if hasattr(self, 'ws') and self.ws:
-                try:
-                    self.ws.shutdown()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        try:
-            if a0 is not None and hasattr(a0, 'accept'):
-                a0.accept()
-        except Exception:
-            # fallback: se non è un QCloseEvent, ignoriamo
-            pass
-
-
-if __name__ == "__main__":
-    app = QApplication([])
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
     window = ListenMoePlayer()
     window.show()
-    try:
-        app.exec_()
-    except KeyboardInterrupt:
-        try:
-            window.close()
-        except Exception:
-            pass
-
-
-            try:
-                if hasattr(self, '_old_stderr') and self._old_stderr:
-                    sys.stderr = self._old_stderr
-            except Exception:
-                pass
-            # Pulisci riferimenti
-            try:
-                self._qt_stream_stdout = None
-                self._qt_stream_stderr = None
-            except Exception:
-                pass
-            try:
-                if hasattr(self, '_console_dialog') and self._console_dialog:
-                    self._console_dialog.deleteLater()
-            except Exception:
-                pass
-            self._console_dialog = None
-        except Exception:
-            pass
+    sys.exit(app.exec_())
