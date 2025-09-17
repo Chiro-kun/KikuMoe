@@ -17,6 +17,7 @@ from constants import (
     KEY_NETWORK_CACHING,
     KEY_DARK_MODE,
     KEY_SLEEP_STOP_ON_END,
+    KEY_DEV_CONSOLE_ENABLED,
 )
 
 class SettingsDialog(QDialog):
@@ -43,6 +44,20 @@ class SettingsDialog(QDialog):
         self.chk_sleep_stop = QCheckBox(self.i18n.t('settings_sleep_stop_on_end'))
         self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, 'true') == 'true')
         layout.addWidget(self.chk_sleep_stop)
+
+        # Developer Console (optional)
+        self.chk_dev_console = QCheckBox(self.i18n.t('settings_dev_console'))
+        self.chk_dev_console.setChecked(self.settings.value(KEY_DEV_CONSOLE_ENABLED, 'false') == 'true')
+        # Row with checkbox + open button
+        dev_row = QHBoxLayout()
+        dev_row.addWidget(self.chk_dev_console)
+        self.btn_open_console = QPushButton(self.i18n.t('dev_console_button'))
+        self.btn_open_console.setEnabled(self.chk_dev_console.isChecked())
+        self.btn_open_console.clicked.connect(self._on_open_console)
+        dev_row.addWidget(self.btn_open_console)
+        layout.addLayout(dev_row)
+        # Enable/disable button based on checkbox state
+        self.chk_dev_console.stateChanged.connect(lambda s: self.btn_open_console.setEnabled(self.chk_dev_console.isChecked()))
 
         # Language
         lang_row = QHBoxLayout()
@@ -134,11 +149,25 @@ class SettingsDialog(QDialog):
         self._save_settings()
         self.accept()
 
+    def _on_open_console(self):
+        # Only open if enabled
+        if not self.chk_dev_console.isChecked():
+            return
+        try:
+            # Salva subito lo stato della checkbox per permettere al gating del parent di leggere 'true'
+            self._save_settings()
+            parent = self.parent()
+            if parent and hasattr(parent, 'open_dev_console'):
+                parent.open_dev_console(self)
+        except Exception:
+            pass
+
     def _save_settings(self):
         """Logica comune per salvare le impostazioni."""
         self.settings.setValue(KEY_AUTOPLAY, 'true' if self.chk_autoplay.isChecked() else 'false')
         self.settings.setValue(KEY_DARK_MODE, 'true' if self.chk_dark_mode.isChecked() else 'false')
         self.settings.setValue(KEY_SLEEP_STOP_ON_END, 'true' if self.chk_sleep_stop.isChecked() else 'false')
+        self.settings.setValue(KEY_DEV_CONSOLE_ENABLED, 'true' if self.chk_dev_console.isChecked() else 'false')
         self.settings.setValue(KEY_LANG, 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())

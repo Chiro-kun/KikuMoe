@@ -230,6 +230,10 @@ class PlayerFFmpeg:
                     try:
                         self._audio_stream.stop_stream()
                         self._paused = True
+                        try:
+                            print("[DEBUG] pause_toggle: paused")
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                     self._emit('paused', None)
@@ -237,6 +241,10 @@ class PlayerFFmpeg:
                     try:
                         self._audio_stream.start_stream()
                         self._paused = False
+                        try:
+                            print("[DEBUG] pause_toggle: resumed -> playing")
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                     self._emit('playing', None)

@@ -74,6 +74,12 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_dark_mode': 'Tema scuro',
         # Opzione: stop allo scadere Sleep Timer
         'settings_sleep_stop_on_end': 'Alla scadenza Sleep Timer: ferma riproduzione',
+        # Dev console
+        'settings_dev_console': 'Abilita console sviluppatore',
+        'dev_console_button': 'Console',
+        'dev_console_title': 'Console sviluppatore',
+        'dev_console_clear': 'Pulisci',
+        'dev_console_copy': 'Copia tutto',
         # Volume zero safeguard
         'volume_zero_title': 'Volume a zero',
         'volume_zero_text': 'Il volume è impostato a 0. Vuoi ripristinarlo al 60%?',
@@ -152,6 +158,12 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_dark_mode': 'Dark mode',
         # Option: stop when Sleep Timer elapses
         'settings_sleep_stop_on_end': 'When Sleep Timer elapses: stop playback',
+        # Dev console
+        'settings_dev_console': 'Enable developer console',
+        'dev_console_button': 'Console',
+        'dev_console_title': 'Developer Console',
+        'dev_console_clear': 'Clear',
+        'dev_console_copy': 'Copy all',
         # Volume zero safeguard
         'volume_zero_title': 'Volume is zero',
         'volume_zero_text': 'Volume is set to 0. Do you want to restore it to 60%?',

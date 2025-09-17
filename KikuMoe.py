@@ -1,14 +1,15 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut, QSpinBox,
-    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog, QMessageBox
+    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog, QMessageBox, QTextEdit
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
-from PyQt5.QtGui import QKeySequence, QIcon
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QObject, pyqtSlot
+from PyQt5.QtGui import QKeySequence, QIcon, QTextCursor, QTextOption
 from typing import Optional
 import os
 import sys
 import re
+import builtins
 from i18n import I18n
 from ws_client import NowPlayingWS
 from player_ffmpeg import PlayerFFmpeg
@@ -32,8 +33,33 @@ from constants import (
     KEY_DARK_MODE,
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
+    KEY_DEV_CONSOLE_ENABLED,
 )
 import threading
+
+class _QtStream(QObject):
+    text_emitted = pyqtSignal(str)
+
+    def __init__(self, append_fn):
+        super().__init__()
+        try:
+            # Usa sempre una connessione queue-ata per garantire che l'aggiornamento UI avvenga nel thread principale
+            self.text_emitted.connect(append_fn, Qt.QueuedConnection)
+        except Exception:
+            pass
+
+    def write(self, s):
+        try:
+            if s:
+                self.text_emitted.emit(str(s))
+        except Exception:
+            pass
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
 
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
@@ -88,7 +114,7 @@ class ListenMoePlayer(QWidget):
         self._layout.addLayout(sel_row)
 
         # Barra superiore: solo pulsante Impostazioni
-        top_row = QHBoxLayout()
+        self.top_row = QHBoxLayout()
         # Icone SVG (app)
         try:
             base_dir = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
@@ -104,9 +130,14 @@ class ListenMoePlayer(QWidget):
         # Pulsante Impostazioni
         self.settings_button = QPushButton(self.i18n.t('settings_button'))
         self.settings_button.clicked.connect(self.open_settings)
-        top_row.addStretch(1)
-        top_row.addWidget(self.settings_button)
-        self._layout.addLayout(top_row)
+        self.top_row.addStretch(1)
+        # Dev console disponibile solo nella finestra Impostazioni: niente bottone o scorciatoia nella top bar
+        try:
+            self._dev_console_enabled = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
+        except Exception:
+            self._dev_console_enabled = False
+        self.top_row.addWidget(self.settings_button)
+        self._layout.addLayout(self.top_row)
 
         # Indicatore stato VLC (icona + testo)
         status_row = QHBoxLayout()
@@ -230,7 +261,8 @@ class ListenMoePlayer(QWidget):
         except Exception:
             network_caching = 1000
         try:
-            self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None), network_caching_ms=network_caching)
+            # PlayerFFmpeg non accetta network_caching_ms nel costruttore
+            self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
         except Exception:
             self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=libvlc_path, network_caching_ms=network_caching)
         
@@ -312,6 +344,16 @@ class ListenMoePlayer(QWidget):
         self.update_now_playing_label()
         self.update_tray_texts()
         self.update_vlc_status_label()
+        # Update dev console dialog texts if open
+        try:
+            if hasattr(self, '_console_dialog') and self._console_dialog:
+                self._console_dialog.setWindowTitle(self.i18n.t('dev_console_title'))
+                if hasattr(self, '_console_btn_clear'):
+                    self._console_btn_clear.setText(self.i18n.t('dev_console_clear'))
+                if hasattr(self, '_console_btn_copy'):
+                    self._console_btn_copy.setText(self.i18n.t('dev_console_copy'))
+        except Exception:
+            pass
 
     def apply_theme(self) -> None:
         try:
@@ -377,6 +419,7 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 prev_nc = 1000
             prev_dark = self._get_bool(KEY_DARK_MODE, False)
+            prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
             dlg = SettingsDialog(self)
             if dlg.exec_() == QDialog.Accepted:
                 # Lingua
@@ -423,6 +466,19 @@ class ListenMoePlayer(QWidget):
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev_tray_enabled:
                     self._ensure_tray(new_tray_enabled)
+                # Dev console enable/disable may have changed
+                new_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
+                if new_dev_console != prev_dev_console:
+                    try:
+                        if not new_dev_console:
+                            if hasattr(self, '_console_dialog') and self._console_dialog:
+                                try:
+                                    self._console_dialog.close()
+                                except Exception:
+                                    pass
+                                self._restore_std_streams()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -431,6 +487,194 @@ class ListenMoePlayer(QWidget):
             return self.i18n.t(key, **kwargs)
         except Exception:
             return key
+
+    def open_dev_console(self, parent_widget=None):
+        try:
+            # Open only if enabled in settings (but allow explicit call from Settings dialog)
+            try:
+                self.settings.sync()
+            except Exception:
+                pass
+            try:
+                invoked_from_settings = parent_widget is not None
+            except Exception:
+                invoked_from_settings = False
+            if not invoked_from_settings:
+                if not self._get_bool(KEY_DEV_CONSOLE_ENABLED, False):
+                    return
+            # If already open, just focus it
+            if hasattr(self, '_console_dialog') and getattr(self, '_console_dialog', None):
+                try:
+                    self._console_dialog.raise_()
+                    self._console_dialog.activateWindow()
+                except Exception:
+                    pass
+                return
+
+            # Build console dialog UI
+            self._console_dialog = QDialog(self)
+            self._console_dialog.setWindowTitle(self.i18n.t('dev_console_title'))
+            self._console_dialog.setModal(False)
+
+            v = QVBoxLayout()
+            self._console_text = QTextEdit()
+            self._console_text.setReadOnly(True)
+            self._console_text.setLineWrapMode(QTextEdit.WidgetWidth)
+            try:
+                self._console_text.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+            except Exception:
+                pass
+            try:
+                self._console_text.setStyleSheet("font-family: Consolas, 'Courier New', monospace; font-size: 12px;")
+            except Exception:
+                pass
+            v.addWidget(self._console_text)
+
+            h = QHBoxLayout()
+            btn_clear = QPushButton(self.i18n.t('dev_console_clear'))
+            btn_copy = QPushButton(self.i18n.t('dev_console_copy'))
+            btn_clear.clicked.connect(lambda: self._console_text.clear())
+            btn_copy.clicked.connect(lambda: (self._console_text.selectAll(), self._console_text.copy()))
+            h.addStretch(1)
+            h.addWidget(btn_clear)
+            h.addWidget(btn_copy)
+            v.addLayout(h)
+
+            self._console_dialog.setLayout(v)
+
+            # Messaggio iniziale per confermare il rendering della console
+            try:
+                self._console_text.append(">>> Console pronta. I log appariranno qui se la redirezione è attiva.")
+            except Exception:
+                pass
+
+            # Debug: traccia su stdout reale prima del redirect
+            try:
+                real_out = getattr(sys, '__stdout__', None) or getattr(self, '_old_stdout', None) or sys.stdout
+                if real_out:
+                    real_out.write('[DEV] open_dev_console: pre-redirect reached\n')
+                    try:
+                        real_out.flush()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Redirect stdout/stderr to the QTextEdit using a Qt-friendly stream
+            try:
+                self._old_stdout = sys.stdout
+                self._old_stderr = sys.stderr
+                self._qt_stream_stdout = _QtStream(self._append_console)
+                self._qt_stream_stderr = _QtStream(self._append_console)
+                sys.stdout = self._qt_stream_stdout
+                sys.stderr = self._qt_stream_stderr
+                # Monkeypatch print to ensure capture even if libraries bypass sys.stdout
+                self._old_print = getattr(builtins, 'print', None)
+                def _console_print(*args, **kwargs):
+                    try:
+                        sep = kwargs.get('sep', ' ')
+                        end = kwargs.get('end', '\n')
+                        text = sep.join(str(a) for a in args) + end
+                        try:
+                            if hasattr(self, '_qt_stream_stdout') and self._qt_stream_stdout:
+                                self._qt_stream_stdout.write(text)
+                        except Exception:
+                            pass
+                        try:
+                            if self._old_print is not None:
+                                file_kw = kwargs.copy()
+                                # ensure we mirror to the original stdout, not the redirected one
+                                file_kw['file'] = getattr(self, '_old_stdout', None)
+                                self._old_print(*args, **file_kw)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                try:
+                    builtins.print = _console_print
+                except Exception:
+                    pass
+                print('[DEV] Console sviluppatore attivata. Output reindirizzato.')
+            except Exception:
+                pass
+
+            # Ensure streams are restored when dialog closes
+            try:
+                self._console_dialog.finished.connect(lambda _: self._restore_std_streams())
+                self._console_dialog.rejected.connect(self._restore_std_streams)
+                self._console_dialog.destroyed.connect(lambda _: self._restore_std_streams())
+            except Exception:
+                pass
+
+            self._console_dialog.resize(700, 400)
+            self._console_dialog.show()
+            try:
+                self._console_dialog.raise_()
+                self._console_dialog.activateWindow()
+            except Exception:
+                pass
+            # Test asink per verificare il redirect dopo l'apertura
+            try:
+                QTimer.singleShot(150, lambda: print('[DEV] Test timer: console attiva e redirect funzionante?'))
+                QTimer.singleShot(300, lambda: self._append_console('[DEV] Test timer (append diretto)\n'))
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    @pyqtSlot(str)
+    def _append_console(self, s: str):
+        try:
+            if not hasattr(self, '_console_text') or self._console_text is None:
+                return
+            if s is None:
+                return
+            text = str(s)
+            if not text:
+                return
+            self._console_text.moveCursor(QTextCursor.End)
+            self._console_text.insertPlainText(text)
+            self._console_text.moveCursor(QTextCursor.End)
+        except Exception:
+            pass
+
+    def _restore_std_streams(self):
+        try:
+            # Ripristina print monkeypatch
+            try:
+                if hasattr(self, '_old_print') and self._old_print is not None:
+                    builtins.print = self._old_print
+            except Exception:
+                pass
+            # Restore sys.stdout/sys.stderr if previously redirected
+            try:
+                if hasattr(self, '_old_stdout') and self._old_stdout:
+                    sys.stdout = self._old_stdout
+            except Exception:
+                pass
+            try:
+                if hasattr(self, '_old_stderr') and self._old_stderr:
+                    sys.stderr = self._old_stderr
+            except Exception:
+                pass
+            self._old_stdout = None
+            self._old_stderr = None
+            self._qt_stream_stdout = None
+            self._qt_stream_stderr = None
+
+            # Cleanup dialog references
+            try:
+                if hasattr(self, '_console_dialog') and self._console_dialog:
+                    try:
+                        self._console_dialog.close()
+                    except Exception:
+                        pass
+                    self._console_dialog.deleteLater()
+                    self._console_dialog = None
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     # Sleep timer logic
     def sleep_start_clicked(self) -> None:
@@ -486,6 +730,10 @@ class ListenMoePlayer(QWidget):
                     # Stop opzionale a fine Sleep Timer
                     should_stop = self._get_bool(KEY_SLEEP_STOP_ON_END, True)
                     if should_stop:
+                        try:
+                            print("[SLEEP] time up -> stopping stream")
+                        except Exception:
+                            pass
                         self.stop_stream()
                 except Exception:
                     pass
@@ -501,7 +749,10 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
             if hasattr(self, 'sleep_label'):
-                self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+                try:
+                    self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -571,21 +822,29 @@ class ListenMoePlayer(QWidget):
         # Append remaining or total duration
         try:
             if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
-                # If we have start time, show remaining; else show total
-                remaining = None
-                if self._current_start_epoch is not None:
+                # Prefer remaining time only if start timestamp is plausible; otherwise show total duration
+                mmss = None
+                try:
+                    dur = int(self._current_duration_seconds)
+                except Exception:
+                    dur = None
+                if dur and self._current_start_epoch is not None:
                     import time
-                    elapsed = int(time.time() - int(self._current_start_epoch))
-                    if elapsed < 0:
-                        elapsed = 0
-                    remaining_calc = int(self._current_duration_seconds) - elapsed
-                    if remaining_calc < 0:
-                        remaining_calc = 0
-                    remaining = remaining_calc
-                if remaining is not None:
-                    mmss = self._format_mmss(remaining)
-                else:
-                    mmss = self._format_mmss(int(self._current_duration_seconds))
+                    try:
+                        elapsed = int(time.time()) - int(self._current_start_epoch)
+                    except Exception:
+                        elapsed = None
+                    # Use remaining only when 0 <= elapsed <= dur + small slack (handle clock skew)
+                    if elapsed is not None and 0 <= elapsed <= dur + 5:
+                        remaining = dur - elapsed
+                        if remaining < 0:
+                            remaining = 0
+                        mmss = self._format_mmss(remaining)
+                    else:
+                        # Fallback to total duration to avoid misleading 0:00
+                        mmss = self._format_mmss(dur)
+                elif dur:
+                    mmss = self._format_mmss(dur)
                 if mmss:
                     text += f" [{mmss}]"
         except Exception:
@@ -599,6 +858,10 @@ class ListenMoePlayer(QWidget):
             pass
 
     def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
+        try:
+            print(f"[WS] now_playing: title={title!r}, artist={artist!r}, duration={duration}, start_ts={start_ts}")
+        except Exception:
+            pass
         self._current_title = title or self.t('unknown')
         self._current_artist = artist or ''
         try:
@@ -625,7 +888,21 @@ class ListenMoePlayer(QWidget):
                 body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
                 try:
                     if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
-                        mmss = self._format_mmss(int(self._current_duration_seconds))
+                        dur = int(self._current_duration_seconds)
+                        mmss = None
+                        if self._current_start_epoch is not None:
+                            import time
+                            try:
+                                elapsed = int(time.time()) - int(self._current_start_epoch)
+                            except Exception:
+                                elapsed = None
+                            if elapsed is not None and 0 <= elapsed <= dur + 5:
+                                remaining = dur - elapsed
+                                if remaining < 0:
+                                    remaining = 0
+                                mmss = self._format_mmss(remaining)
+                        if not mmss:
+                            mmss = self._format_mmss(dur)
                         if mmss:
                             body += f" [{mmss}]"
                 except Exception:
@@ -655,6 +932,10 @@ class ListenMoePlayer(QWidget):
                 self.buffering_indeterminate.emit(True)
                 self.buffering_visible.emit(True)
                 self.buffering_progress.emit(0)
+                try:
+                    print('[EVENT] opening')
+                except Exception:
+                    pass
             elif c == 'buffering':
                 # Mostra la barra solo se non abbiamo già completato
                 pct = None
@@ -676,6 +957,10 @@ class ListenMoePlayer(QWidget):
                         self.buffering_visible.emit(False)
                     else:
                         self.buffering_visible.emit(True)
+                    try:
+                        print(f"[EVENT] buffering {pct}%")
+                    except Exception:
+                        pass
                 else:
                     # Percentuale non disponibile: mostra stato generico e barra indeterminata
                     self.status_changed.emit(self.t('status_buffering'))
@@ -686,31 +971,55 @@ class ListenMoePlayer(QWidget):
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_playing'))
                 self.tray_icon_refresh.emit()
+                try:
+                    print('[EVENT] playing')
+                except Exception:
+                    pass
             elif c == 'paused':
                 # In pausa la barra di buffering non è utile: nascondila
                 self.buffering_visible.emit(False)
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_paused'))
+                try:
+                    print("[EVENT] paused")
+                except Exception:
+                    pass
             elif c == 'stopped':
                 self.buffering_visible.emit(False)
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_stopped'))
                 self.tray_icon_refresh.emit()
+                try:
+                    print('[EVENT] stopped')
+                except Exception:
+                    pass
             elif c == 'ended':
                 # Fine stream: nascondi la barra
                 self.buffering_visible.emit(False)
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_ended'))
+                try:
+                    print('[EVENT] ended')
+                except Exception:
+                    pass
             elif c == 'libvlc_init_failed':
                 self.backend_status_refresh.emit()
                 try:
                     self.status_changed.emit(self.i18n.t('vlc_not_found'))
                 except Exception:
                     self.status_changed.emit(self.t('status_error'))
+                try:
+                    print('[EVENT] libvlc_init_failed')
+                except Exception:
+                    pass
             elif c == 'error':
                 self.buffering_visible.emit(False)
                 self.buffering_indeterminate.emit(False)
                 self.status_changed.emit(self.t('status_error'))
+                try:
+                    print('[EVENT] error')
+                except Exception:
+                    pass
             else:
                 # Unknown code, no-op
                 pass
@@ -849,10 +1158,19 @@ class ListenMoePlayer(QWidget):
                         pass
 
                 url = self.get_selected_stream_url()
+                try:
+                    print(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
+                    print(f"[UI] play_stream url={url}")
+                except Exception:
+                    pass
                 self.status_changed.emit(self.t('status_connecting') if hasattr(self, 't') else 'Connecting...')
                 ok = self.player.play_url(url)
                 if not ok:
                     self.status_changed.emit(self.t('status_error'))
+                    try:
+                        print("[UI] play_stream failed")
+                    except Exception:
+                        pass
                 else:
                     try:
                         if hasattr(self, '_icon_play') and not self._icon_play.isNull():
@@ -860,20 +1178,74 @@ class ListenMoePlayer(QWidget):
                     except Exception:
                         pass
                     self.tray_icon_refresh.emit()
+                    try:
+                        print("[UI] play_stream started")
+                    except Exception:
+                        pass
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
     def pause_resume(self) -> None:
         try:
             with self._playback_lock:
+                try:
+                    print("[UI] pause_resume clicked")
+                except Exception:
+                    pass
                 self.player.pause_toggle()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
+
+    def stop_stream(self) -> None:
+        try:
+            try:
+                print("[UI] stop_stream clicked")
+            except Exception:
+                pass
+            with self._playback_lock:
+                # Stop backend playback
+                try:
+                    self.player.stop()
+                except Exception:
+                    pass
+                # Update UI state
+                try:
+                    self.status_changed.emit(self.t('status_stopped'))
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, '_icon_stop') and not self._icon_stop.isNull():
+                        self.setWindowIcon(self._icon_stop)
+                except Exception:
+                    pass
+                try:
+                    self.buffering_visible.emit(False)
+                    self.buffering_indeterminate.emit(False)
+                except Exception:
+                    pass
+                try:
+                    self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+        except Exception as e:
+            try:
+                self.status_changed.emit(f"{self.t('status_error')} {e}")
+            except Exception:
+                pass
+        # Reset window title
+        try:
+            self.setWindowTitle(APP_TITLE)
+        except Exception:
+            pass
 
     def volume_changed(self, value: int) -> None:
         try:
             self.player.set_volume(int(value))
             self.settings.setValue(KEY_VOLUME, int(value))
+            try:
+                print(f"[UI] volume_changed -> {int(value)}")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -885,6 +1257,10 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             self.settings.setValue(KEY_MUTE, bool(checked))
+            try:
+                print(f"[UI] mute_toggled -> {bool(checked)}")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -920,27 +1296,36 @@ class ListenMoePlayer(QWidget):
 
     def toggle_mute_shortcut(self) -> None:
         try:
-            self.mute_button.setChecked(not self.mute_button.isChecked())
+            print("[UI] mute shortcut toggled")
+        except Exception:
+            pass
+        try:
+            self.mute_button.toggle()
         except Exception:
             pass
 
     def force_stop_all(self) -> None:
         try:
-            self.player.force_cleanup()
-            self.status_changed.emit(self.t('status_force_stop') if hasattr(self, 't') else 'Force stop executed')
-            self.tray_icon_refresh.emit()
+            print("[UI] FORCE STOP clicked")
         except Exception:
             pass
-
-    def stop_stream(self):
         try:
-            print("[DEBUG] stop_stream: called")
             with self._playback_lock:
-                self.player.stop()
+                try:
+                    self.player.force_cleanup()
+                except Exception:
+                    pass
+                try:
+                    self.player.stop()
+                except Exception:
+                    pass
                 self.status_changed.emit(self.t('status_stopped'))
                 self.tray_icon_refresh.emit()
-        except Exception as e:
-            self.status_changed.emit(f"{self.t('status_error')} {e}")
+        except Exception:
+            try:
+                self.status_changed.emit(self.t('status_stopped'))
+            except Exception:
+                pass
         
         # Reset window title (timer keeps running in UI thread)
         try:
@@ -982,5 +1367,26 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         try:
             window.close()
+        except Exception:
+            pass
+
+
+            try:
+                if hasattr(self, '_old_stderr') and self._old_stderr:
+                    sys.stderr = self._old_stderr
+            except Exception:
+                pass
+            # Pulisci riferimenti
+            try:
+                self._qt_stream_stdout = None
+                self._qt_stream_stderr = None
+            except Exception:
+                pass
+            try:
+                if hasattr(self, '_console_dialog') and self._console_dialog:
+                    self._console_dialog.deleteLater()
+            except Exception:
+                pass
+            self._console_dialog = None
         except Exception:
             pass
