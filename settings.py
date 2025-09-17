@@ -16,6 +16,7 @@ from constants import (
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
     KEY_DARK_MODE,
+    KEY_SLEEP_STOP_ON_END,
 )
 
 class SettingsDialog(QDialog):
@@ -37,6 +38,11 @@ class SettingsDialog(QDialog):
         self.chk_dark_mode = QCheckBox(self.i18n.t('settings_dark_mode'))
         self.chk_dark_mode.setChecked(self.settings.value(KEY_DARK_MODE, 'false') == 'true')
         layout.addWidget(self.chk_dark_mode)
+
+        # Sleep Timer option: stop on end
+        self.chk_sleep_stop = QCheckBox(self.i18n.t('settings_sleep_stop_on_end'))
+        self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, 'true') == 'true')
+        layout.addWidget(self.chk_sleep_stop)
 
         # Language
         lang_row = QHBoxLayout()
@@ -132,6 +138,7 @@ class SettingsDialog(QDialog):
         """Logica comune per salvare le impostazioni."""
         self.settings.setValue(KEY_AUTOPLAY, 'true' if self.chk_autoplay.isChecked() else 'false')
         self.settings.setValue(KEY_DARK_MODE, 'true' if self.chk_dark_mode.isChecked() else 'false')
+        self.settings.setValue(KEY_SLEEP_STOP_ON_END, 'true' if self.chk_sleep_stop.isChecked() else 'false')
         self.settings.setValue(KEY_LANG, 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())

@@ -31,6 +31,7 @@ from constants import (
     KEY_NETWORK_CACHING,
     KEY_DARK_MODE,
     KEY_SLEEP_MINUTES,
+    KEY_SLEEP_STOP_ON_END,
 )
 import threading
 
@@ -482,7 +483,10 @@ class ListenMoePlayer(QWidget):
                     self.sleep_label.setText("")
                 self._sleep_saved_volume = None
                 try:
-                    self.stop_stream()
+                    # Stop opzionale a fine Sleep Timer
+                    should_stop = self._get_bool(KEY_SLEEP_STOP_ON_END, True)
+                    if should_stop:
+                        self.stop_stream()
                 except Exception:
                     pass
                 return
@@ -816,7 +820,7 @@ class ListenMoePlayer(QWidget):
     def play_stream(self) -> None:
         try:
             with self._playback_lock:
-                # Safeguard: se il volume è 0 e non sei in muto, chiedi se ripristinare a 20%
+                # Safeguard: se il volume è 0 e non sei in muto, chiedi se ripristinare a 60%
                 try:
                     vol = int(self.volume_slider.value()) if hasattr(self, 'volume_slider') else int(self.player.get_volume())
                     is_muted = bool(self.mute_button.isChecked()) if hasattr(self, 'mute_button') else bool(self.player.get_mute())
@@ -834,11 +838,11 @@ class ListenMoePlayer(QWidget):
                         msg.exec_()
                         if msg.clickedButton() == restore_btn:
                             if hasattr(self, 'volume_slider'):
-                                self.volume_slider.setValue(20)
+                                self.volume_slider.setValue(60)
                             else:
-                                self.player.set_volume(20)
+                                self.player.set_volume(60)
                             try:
-                                self.settings.setValue(KEY_VOLUME, 20)
+                                self.settings.setValue(KEY_VOLUME, 60)
                             except Exception:
                                 pass
                     except Exception:
@@ -884,7 +888,7 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-        # Salvaguardia: se abbiamo appena disattivato il muto ma il volume è 0, proponi ripristino a 20%
+        # Salvaguardia: se abbiamo appena disattivato il muto ma il volume è 0, proponi ripristino a 60%
         try:
             if not checked:
                 try:
@@ -902,11 +906,11 @@ class ListenMoePlayer(QWidget):
                         msg.exec_()
                         if msg.clickedButton() == restore_btn:
                             if hasattr(self, 'volume_slider'):
-                                self.volume_slider.setValue(20)
+                                self.volume_slider.setValue(60)
                             else:
-                                self.player.set_volume(20)
+                                self.player.set_volume(60)
                             try:
-                                self.settings.setValue(KEY_VOLUME, 20)
+                                self.settings.setValue(KEY_VOLUME, 60)
                             except Exception:
                                 pass
                     except Exception:

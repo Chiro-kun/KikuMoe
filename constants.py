@@ -23,3 +23,4 @@ KEY_NETWORK_CACHING = "network_caching"
 # New settings keys
 KEY_DARK_MODE = "dark_mode"
 KEY_SLEEP_MINUTES = "sleep_minutes"
+KEY_SLEEP_STOP_ON_END = "sleep_stop_on_end"

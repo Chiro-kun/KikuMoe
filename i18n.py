@@ -72,9 +72,11 @@ I18N: Dict[str, Dict[str, str]] = {
         'sleep_cancel': 'Annulla',
         'sleep_remaining': 'Sleep tra {time}',
         'settings_dark_mode': 'Tema scuro',
+        # Opzione: stop allo scadere Sleep Timer
+        'settings_sleep_stop_on_end': 'Alla scadenza Sleep Timer: ferma riproduzione',
         # Volume zero safeguard
         'volume_zero_title': 'Volume a zero',
-        'volume_zero_text': 'Il volume è impostato a 0. Vuoi ripristinarlo al 20%?',
+        'volume_zero_text': 'Il volume è impostato a 0. Vuoi ripristinarlo al 60%?',
         'restore': 'Ripristina',
     },
     'en': {
@@ -148,9 +150,11 @@ I18N: Dict[str, Dict[str, str]] = {
         'sleep_cancel': 'Cancel',
         'sleep_remaining': 'Sleep in {time}',
         'settings_dark_mode': 'Dark mode',
+        # Option: stop when Sleep Timer elapses
+        'settings_sleep_stop_on_end': 'When Sleep Timer elapses: stop playback',
         # Volume zero safeguard
         'volume_zero_title': 'Volume is zero',
-        'volume_zero_text': 'Volume is set to 0. Do you want to restore it to 20%?',
+        'volume_zero_text': 'Volume is set to 0. Do you want to restore it to 60%?',
         'restore': 'Restore',
     },
 }
