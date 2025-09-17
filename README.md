@@ -40,6 +40,7 @@ python KikuMoe.py
 - Percorso libVLC (opzionale; utile se si usa il fallback VLC o se FFmpeg non è disponibile)
 - Avvio automatico all’apertura (se abilitato)
 - Tray Icon abilitata e notifiche tray
+- Console sviluppatore (abilita la console e usa il pulsante "Console" per aprirla)
 
 Quando chiudi la finestra delle Impostazioni con OK, se lo stream era in riproduzione e hai cambiato Canale, Formato o il percorso di libVLC, l’app mostra "Riavvio dello stream…" e riavvia automaticamente la riproduzione.
 
@@ -74,7 +75,7 @@ Come creare il pacchetto:
    ```
 
 Output:
-- L’eseguibile sarà in `dist\KikuMoe-1.5.exe`.
+- L’eseguibile sarà in `dist\KikuMoe-1.7.exe`.
 
 Dettagli tecnici:
 - Il file `kikumoe.spec` forza la modalità onefile e include automaticamente:
@@ -84,3 +85,10 @@ Dettagli tecnici:
 - In caso di antivirus troppo aggressivi, l’eseguibile onefile può richiedere un’approvazione/whitelist. Il primo avvio potrebbe essere leggermente più lento perché i contenuti vengono estratti in una cartella temporanea.
 
 Nota: le precedenti istruzioni per build manuali con `pyinstaller ... --onefile/--onedir` e le opzioni dello script (es. `-OneFile`, `-Onedir`, `-BundleVlc`) non sono più necessarie né supportate: usare esclusivamente `./build.ps1`, che esegue `pyinstaller kikumoe.spec`.
+## Console sviluppatore (Dev Console)
+- Per abilitare la console, apri Impostazioni e attiva "Console sviluppatore".
+- Con l’opzione attiva, premi il pulsante "Console" nelle Impostazioni per aprirla; quando abilitata può anche aprirsi automaticamente all’avvio dell’app.
+- Quando la Dev Console è aperta, cattura:
+  - i log dei logger Python basati su StreamHandler (root incluso), e
+  - stdout/stderr, compresi i print(...).
+- Alla chiusura della Dev Console, gli stream originali vengono ripristinati. Nota: i messaggi prodotti prima dell’apertura della console non sono mostrati retroattivamente.

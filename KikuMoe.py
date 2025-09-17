@@ -1,15 +1,14 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut, QSpinBox,
-    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog, QMessageBox, QTextEdit
+    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog, QMessageBox
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QObject, pyqtSlot
-from PyQt5.QtGui import QKeySequence, QIcon, QTextCursor, QTextOption
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
+from PyQt5.QtGui import QKeySequence, QIcon
 from typing import Optional
 import os
 import sys
 import re
-import builtins
 from i18n import I18n
 from ws_client import NowPlayingWS
 from player_ffmpeg import PlayerFFmpeg
@@ -39,30 +38,7 @@ import threading
 from logger import get_logger
 from now_playing import compute_display_mmss
 from tray_manager import TrayManager
-
-class _QtStream(QObject):
-    text_emitted = pyqtSignal(str)
-
-    def __init__(self, append_fn):
-        super().__init__()
-        try:
-            # Usa sempre una connessione queue-ata per garantire che l'aggiornamento UI avvenga nel thread principale
-            self.text_emitted.connect(append_fn, Qt.QueuedConnection)
-        except Exception:
-            pass
-
-    def write(self, s):
-        try:
-            if s:
-                self.text_emitted.emit(str(s))
-        except Exception:
-            pass
-
-    def flush(self):
-        pass
-
-    def isatty(self):
-        return False
+from ui.dev_console import DevConsole
 
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
@@ -248,6 +224,11 @@ class ListenMoePlayer(QWidget):
 
         # Initialize logger
         self.log = get_logger('KikuMoe')
+        # Initialize Dev Console helper
+        try:
+            self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
+        except Exception:
+            self.dev_console = None
 
         # Sleep timer runtime
         self._sleep_timer: Optional[QTimer] = QTimer(self)
@@ -308,7 +289,14 @@ class ListenMoePlayer(QWidget):
         try:
             self._tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
             # crea tray manager e applica stato iniziale
-            self.tray_mgr = TrayManager(self, self.i18n, on_show_window=self.show, on_open_settings=self.open_settings)
+            self.tray_mgr = TrayManager(
+                self,
+                self.i18n,
+                on_show_window=self.show,
+                on_open_settings=self.open_settings,
+                on_change_channel=self._tray_change_channel,
+                on_change_format=self._tray_change_format,
+            )
             # inizializza icona/tooltip coerenti
             tooltip = None
             try:
@@ -362,12 +350,12 @@ class ListenMoePlayer(QWidget):
         self.update_vlc_status_label()
         # Update dev console dialog texts if open
         try:
-            if hasattr(self, '_console_dialog') and self._console_dialog:
-                self._console_dialog.setWindowTitle(self.i18n.t('dev_console_title'))
-                if hasattr(self, '_console_btn_clear'):
-                    self._console_btn_clear.setText(self.i18n.t('dev_console_clear'))
-                if hasattr(self, '_console_btn_copy'):
-                    self._console_btn_copy.setText(self.i18n.t('dev_console_copy'))
+            if hasattr(self, 'dev_console') and self.dev_console and self.dev_console.is_open():
+                try:
+                    self.dev_console.set_translator(self.i18n)
+                    self.dev_console.refresh_texts()
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -448,6 +436,20 @@ class ListenMoePlayer(QWidget):
                     self.channel_value.setText(self.settings.value(KEY_CHANNEL, 'J-POP'))
                 if hasattr(self, 'format_value'):
                     self.format_value.setText(self.settings.value(KEY_FORMAT, 'Vorbis'))
+                # Se canale o formato sono cambiati, riavvia lo stream e aggiorna la tray
+                try:
+                    new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+                    new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
+                    if new_channel != prev_channel or new_format != prev_format:
+                        self._restart_stream_after_channel_format_change()
+                        # Aggiorna tooltip/menu della tray
+                        try:
+                            self.update_tray_texts()
+                            self.tray_icon_refresh.emit()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 # Percorso VLC
                 new_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
                 path_changed = (prev_path != new_path)
@@ -487,12 +489,14 @@ class ListenMoePlayer(QWidget):
                 if new_dev_console != prev_dev_console:
                     try:
                         if not new_dev_console:
-                            if hasattr(self, '_console_dialog') and self._console_dialog:
-                                try:
-                                    self._console_dialog.close()
-                                except Exception:
-                                    pass
-                                self._restore_std_streams()
+                            if hasattr(self, 'dev_console') and self.dev_console:
+                                self.dev_console.close()
+                        else:
+                            # Apertura immediata quando abilitata dalle impostazioni
+                            try:
+                                self.open_dev_console(parent_widget=self)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
         except Exception:
@@ -518,160 +522,18 @@ class ListenMoePlayer(QWidget):
             if not invoked_from_settings:
                 if not self._get_bool(KEY_DEV_CONSOLE_ENABLED, False):
                     return
-            # If already open, just focus it
-            if hasattr(self, '_console_dialog') and getattr(self, '_console_dialog', None):
+            if not hasattr(self, 'dev_console') or self.dev_console is None:
                 try:
-                    self._console_dialog.raise_()
-                    self._console_dialog.activateWindow()
+                    self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
+                except Exception:
+                    return
+            if self.dev_console.is_open():
+                try:
+                    self.dev_console.raise_window()
                 except Exception:
                     pass
                 return
-
-            # Build console dialog UI
-            self._console_dialog = QDialog(self)
-            self._console_dialog.setWindowTitle(self.i18n.t('dev_console_title'))
-            self._console_dialog.setModal(False)
-
-            v = QVBoxLayout()
-            self._console_text = QTextEdit()
-            self._console_text.setReadOnly(True)
-            self._console_text.setLineWrapMode(QTextEdit.WidgetWidth)
-            try:
-                self._console_text.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
-            except Exception:
-                pass
-            try:
-                self._console_text.setStyleSheet("font-family: Consolas, 'Courier New', monospace; font-size: 12px;")
-            except Exception:
-                pass
-            v.addWidget(self._console_text)
-
-            h = QHBoxLayout()
-            btn_clear = QPushButton(self.i18n.t('dev_console_clear'))
-            btn_copy = QPushButton(self.i18n.t('dev_console_copy'))
-            btn_clear.clicked.connect(lambda: self._console_text.clear())
-            btn_copy.clicked.connect(lambda: (self._console_text.selectAll(), self._console_text.copy()))
-            h.addStretch(1)
-            h.addWidget(btn_clear)
-            h.addWidget(btn_copy)
-            v.addLayout(h)
-
-            self._console_dialog.setLayout(v)
-
-            # Messaggio iniziale per confermare il rendering della console
-            try:
-                self._console_text.append(">>> Console pronta. I log appariranno qui se la redirezione è attiva.")
-            except Exception:
-                pass
-
-            # Debug: traccia su stdout reale prima del redirect
-            try:
-                real_out = getattr(sys, '__stdout__', None) or getattr(self, '_old_stdout', None) or sys.stdout
-                if real_out:
-                    real_out.write('[DEV] open_dev_console: pre-redirect reached\n')
-                    try:
-                        real_out.flush()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # Redirect stdout/stderr to the QTextEdit using a Qt-friendly stream
-            try:
-                self._old_stdout = sys.stdout
-                self._old_stderr = sys.stderr
-                self._qt_stream_stdout = _QtStream(self._append_console)
-                self._qt_stream_stderr = _QtStream(self._append_console)
-                sys.stdout = self._qt_stream_stdout
-                sys.stderr = self._qt_stream_stderr
-                # Monkeypatch print to ensure capture even if libraries bypass sys.stdout
-                self._old_print = getattr(builtins, 'print', None)
-                def _console_print(*args, **kwargs):
-                    try:
-                        sep = kwargs.get('sep', ' ')
-                        end = kwargs.get('end', '\n')
-                        text = sep.join(str(a) for a in args) + end
-                        try:
-                            if hasattr(self, '_qt_stream_stdout') and self._qt_stream_stdout:
-                                self._qt_stream_stdout.write(text)
-                        except Exception:
-                            pass
-                        try:
-                            if self._old_print is not None:
-                                file_kw = kwargs.copy()
-                                # ensure we mirror to the original stdout, not the redirected one
-                                file_kw['file'] = getattr(self, '_old_stdout', None)
-                                self._old_print(*args, **file_kw)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                try:
-                    builtins.print = _console_print
-                except Exception:
-                    pass
-                try:
-                    self.log.info('[DEV] Console sviluppatore attivata. Output reindirizzato.')
-                except Exception:
-                    pass
-                QTimer.singleShot(150, lambda: self.log.debug('[DEV] Test timer: console attiva e redirect funzionante?'))
-                QTimer.singleShot(300, lambda: self._append_console('[DEV] Test timer (append diretto)\n'))
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    @pyqtSlot(str)
-    def _append_console(self, s: str):
-        try:
-            if not hasattr(self, '_console_text') or self._console_text is None:
-                return
-            if s is None:
-                return
-            text = str(s)
-            if not text:
-                return
-            self._console_text.moveCursor(QTextCursor.End)
-            self._console_text.insertPlainText(text)
-            self._console_text.moveCursor(QTextCursor.End)
-        except Exception:
-            pass
-
-    def _restore_std_streams(self):
-        try:
-            # Ripristina print monkeypatch
-            try:
-                if hasattr(self, '_old_print') and self._old_print is not None:
-                    builtins.print = self._old_print
-            except Exception:
-                pass
-            # Restore sys.stdout/sys.stderr if previously redirected
-            try:
-                if hasattr(self, '_old_stdout') and self._old_stdout:
-                    sys.stdout = self._old_stdout
-            except Exception:
-                pass
-            try:
-                if hasattr(self, '_old_stderr') and self._old_stderr:
-                    sys.stderr = self._old_stderr
-            except Exception:
-                pass
-            self._old_stdout = None
-            self._old_stderr = None
-            self._qt_stream_stdout = None
-            self._qt_stream_stderr = None
-
-            # Cleanup dialog references
-            try:
-                if hasattr(self, '_console_dialog') and self._console_dialog:
-                    try:
-                        self._console_dialog.close()
-                    except Exception:
-                        pass
-                    self._console_dialog.deleteLater()
-                    self._console_dialog = None
-            except Exception:
-                pass
+            self.dev_console.open()
         except Exception:
             pass
 
@@ -1043,22 +905,121 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _ensure_tray(self, enabled: bool) -> None:
+        try:
+            self._tray_enabled = bool(enabled)
+            # Ensure tray manager exists
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
+                try:
+                    self.tray_mgr = TrayManager(
+                        self,
+                        self.i18n,
+                        on_show_window=self.show,
+                        on_open_settings=self.open_settings,
+                        on_change_channel=self._tray_change_channel,
+                        on_change_format=self._tray_change_format,
+                    )
+                except Exception:
+                    return
+            # Compose tooltip from current UI state
+            try:
+                header = self.i18n.t('header').format(
+                    channel=self.settings.value(KEY_CHANNEL, 'J-POP'),
+                    format=self.settings.value(KEY_FORMAT, 'Vorbis')
+                )
+            except Exception:
+                header = APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tooltip = f"{header}\n{now}" if now else header
+            # Apply visibility/icon/tooltip
+            try:
+                self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def update_tray_icon(self) -> None:
         try:
             if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
                 return
-            self.tray_mgr.update_icon(self.windowIcon())
+            # Update tray visibility/icon/tooltip based on current state
+            try:
+                header = self.label.text() if hasattr(self, 'label') else APP_TITLE
+            except Exception:
+                header = APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tooltip = f"{header}\n{now}" if now else header
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
         except Exception:
             pass
 
-    def _ensure_tray(self, enabled: bool) -> None:
+    def _tray_change_channel(self, channel: str) -> None:
         try:
-            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
-                self.tray_mgr = TrayManager(self, self.i18n, on_show_window=self.show, on_open_settings=self.open_settings)
-            header = self.label.text() if hasattr(self, 'label') else APP_TITLE
-            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
-            self.tray_mgr.ensure_tray_enabled(enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            # Aggiorna impostazione
+            try:
+                self.settings.setValue(KEY_CHANNEL, channel)
+            except Exception:
+                pass
+            # Aggiorna intestazione/tray
+            try:
+                self.update_header_label()
+            except Exception:
+                pass
+            try:
+                self.update_tray_texts()
+            except Exception:
+                pass
+            # Riavvia stream se già in riproduzione
+            self._restart_stream_after_channel_format_change()
+        except Exception:
+            pass
+
+    def _tray_change_format(self, fmt: str) -> None:
+        try:
+            # Aggiorna impostazione
+            try:
+                self.settings.setValue(KEY_FORMAT, fmt)
+            except Exception:
+                pass
+            # Aggiorna intestazione/tray
+            try:
+                self.update_header_label()
+            except Exception:
+                pass
+            try:
+                self.update_tray_texts()
+            except Exception:
+                pass
+            # Riavvia stream se già in riproduzione
+            self._restart_stream_after_channel_format_change()
+        except Exception:
+            pass
+
+    def _restart_stream_after_channel_format_change(self) -> None:
+        try:
+            was_playing = False
+            try:
+                was_playing = bool(self.player and self.player.is_playing())
+            except Exception:
+                was_playing = False
+            if was_playing:
+                try:
+                    self.stop_stream()
+                except Exception:
+                    pass
+                # Piccolo delay per lasciare tempo al backend di fermarsi
+                try:
+                    QTimer.singleShot(200, self.play_stream)
+                except Exception:
+                    # Fallback sincrono
+                    self.play_stream()
+            else:
+                # Se non stava riproducendo, aggiorna comunque icona/tooltip
+                try:
+                    self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1258,6 +1219,19 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, 'player') and self.player:
                 self.player.force_cleanup()
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:
+        # Chiudi DevConsole per ripristinare stdout/stderr e print
+        try:
+            if hasattr(self, 'dev_console') and self.dev_console:
+                self.dev_console.close()
+        except Exception:
+            pass
+        # Accetta la chiusura della finestra
+        try:
+            event.accept()
         except Exception:
             pass
 
