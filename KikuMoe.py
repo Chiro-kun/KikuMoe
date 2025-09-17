@@ -884,6 +884,36 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+        # Salvaguardia: se abbiamo appena disattivato il muto ma il volume è 0, proponi ripristino a 20%
+        try:
+            if not checked:
+                try:
+                    vol = int(self.volume_slider.value()) if hasattr(self, 'volume_slider') else int(self.player.get_volume())
+                except Exception:
+                    vol = 0
+                if vol <= 0:
+                    try:
+                        msg = QMessageBox(self)
+                        msg.setWindowTitle(self.i18n.t('volume_zero_title'))
+                        msg.setText(self.i18n.t('volume_zero_text'))
+                        restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.AcceptRole)
+                        cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
+                        msg.setIcon(QMessageBox.Question)
+                        msg.exec_()
+                        if msg.clickedButton() == restore_btn:
+                            if hasattr(self, 'volume_slider'):
+                                self.volume_slider.setValue(20)
+                            else:
+                                self.player.set_volume(20)
+                            try:
+                                self.settings.setValue(KEY_VOLUME, 20)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def toggle_mute_shortcut(self) -> None:
         try:
             self.mute_button.setChecked(not self.mute_button.isChecked())
