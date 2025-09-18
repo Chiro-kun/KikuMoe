@@ -8,6 +8,7 @@ import sys
 import struct
 import re
 from logger import get_logger
+from constants import APP_NAME, APP_VERSION
 
 try:
     import pyaudio
@@ -35,6 +36,11 @@ class PlayerFFmpeg:
         # Track pause state explicitly
         self._paused: bool = False
         self.log = get_logger('PlayerFFmpeg')
+        # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.8.0.0")
+        try:
+            self._user_agent = f"{APP_NAME}/{APP_VERSION}"
+        except Exception:
+            self._user_agent = "KikuMoe/1.8"
         self._init_audio()
 
     def _init_audio(self) -> None:
@@ -417,7 +423,7 @@ class PlayerFFmpeg:
                 '-reconnect_at_eof', '1',
                 '-reconnect_on_network_error', '1',
                 '-rw_timeout', '15000000',
-                '-user_agent', 'KikuMoe/1.8',
+                '-user_agent', self._user_agent,
                 # Removed custom Connection: close header to allow persistent streaming
                 # '-headers', 'Connection: close\r\n',
                 '-i', safe_url,

@@ -1,7 +1,59 @@
 # Application constants and settings keys
+import os
+import re
 
 APP_NAME = "KikuMoe"
-APP_VERSION = "1.8"
+
+
+def _get_project_root() -> str:
+    try:
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    except Exception:
+        return os.getcwd()
+
+
+def _read_version_from_files() -> str:
+    # 1) Try version.yml (simple to parse without YAML dep)
+    try:
+        root = _get_project_root()
+        for path in (
+            os.path.join(root, "version.yml"),
+            os.path.join(os.path.dirname(__file__), "version.yml"),
+        ):
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip().lower().startswith("version:"):
+                            ver = line.split(":", 1)[1].strip()
+                            if ver:
+                                return ver
+    except Exception:
+        pass
+    
+    # 2) Try version_info.txt (parse FileVersion or filevers tuple)
+    try:
+        root = _get_project_root()
+        path = os.path.join(root, "version_info.txt")
+        if os.path.isfile(path):
+            data = ""
+            with open(path, "r", encoding="utf-8") as f:
+                data = f.read()
+            # Prefer StringStruct 'FileVersion', e.g. 1.8.0.0
+            m = re.search(r"FileVersion\'\s*,\s*u?\'([^\']+)\'", data)
+            if m:
+                return m.group(1).strip()
+            # Fallback to filevers=(1,8,0,0)
+            m2 = re.search(r"filevers=\((\d+),(\d+),(\d+),(\d+)\)", data)
+            if m2:
+                return ".".join(m2.groups())
+    except Exception:
+        pass
+    
+    # 3) Fallback to default
+    return "1.8"
+
+
+APP_VERSION = _read_version_from_files()
 APP_TITLE = f"{APP_NAME} {APP_VERSION}"
 
 # QSettings scope

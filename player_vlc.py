@@ -2,6 +2,8 @@ from __future__ import annotations
 from typing import Optional, Callable
 import os
 
+from constants import APP_NAME, APP_VERSION
+
 try:
     import vlc
 except Exception:
@@ -18,6 +20,11 @@ class PlayerVLC:
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
+        # Build dynamic User-Agent similar to ffmpeg backend
+        try:
+            self._user_agent = f"{APP_NAME}/{APP_VERSION}"
+        except Exception:
+            self._user_agent = "KikuMoe/1.8"
         self._init_vlc()
 
     def _init_vlc(self) -> None:
@@ -50,6 +57,12 @@ class PlayerVLC:
                 "--http-continuous",  # Continuous HTTP streaming
                 "--live-caching=1000",  # Small live caching for smooth playback
             ])
+            # Set HTTP User-Agent globally for VLC instance
+            try:
+                if getattr(self, "_user_agent", None):
+                    inst_opts.append(f"--http-user-agent={self._user_agent}")
+            except Exception:
+                pass
             self.instance = vlc.Instance(inst_opts)
             self.player = self.instance.media_player_new()
             # Hook events for UI feedback
@@ -111,6 +124,12 @@ class PlayerVLC:
             time.sleep(0.3)
             # Create and set new media
             media = self.instance.media_new(url)
+            # Also set per-media user agent to be extra sure
+            try:
+                if getattr(self, "_user_agent", None):
+                    media.add_option(f":http-user-agent={self._user_agent}")
+            except Exception:
+                pass
             self.player.set_media(media)
             self.player.play()
             return True
