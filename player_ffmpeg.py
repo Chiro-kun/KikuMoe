@@ -417,7 +417,7 @@ class PlayerFFmpeg:
                 '-reconnect_at_eof', '1',
                 '-reconnect_on_network_error', '1',
                 '-rw_timeout', '15000000',
-                '-user_agent', 'KikuMoe/1.5',
+                '-user_agent', 'KikuMoe/1.8',
                 # Removed custom Connection: close header to allow persistent streaming
                 # '-headers', 'Connection: close\r\n',
                 '-i', safe_url,
