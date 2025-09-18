@@ -4,11 +4,8 @@ import os
 import threading
 import time
 import subprocess
-import tempfile
-import signal
 import sys
 import struct
-import traceback
 import re
 from logger import get_logger
 
@@ -67,7 +64,7 @@ class PlayerFFmpeg:
         """Check if ffmpeg is available."""
         try:
             result = subprocess.run(['ffmpeg', '-version'],
-                                    capture_output=True, check=False, timeout=5)
+                                    capture_output=True, check=False, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
             return result.returncode == 0
         except Exception:
             return False
@@ -277,7 +274,7 @@ class PlayerFFmpeg:
         """Return ffmpeg version string if available."""
         try:
             result = subprocess.run(['ffmpeg', '-version'],
-                                    capture_output=True, text=True, timeout=5)
+                                    capture_output=True, text=True, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
             if result.returncode == 0:
                 return result.stdout.split('\n')[0]
         except Exception:
@@ -350,7 +347,7 @@ class PlayerFFmpeg:
         try:
             if sys.platform == "win32":
                 subprocess.run(["taskkill", "/f", "/im", "ffmpeg.exe"],
-                               capture_output=True, check=False)
+                               capture_output=True, check=False, **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
             else:
                 subprocess.run(["pkill", "-f", "ffmpeg"],
                                capture_output=True, check=False)
@@ -446,7 +443,8 @@ class PlayerFFmpeg:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         stdin=subprocess.DEVNULL,
-                        bufsize=0
+                        bufsize=0,
+                        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {})
                     )
                     self.log.debug("[DEBUG] _stream_worker: ffmpeg process started, pid: %s", self._ffmpeg_process.pid)
                 except Exception as e:

@@ -229,10 +229,12 @@ class PlayerVLC:
             
             if platform.system() == "Windows":
                 # Kill VLC processes on Windows
-                subprocess.run(["taskkill", "/f", "/im", "vlc.exe"], 
-                             capture_output=True, check=False)
-                subprocess.run(["taskkill", "/f", "/im", "libvlc.dll"], 
-                             capture_output=True, check=False)
+                subprocess.run(["taskkill", "/f", "/im", "vlc.exe"],
+                               capture_output=True, check=False,
+                               **({"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}))
+                subprocess.run(["taskkill", "/f", "/im", "libvlc.dll"],
+                               capture_output=True, check=False,
+                               **({"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}))
             else:
                 # Kill VLC processes on Unix-like systems
                 subprocess.run(["pkill", "-f", "vlc"], 

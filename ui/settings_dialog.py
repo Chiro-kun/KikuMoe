@@ -27,12 +27,19 @@ class SettingsDialog(QDialog):
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, 'it'))
         self.setWindowTitle(self.i18n.t('settings_title'))
+        try:
+            self.setMinimumSize(560, 360)
+        except Exception:
+            pass
 
         layout = QVBoxLayout()
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
 
         # Autoplay
         self.chk_autoplay = QCheckBox(self.i18n.t('settings_autoplay'))
         self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, 'false') == 'true')
+        self.chk_autoplay.setToolTip(self.i18n.t('settings_autoplay_tip') if hasattr(self.i18n, 't') else '')
         layout.addWidget(self.chk_autoplay)
 
         # Dark Mode
@@ -50,10 +57,16 @@ class SettingsDialog(QDialog):
         self.chk_dev_console.setChecked(self.settings.value(KEY_DEV_CONSOLE_ENABLED, 'false') == 'true')
         # Row with checkbox + open button
         dev_row = QHBoxLayout()
+        dev_row.setSpacing(8)
         dev_row.addWidget(self.chk_dev_console)
         self.btn_open_console = QPushButton(self.i18n.t('dev_console_button'))
+        try:
+            self.btn_open_console.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
+        except Exception:
+            pass
         self.btn_open_console.setEnabled(self.chk_dev_console.isChecked())
         self.btn_open_console.clicked.connect(self._on_open_console)
+        dev_row.addStretch(1)
         dev_row.addWidget(self.btn_open_console)
         layout.addLayout(dev_row)
         # Enable/disable button based on checkbox state
@@ -61,43 +74,71 @@ class SettingsDialog(QDialog):
 
         # Language
         lang_row = QHBoxLayout()
-        lang_row.addWidget(QLabel(self.i18n.t('settings_language')))
+        lang_row.setSpacing(8)
+        lab_lang = QLabel(self.i18n.t('settings_language'))
+        lab_lang.setMinimumWidth(140)
+        lang_row.addWidget(lab_lang)
         self.cmb_lang = QComboBox()
         self.cmb_lang.addItems(['Italiano', 'English'])
         self.cmb_lang.setCurrentIndex(0 if self.settings.value(KEY_LANG, 'it') == 'it' else 1)
-        lang_row.addWidget(self.cmb_lang)
+        try:
+            self.cmb_lang.setMinimumWidth(160)
+        except Exception:
+            pass
+        lang_row.addWidget(self.cmb_lang, 1)
         layout.addLayout(lang_row)
 
         # Channel & Format
         ch_row = QHBoxLayout()
-        ch_row.addWidget(QLabel(self.i18n.t('settings_channel')))
+        ch_row.setSpacing(8)
+        lab_ch = QLabel(self.i18n.t('settings_channel'))
+        lab_ch.setMinimumWidth(140)
+        ch_row.addWidget(lab_ch)
         self.cmb_channel = QComboBox()
         self.cmb_channel.addItems(['J-POP', 'K-POP'])
         self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, 'J-POP'))
-        ch_row.addWidget(self.cmb_channel)
+        ch_row.addWidget(self.cmb_channel, 1)
         layout.addLayout(ch_row)
 
         fmt_row = QHBoxLayout()
-        fmt_row.addWidget(QLabel(self.i18n.t('settings_format')))
+        fmt_row.setSpacing(8)
+        lab_fmt = QLabel(self.i18n.t('settings_format'))
+        lab_fmt.setMinimumWidth(140)
+        fmt_row.addWidget(lab_fmt)
         self.cmb_format = QComboBox()
         self.cmb_format.addItems(['Vorbis', 'MP3'])
         self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, 'Vorbis'))
-        fmt_row.addWidget(self.cmb_format)
+        fmt_row.addWidget(self.cmb_format, 1)
         layout.addLayout(fmt_row)
 
         # VLC Path
         vlc_row = QHBoxLayout()
-        vlc_row.addWidget(QLabel(self.i18n.t('settings_vlc_path')))
+        vlc_row.setSpacing(8)
+        lab_vlc = QLabel(self.i18n.t('settings_vlc_path'))
+        lab_vlc.setMinimumWidth(140)
+        vlc_row.addWidget(lab_vlc)
         self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, '') or '')
-        vlc_row.addWidget(self.txt_vlc_path)
+        self.txt_vlc_path.setPlaceholderText('C:/Program Files/VideoLAN/VLC' if Qt.Key_Enter else '')
+        try:
+            self.txt_vlc_path.setMinimumWidth(260)
+        except Exception:
+            pass
+        vlc_row.addWidget(self.txt_vlc_path, 1)
         self.btn_browse_vlc = QPushButton(self.i18n.t('settings_browse'))
+        try:
+            self.btn_browse_vlc.setIcon(self.style().standardIcon(self.style().SP_DialogOpenButton))
+        except Exception:
+            pass
         self.btn_browse_vlc.clicked.connect(self._browse_vlc_path)
         vlc_row.addWidget(self.btn_browse_vlc)
         layout.addLayout(vlc_row)
 
         # Network caching (ms)
         nc_row = QHBoxLayout()
-        nc_row.addWidget(QLabel(self.i18n.t('settings_network_caching')))
+        nc_row.setSpacing(8)
+        lab_nc = QLabel(self.i18n.t('settings_network_caching'))
+        lab_nc.setMinimumWidth(140)
+        nc_row.addWidget(lab_nc)
         self.spin_network_caching = QSpinBox()
         self.spin_network_caching.setRange(0, 20000)
         self.spin_network_caching.setSingleStep(250)
@@ -120,9 +161,16 @@ class SettingsDialog(QDialog):
 
         # Buttons
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
         self.btn_ok = QPushButton(self.i18n.t('settings_ok'))
         self.btn_cancel = QPushButton(self.i18n.t('settings_cancel'))
         self.btn_apply = QPushButton(self.i18n.t('settings_apply'))
+        try:
+            self.btn_ok.setIcon(self.style().standardIcon(self.style().SP_DialogOkButton))
+            self.btn_cancel.setIcon(self.style().standardIcon(self.style().SP_DialogCancelButton))
+            self.btn_apply.setIcon(self.style().standardIcon(self.style().SP_DialogApplyButton))
+        except Exception:
+            pass
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_apply.clicked.connect(self._on_apply)

@@ -1,14 +1,14 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut, QSpinBox,
-    QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle, QDialog, QMessageBox
+    QDialog, QMessageBox, QSizePolicy
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer
-from PyQt5.QtGui import QKeySequence, QIcon
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize
+from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
 from typing import Optional
-import os
 import sys
-import re
+import os
+import time
 from i18n import I18n
 from ws_client import NowPlayingWS
 from player_ffmpeg import PlayerFFmpeg
@@ -71,11 +71,17 @@ class ListenMoePlayer(QWidget):
         self.setMinimumSize(500, 400)
         # uso _layout per non sovrascrivere QWidget.layout()
         self._layout = QVBoxLayout()
+        self._layout.setContentsMargins(16, 16, 16, 16)
+        self._layout.setSpacing(8)
 
         # Header + Now playing
         self.label = QLabel(self.i18n.t('header').format(channel='J-POP', format='Vorbis'))
+        self.label.setObjectName('headerLabel')
+        self.label.setStyleSheet('font-size: 16px; font-weight: 600;')
         self.status_label = QLabel("")
         self.now_playing_label = QLabel(f"{self.i18n.t('now_playing_prefix')} –")
+        self.now_playing_label.setObjectName('nowPlayingLabel')
+        self.now_playing_label.setStyleSheet('font-size: 14px; font-weight: 500;')
         self._layout.addWidget(self.label)
         self._layout.addWidget(self.status_label)
         self._layout.addWidget(self.now_playing_label)
@@ -142,17 +148,36 @@ class ListenMoePlayer(QWidget):
         self.force_stop_button = QPushButton("FORCE STOP")  # Emergency stop
 
         vol_row = QHBoxLayout()
+        vol_row.setSpacing(8)
         self.volume_label = QLabel(self.i18n.t('volume'))
         self.volume_slider = QSlider()
         # QSlider default è orizzontale: evitiamo chiamate che i type-stub possono segnalare
         # (riduce falsi positivi di Pylance mantenendo comportamento runtime)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(int(self.settings.value(KEY_VOLUME, 80)))
+        # Miglioramenti UX per lo slider del volume
+        try:
+            self.volume_slider.setOrientation(Qt.Horizontal)
+            self.volume_slider.setTickPosition(QSlider.TicksBelow)
+            self.volume_slider.setTickInterval(10)
+            self.volume_slider.setSingleStep(1)
+            self.volume_slider.setPageStep(5)
+            self.volume_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.volume_slider.setMinimumWidth(160)
+            self.volume_slider.setToolTip(f"{int(self.volume_slider.value())}%")
+        except Exception:
+            pass
+        # Etichetta percentuale accanto allo slider
+        try:
+            self.volume_value_label = QLabel(f"{int(self.volume_slider.value())}%")
+        except Exception:
+            self.volume_value_label = QLabel("-")
         self.mute_button = QPushButton(self.i18n.t('mute'))
         self.mute_button.setCheckable(True)
         self.mute_button.setChecked(self._get_bool(KEY_MUTE, False))
         vol_row.addWidget(self.volume_label)
         vol_row.addWidget(self.volume_slider)
+        vol_row.addWidget(self.volume_value_label)
         vol_row.addWidget(self.mute_button)
 
         self._layout.addWidget(self.play_button)
@@ -160,9 +185,42 @@ class ListenMoePlayer(QWidget):
         self._layout.addWidget(self.stop_button)
         self._layout.addWidget(self.force_stop_button)
         self._layout.addLayout(vol_row)
+        # Imposta icone e tooltip dei pulsanti principali
+        try:
+            # Play: preferisci l'icona bundled, altrimenti fallback al sistema
+            if hasattr(self, '_icon_play') and not self._icon_play.isNull():
+                self.play_button.setIcon(self._icon_play)
+            else:
+                self.play_button.setIcon(self.style().standardIcon(self.style().SP_MediaPlay))
+            # Pause: icona di sistema
+            self.pause_button.setIcon(self.style().standardIcon(self.style().SP_MediaPause))
+            self.pause_button.setStyleSheet("")
+            self.pause_button.setIcon(self._tint_icon(self.pause_button.icon(), QColor("#f39c12"), self.pause_button.iconSize()))
+            self.pause_button.setObjectName('pauseButton')
+            self.pause_button.setStyleSheet("")
+            # Stop: forza icona standard "quadrato"
+            self.stop_button.setIcon(self.style().standardIcon(self.style().SP_MediaStop))
+            self.stop_button.setStyleSheet("")
+            self.stop_button.setIcon(self._tint_icon(self.stop_button.icon(), QColor("#e53935"), self.stop_button.iconSize()))
+            self.stop_button.setObjectName('stopButton')
+            self.stop_button.setStyleSheet("")
+            # Mute: icona in base allo stato attuale
+            self.mute_button.setIcon(
+                self.style().standardIcon(self.style().SP_MediaVolumeMuted)
+                if self.mute_button.isChecked() else
+                self.style().standardIcon(self.style().SP_MediaVolume)
+            )
+            # Tooltip localizzati
+            self.play_button.setToolTip(self.i18n.t('tt_play'))
+            self.pause_button.setToolTip(self.i18n.t('tt_pause'))
+            self.stop_button.setToolTip(self.i18n.t('tt_stop'))
+            self.mute_button.setToolTip(self.i18n.t('tt_unmute') if self.mute_button.isChecked() else self.i18n.t('tt_mute'))
+        except Exception:
+            pass
 
         # Sleep Timer row
         sleep_row = QHBoxLayout()
+        sleep_row.setSpacing(8)
         self.sleep_title = QLabel(self.i18n.t('sleep_timer'))
         self.sleep_minutes_label = QLabel(self.i18n.t('sleep_minutes'))
         self.spin_sleep = QSpinBox()
@@ -333,6 +391,14 @@ class ListenMoePlayer(QWidget):
         self.stop_button.setText(self.i18n.t('stop'))
         self.volume_label.setText(self.i18n.t('volume'))
         self.mute_button.setText(self.i18n.t('unmute') if self.mute_button.isChecked() else self.i18n.t('mute'))
+        # Aggiorna tooltip dei controlli
+        try:
+            self.play_button.setToolTip(self.i18n.t('tt_play'))
+            self.pause_button.setToolTip(self.i18n.t('tt_pause'))
+            self.stop_button.setToolTip(self.i18n.t('tt_stop'))
+            self.mute_button.setToolTip(self.i18n.t('tt_unmute') if self.mute_button.isChecked() else self.i18n.t('tt_mute'))
+        except Exception:
+            pass
         if hasattr(self, 'settings_button'):
             self.settings_button.setText(self.i18n.t('settings_button'))
         # Sleep UI texts
@@ -369,21 +435,50 @@ class ListenMoePlayer(QWidget):
                 app.setStyleSheet(
                     """
                     QWidget { background-color: #121212; color: #e0e0e0; }
-                    QPushButton { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px; }
+                    QLabel#headerLabel { font-size: 16px; font-weight: 600; color: #ffffff; }
+                    QLabel#nowPlayingLabel { font-size: 14px; font-weight: 500; color: #e0e0e0; }
+                    QPushButton { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }
                     QPushButton:hover { background-color: #2a2a2a; }
-                    QLineEdit, QSpinBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; }
-                    QComboBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; }
-                    QMenu { background-color: #121212; color: #e0e0e0; }
-                    QProgressBar { background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; }
-                    QProgressBar::chunk { background-color: #3a86ff; }
-                    QSlider::groove:horizontal { height: 6px; background: #333; }
-                    QSlider::handle:horizontal { background: #ddd; width: 12px; margin: -4px 0; border-radius: 6px; }
+                    QPushButton:disabled { background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }
+                    QLineEdit, QSpinBox, QComboBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }
+                    QMenu { background-color: #121212; color: #e0e0e0; border: 1px solid #333; }
+                    QToolTip { background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }
+                    QProgressBar { background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; border-radius: 4px; text-align: center; }
+                    QProgressBar::chunk { background-color: #3a86ff; border-radius: 4px; }
+                    QSlider::groove:horizontal { height: 6px; background: #333; border-radius: 3px; }
+                    QSlider::handle:horizontal { background: #e0e0e0; width: 12px; margin: -4px 0; border-radius: 6px; }
                     """
                 )
             else:
                 app.setStyleSheet("")
+            try:
+                if hasattr(self, 'dev_console') and self.dev_console and self.dev_console.is_open():
+                    self.dev_console.apply_theme(dark)
+            except Exception:
+                pass
         except Exception:
             pass
+
+    def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
+        try:
+            if icon is None or icon.isNull():
+                return icon
+            if not size or size.isEmpty():
+                size = QSize(16, 16)
+            src = icon.pixmap(size)
+            if src.isNull():
+                return icon
+            dst = QPixmap(src.size())
+            dst.fill(Qt.transparent)
+            painter = QPainter(dst)
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.drawPixmap(0, 0, src)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(dst.rect(), color)
+            painter.end()
+            return QIcon(dst)
+        except Exception:
+            return icon
 
     def _set_buffer_bar_indeterminate(self, active: bool) -> None:
         try:
@@ -436,11 +531,23 @@ class ListenMoePlayer(QWidget):
                     self.channel_value.setText(self.settings.value(KEY_CHANNEL, 'J-POP'))
                 if hasattr(self, 'format_value'):
                     self.format_value.setText(self.settings.value(KEY_FORMAT, 'Vorbis'))
-                # Se canale o formato sono cambiati, riavvia lo stream e aggiorna la tray
+                # Se canale o formato sono cambiati, resetta subito Now Playing e riavvia lo stream, poi aggiorna la tray
                 try:
                     new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
                     new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
                     if new_channel != prev_channel or new_format != prev_format:
+                        # Reset immediato del Now Playing per evitare titolo obsoleto
+                        try:
+                            self._current_title = '–'
+                            self._current_artist = ''
+                            self._current_duration_seconds = None
+                            self._current_start_epoch = None
+                            try:
+                                self.label_refresh.emit()
+                            except Exception:
+                                self.update_now_playing_label()
+                        except Exception:
+                            pass
                         self._restart_stream_after_channel_format_change()
                         # Aggiorna tooltip/menu della tray
                         try:
@@ -466,7 +573,6 @@ class ListenMoePlayer(QWidget):
                     new_nc = 1000
                 if path_changed or new_nc != prev_nc:
                     self.status_changed.emit(self.t('status_restarting'))
-                    import time
                     time.sleep(0.5)
                     # Recreate player with new settings
                     try:
@@ -533,7 +639,18 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
                 return
-            self.dev_console.open()
+            try:
+                self.dev_console.open()
+                try:
+                    dark = self._get_bool(KEY_DARK_MODE, False)
+                except Exception:
+                    dark = False
+                try:
+                    self.dev_console.apply_theme(dark)
+                except Exception:
+                    pass
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -690,7 +807,6 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     dur = None
                 if dur and self._current_start_epoch is not None:
-                    import time
                     try:
                         elapsed = int(time.time()) - int(self._current_start_epoch)
                     except Exception:
@@ -717,6 +833,107 @@ class ListenMoePlayer(QWidget):
             self.setWindowTitle(f"{base} — {title}")
         except Exception:
             pass
+
+    def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
+        """Gestisce gli eventi del backend (FFmpeg/VLC) aggiornando lo stato UI."""
+        try:
+            c = (str(code).lower() if code is not None else '')
+        except Exception:
+            c = ''
+        try:
+            if c == 'opening':
+                # Mostra buffering indeterminato in fase di apertura
+                try:
+                    self.status_changed.emit(self.t('status_opening'))
+                except Exception:
+                    pass
+                try:
+                    self.buffering_visible.emit(True)
+                    self.buffering_indeterminate.emit(True)
+                except Exception:
+                    pass
+                try:
+                    self.backend_status_refresh.emit()
+                except Exception:
+                    pass
+                return
+
+            if c == 'buffering':
+                # Mostra buffering (determinato se percentuale disponibile)
+                try:
+                    self.status_changed.emit(self.t('status_buffering'))
+                except Exception:
+                    pass
+                try:
+                    self.buffering_visible.emit(True)
+                    if isinstance(value, int) and 0 <= value <= 100:
+                        self.buffering_indeterminate.emit(False)
+                        self.buffering_progress.emit(int(value))
+                    else:
+                        self.buffering_indeterminate.emit(True)
+                except Exception:
+                    pass
+                return
+
+            if c == 'playing':
+                try:
+                    self.status_changed.emit(self.t('status_playing'))
+                except Exception:
+                    pass
+                try:
+                    self.buffering_visible.emit(False)
+                    self.buffering_indeterminate.emit(False)
+                except Exception:
+                    pass
+                try:
+                    self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+                return
+
+            if c == 'paused':
+                try:
+                    self.status_changed.emit(self.t('status_paused'))
+                except Exception:
+                    pass
+                return
+
+            if c in ('stopped', 'ended'):
+                try:
+                    self.status_changed.emit(self.t('status_stopped'))
+                except Exception:
+                    pass
+                try:
+                    self.buffering_visible.emit(False)
+                    self.buffering_indeterminate.emit(False)
+                except Exception:
+                    pass
+                try:
+                    self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+                return
+
+            if c in ('error', 'libvlc_init_failed'):
+                try:
+                    self.status_changed.emit(self.t('status_error'))
+                except Exception:
+                    pass
+                try:
+                    self.buffering_visible.emit(False)
+                    self.buffering_indeterminate.emit(False)
+                except Exception:
+                    pass
+                try:
+                    self.backend_status_refresh.emit()
+                except Exception:
+                    pass
+                return
+        except Exception:
+            try:
+                self.status_changed.emit(self.t('status_error'))
+            except Exception:
+                pass
 
     def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
         try:
@@ -756,124 +973,6 @@ class ListenMoePlayer(QWidget):
                 self.notify_tray.emit(msg_title, body)
         except Exception:
             pass
-
-    def _notify_tray(self, msg_title: str, body: str) -> None:
-        try:
-            tray = getattr(self, 'tray', None)
-            if not tray:
-                return
-            tray.showMessage(msg_title, body)
-        except Exception:
-            pass
-
-    # ------------------- Player events (from backends) -------------------
-    def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
-        try:
-            c = (code or '').lower()
-        except Exception:
-            c = str(code).lower() if code is not None else ''
-        try:
-            if c == 'opening':
-                self.status_changed.emit(self.t('status_opening'))
-                self.buffering_indeterminate.emit(True)
-                self.buffering_visible.emit(True)
-                self.buffering_progress.emit(0)
-                try:
-                    self.log.info('[EVENT] opening')
-                except Exception:
-                    pass
-            elif c == 'buffering':
-                # Mostra la barra solo se non abbiamo già completato
-                pct = None
-                try:
-                    pct = int(value) if value is not None else None
-                except Exception:
-                    pct = None
-                if pct is not None:
-                    # Passa a modalità determinata e aggiorna progresso
-                    self.buffering_indeterminate.emit(False)
-                    self.buffering_progress.emit(max(0, min(100, pct)))
-                    # Aggiorna stato con percentuale
-                    try:
-                        self.status_changed.emit(self.i18n.t('status_buffering_pct').format(pct=pct))
-                    except Exception:
-                        self.status_changed.emit(self.t('status_buffering'))
-                    # Se siamo al 100% nascondi subito la barra per evitare flicker
-                    if pct >= 100:
-                        self.buffering_visible.emit(False)
-                    else:
-                        self.buffering_visible.emit(True)
-                    try:
-                        self.log.info(f"[EVENT] buffering {pct}%")
-                    except Exception:
-                        pass
-                else:
-                    # Nessun valore percentuale -> modalità indeterminata
-                    self.buffering_indeterminate.emit(True)
-                    self.buffering_visible.emit(True)
-            elif c == 'playing':
-                self.buffering_visible.emit(False)
-                self.buffering_indeterminate.emit(False)
-                self.status_changed.emit(self.t('status_playing'))
-                self.tray_icon_refresh.emit()
-                try:
-                    self.log.info('[EVENT] playing')
-                except Exception:
-                    pass
-            elif c == 'paused':
-                # In pausa la barra di buffering non è utile: nascondila
-                self.buffering_visible.emit(False)
-                self.buffering_indeterminate.emit(False)
-                self.status_changed.emit(self.t('status_paused'))
-                try:
-                    self.log.info("[EVENT] paused")
-                except Exception:
-                    pass
-            elif c == 'stopped':
-                self.buffering_visible.emit(False)
-                self.buffering_indeterminate.emit(False)
-                self.status_changed.emit(self.t('status_stopped'))
-                self.tray_icon_refresh.emit()
-                try:
-                    self.log.info('[EVENT] stopped')
-                except Exception:
-                    pass
-            elif c == 'ended':
-                # Fine stream: nascondi la barra
-                self.buffering_visible.emit(False)
-                self.buffering_indeterminate.emit(False)
-                self.status_changed.emit(self.t('status_ended'))
-                try:
-                    self.log.info('[EVENT] ended')
-                except Exception:
-                    pass
-            elif c == 'libvlc_init_failed':
-                self.backend_status_refresh.emit()
-                try:
-                    self.status_changed.emit(self.i18n.t('vlc_not_found'))
-                except Exception:
-                    self.status_changed.emit(self.t('status_error'))
-                try:
-                    self.log.info('[EVENT] libvlc_init_failed')
-                except Exception:
-                    pass
-            elif c == 'error':
-                self.buffering_visible.emit(False)
-                self.buffering_indeterminate.emit(False)
-                self.status_changed.emit(self.t('status_error'))
-                try:
-                    self.log.info('[EVENT] error')
-                except Exception:
-                    pass
-            else:
-                # Unknown code, no-op
-                pass
-        except Exception:
-            # Defensive: never raise from callback
-            try:
-                self.status_changed.emit(self.t('status_error'))
-            except Exception:
-                pass
         # Update backend status indicator opportunistically
         try:
             self.backend_status_refresh.emit()
@@ -970,6 +1069,18 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
             except Exception:
                 pass
+            # Reset immediato del Now Playing per evitare titolo obsoleto
+            try:
+                self._current_title = '–'
+                self._current_artist = ''
+                self._current_duration_seconds = None
+                self._current_start_epoch = None
+                try:
+                    self.label_refresh.emit()
+                except Exception:
+                    self.update_now_playing_label()
+            except Exception:
+                pass
             # Riavvia stream se già in riproduzione
             self._restart_stream_after_channel_format_change()
         except Exception:
@@ -989,6 +1100,18 @@ class ListenMoePlayer(QWidget):
                 pass
             try:
                 self.update_tray_texts()
+            except Exception:
+                pass
+            # Reset immediato del Now Playing per evitare titolo obsoleto
+            try:
+                self._current_title = '–'
+                self._current_artist = ''
+                self._current_duration_seconds = None
+                self._current_start_epoch = None
+                try:
+                    self.label_refresh.emit()
+                except Exception:
+                    self.update_now_playing_label()
             except Exception:
                 pass
             # Riavvia stream se già in riproduzione
@@ -1072,7 +1195,7 @@ class ListenMoePlayer(QWidget):
                     self.log.info(f"[UI] play_stream url={url}")
                 except Exception:
                     pass
-                self.status_changed.emit(self.t('status_connecting') if hasattr(self, 't') else 'Connecting...')
+                self.status_changed.emit(self.t('status_opening') if hasattr(self, 't') else 'Opening...')
                 ok = self.player.play_url(url)
                 if not ok:
                     self.status_changed.emit(self.t('status_error'))
@@ -1090,6 +1213,11 @@ class ListenMoePlayer(QWidget):
                     try:
                         self.log.info("[UI] play_stream started")
                     except Exception:
+                        pass
+                        pass
+                        pass
+                        pass
+                        pass
                         pass
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
@@ -1149,6 +1277,14 @@ class ListenMoePlayer(QWidget):
         try:
             self.player.set_volume(int(value))
             self.settings.setValue(KEY_VOLUME, int(value))
+            # Aggiorna UI volume
+            try:
+                if hasattr(self, 'volume_value_label'):
+                    self.volume_value_label.setText(f"{int(value)}%")
+                if hasattr(self, 'volume_slider'):
+                    self.volume_slider.setToolTip(f"{int(value)}%")
+            except Exception:
+                pass
             try:
                 self.log.info(f"[UI] volume_changed -> {int(value)}")
             except Exception:
@@ -1158,16 +1294,25 @@ class ListenMoePlayer(QWidget):
 
     def mute_toggled(self, checked: bool) -> None:
         try:
-            self.player.set_mute(bool(checked))
+            self.settings.setValue(KEY_MUTE, 'true' if checked else 'false')
+        except Exception:
+            pass
+        try:
+            self.mute_button.setText(self.i18n.t('unmute') if checked else self.i18n.t('mute'))
+            # Update tooltip and icon according to state
             try:
-                self.mute_button.setText(self.i18n.t('unmute') if checked else self.i18n.t('mute'))
+                self.mute_button.setToolTip(self.i18n.t('tt_unmute') if checked else self.i18n.t('tt_mute'))
+                self.mute_button.setIcon(
+                    self.style().standardIcon(self.style().SP_MediaVolumeMuted)
+                    if checked else self.style().standardIcon(self.style().SP_MediaVolume)
+                )
             except Exception:
                 pass
-            self.settings.setValue(KEY_MUTE, bool(checked))
-            try:
-                self.log.info(f"[UI] mute_toggled -> {bool(checked)}")
-            except Exception:
-                pass
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'player') and self.player:
+                self.player.set_mute(checked)
         except Exception:
             pass
 
@@ -1232,5 +1377,296 @@ class ListenMoePlayer(QWidget):
         # Accetta la chiusura della finestra
         try:
             event.accept()
+        except Exception:
+            pass
+
+    def _format_mmss(self, seconds: int) -> str:
+        """Format seconds as M:SS, capped at 0 if negative."""
+        try:
+            total = int(seconds)
+            if total < 0:
+                total = 0
+            m, s = divmod(total, 60)
+            return f"{m}:{s:02d}"
+        except Exception:
+            return ""
+
+    def update_now_playing_label(self):
+        title = self._current_title or self.t('unknown')
+        artist = self._current_artist or ''
+        prefix = self.t('now_playing_prefix')
+        text = f"{prefix} {title}" + (f" — {artist}" if artist and title != '–' else "")
+        # Append remaining or total duration
+        try:
+            if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
+                # Prefer remaining time only if start timestamp is plausible; otherwise show total duration
+                mmss = None
+                try:
+                    dur = int(self._current_duration_seconds)
+                except Exception:
+                    dur = None
+                if dur and self._current_start_epoch is not None:
+                    try:
+                        elapsed = int(time.time()) - int(self._current_start_epoch)
+                    except Exception:
+                        elapsed = None
+                    # Use remaining only when 0 <= elapsed <= dur + small slack (handle clock skew)
+                    if elapsed is not None and 0 <= elapsed <= dur + 5:
+                        remaining = dur - elapsed
+                        if remaining < 0:
+                            remaining = 0
+                        mmss = self._format_mmss(remaining)
+                    else:
+                        # Fallback to total duration to avoid misleading 0:00
+                        mmss = self._format_mmss(dur)
+                elif dur:
+                    mmss = self._format_mmss(dur)
+                if mmss:
+                    text += f" [{mmss}]"
+        except Exception:
+            pass
+        self.now_playing_changed.emit(text)
+        # Update window title too
+        try:
+            base = APP_TITLE
+            self.setWindowTitle(f"{base} — {title}")
+        except Exception:
+            pass
+
+    def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
+        try:
+            self.log.info(f"[WS] now_playing: title={title!r}, artist={artist!r}, duration={duration}, start_ts={start_ts}")
+        except Exception:
+            pass
+        self._current_title = title or self.t('unknown')
+        self._current_artist = artist or ''
+        try:
+            self._current_duration_seconds = int(duration) if duration is not None else None
+            if self._current_duration_seconds is not None and self._current_duration_seconds <= 0:
+                self._current_duration_seconds = None
+        except Exception:
+            self._current_duration_seconds = None
+        # store start time
+        try:
+            self._current_start_epoch = float(start_ts) if start_ts is not None else None
+        except Exception:
+            self._current_start_epoch = None
+        # Ask UI to update label safely
+        try:
+            self.label_refresh.emit()
+        except Exception:
+            pass
+        # Tray notification unchanged (static) but invoked on UI thread via signal
+        try:
+            notify_enabled = (self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True))
+            if notify_enabled:
+                msg_title = self.i18n.t('now_playing_prefix')
+                body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
+                try:
+                    mmss, _ = compute_display_mmss(self._current_duration_seconds, self._current_start_epoch)
+                    if mmss and mmss != "--:--":
+                        body += f" [{mmss}]"
+                except Exception:
+                    pass
+                self.notify_tray.emit(msg_title, body)
+        except Exception:
+            pass
+        # Update backend status indicator opportunistically
+        try:
+            self.backend_status_refresh.emit()
+        except Exception:
+            pass
+
+    # ------------------- WebSocket text handlers -------------------
+    def _on_ws_error_text(self, text: str) -> None:
+        try:
+            self.status_changed.emit(str(text))
+        except Exception:
+            pass
+
+    def _on_ws_closed_text(self, text: str) -> None:
+        try:
+            self.status_changed.emit(str(text))
+        except Exception:
+            pass
+
+    # ------------------- Tray helpers (static) -------------------
+    def update_tray_texts(self) -> None:
+        try:
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
+                return
+            header = self.label.text() if hasattr(self, 'label') else APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tooltip = f"{header}\n{now}" if now else header
+            self.tray_mgr.update_tooltip(tooltip)
+        except Exception:
+            pass
+
+    def _ensure_tray(self, enabled: bool) -> None:
+        try:
+            self._tray_enabled = bool(enabled)
+            # Ensure tray manager exists
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
+                try:
+                    self.tray_mgr = TrayManager(
+                        self,
+                        self.i18n,
+                        on_show_window=self.show,
+                        on_open_settings=self.open_settings,
+                        on_change_channel=self._tray_change_channel,
+                        on_change_format=self._tray_change_format,
+                    )
+                except Exception:
+                    return
+            # Compose tooltip from current UI state
+            try:
+                header = self.i18n.t('header').format(
+                    channel=self.settings.value(KEY_CHANNEL, 'J-POP'),
+                    format=self.settings.value(KEY_FORMAT, 'Vorbis')
+                )
+            except Exception:
+                header = APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tooltip = f"{header}\n{now}" if now else header
+            # Apply visibility/icon/tooltip
+            try:
+                self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def update_tray_icon(self) -> None:
+        try:
+            if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
+                return
+            # Update tray visibility/icon/tooltip based on current state
+            try:
+                header = self.label.text() if hasattr(self, 'label') else APP_TITLE
+            except Exception:
+                header = APP_TITLE
+            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
+            tooltip = f"{header}\n{now}" if now else header
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+        except Exception:
+            pass
+
+    def _tray_change_channel(self, channel: str) -> None:
+        try:
+            # Aggiorna impostazione
+            try:
+                self.settings.setValue(KEY_CHANNEL, channel)
+            except Exception:
+                pass
+            # Aggiorna intestazione/tray
+            try:
+                self.update_header_label()
+            except Exception:
+                pass
+            try:
+                self.update_tray_texts()
+            except Exception:
+                pass
+            # Reset immediato del Now Playing per evitare titolo obsoleto
+            try:
+                self._current_title = '–'
+                self._current_artist = ''
+                self._current_duration_seconds = None
+                self._current_start_epoch = None
+                try:
+                    self.label_refresh.emit()
+                except Exception:
+                    self.update_now_playing_label()
+            except Exception:
+                pass
+            # Riavvia stream se già in riproduzione
+            self._restart_stream_after_channel_format_change()
+        except Exception:
+            pass
+
+    def _tray_change_format(self, fmt: str) -> None:
+        try:
+            # Aggiorna impostazione
+            try:
+                self.settings.setValue(KEY_FORMAT, fmt)
+            except Exception:
+                pass
+            # Aggiorna intestazione/tray
+            try:
+                self.update_header_label()
+            except Exception:
+                pass
+            try:
+                self.update_tray_texts()
+            except Exception:
+                pass
+            # Reset immediato del Now Playing per evitare titolo obsoleto
+            try:
+                self._current_title = '–'
+                self._current_artist = ''
+                self._current_duration_seconds = None
+                self._current_start_epoch = None
+                try:
+                    self.label_refresh.emit()
+                except Exception:
+                    self.update_now_playing_label()
+            except Exception:
+                pass
+            # Riavvia stream se già in riproduzione
+            self._restart_stream_after_channel_format_change()
+        except Exception:
+            pass
+
+    def _restart_stream_after_channel_format_change(self) -> None:
+        try:
+            was_playing = False
+            try:
+                was_playing = bool(self.player and self.player.is_playing())
+            except Exception:
+                was_playing = False
+            if was_playing:
+                try:
+                    self.stop_stream()
+                except Exception:
+                    pass
+                # Piccolo delay per lasciare tempo al backend di fermarsi
+                try:
+                    QTimer.singleShot(200, self.play_stream)
+                except Exception:
+                    # Fallback sincrono
+                    self.play_stream()
+            else:
+                # Se non stava riproducendo, aggiorna comunque icona/tooltip
+                try:
+                    self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # ------------------- Backend status -------------------
+    def update_vlc_status_label(self) -> None:
+        try:
+            ok = bool(self.player and self.player.is_ready())
+            # Aggiorna pallino colore
+            try:
+                self.vlc_status_icon.setStyleSheet(
+                    "background-color: #2e7d32; border-radius: 5px;" if ok else
+                    "background-color: #c62828; border-radius: 5px;"
+                )
+            except Exception:
+                pass
+            # Testo: se disponibile versione, mostralo
+            txt = None
+            try:
+                ver = self.player.get_version()
+                if ver:
+                    txt = f"{ver}"
+            except Exception:
+                txt = None
+            if not ok:
+                self.vlc_status.setText(self.i18n.t('vlc_not_found'))
+            else:
+                self.vlc_status.setText(txt or "Audio backend OK")
         except Exception:
             pass

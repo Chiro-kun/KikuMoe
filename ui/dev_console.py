@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog, QSizePolicy
 from PyQt5.QtGui import QTextCursor, QTextOption
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
 import builtins
@@ -98,6 +98,27 @@ class DevConsole(QObject):
         except Exception:
             pass
 
+    def apply_theme(self, dark: bool):
+        # Applica uno stile locale per la console, coerente con il tema globale
+        try:
+            if not self._console_dialog:
+                return
+            if dark:
+                self._console_dialog.setStyleSheet(
+                    """
+                    QDialog { background-color: #121212; color: #e0e0e0; }
+                    QTextEdit { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; }
+                    QPushButton { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }
+                    QPushButton:hover { background-color: #2a2a2a; }
+                    QComboBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 2px 6px; }
+                    QCheckBox { color: #e0e0e0; }
+                    """
+                )
+            else:
+                self._console_dialog.setStyleSheet("")
+        except Exception:
+            pass
+
     def refresh_texts(self):
         try:
             if self._console_dialog:
@@ -130,8 +151,14 @@ class DevConsole(QObject):
         self._console_dialog = QDialog(self._parent)
         self._console_dialog.setWindowTitle(self._t('dev_console_title', 'Developer Console'))
         self._console_dialog.setModal(False)
+        try:
+            self._console_dialog.setMinimumSize(700, 420)
+        except Exception:
+            pass
 
         v = QVBoxLayout()
+        v.setContentsMargins(16, 16, 16, 16)
+        v.setSpacing(8)
         self._console_text = QTextEdit()
         self._console_text.setReadOnly(True)
         self._console_text.setLineWrapMode(QTextEdit.WidgetWidth)
@@ -143,18 +170,34 @@ class DevConsole(QObject):
             self._console_text.setStyleSheet("font-family: Consolas, 'Courier New', monospace; font-size: 12px;")
         except Exception:
             pass
+        try:
+            sp = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self._console_text.setSizePolicy(sp)
+        except Exception:
+            pass
         v.addWidget(self._console_text)
 
         # Row controlli principali
         hc = QHBoxLayout()
+        hc.setSpacing(8)
         # livello
         self._level_combo = QComboBox()
         self._level_combo.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR'])
         self._level_combo.setCurrentText('DEBUG')
         self._level_combo.currentTextChanged.connect(self._on_level_changed)
         self._level_combo.setToolTip(self._t('dev_console_level', 'Level filter'))
+        try:
+            self._level_combo.setMinimumWidth(120)
+        except Exception:
+            pass
         # pausa
         self._btn_pause = QPushButton(self._t('dev_console_pause', 'Pause'))
+        try:
+            self._btn_pause.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_MediaPause))
+            self._btn_pause.setObjectName('devConsolePause')
+            self._btn_pause.setStyleSheet("")
+        except Exception:
+            pass
         self._btn_pause.clicked.connect(self._on_toggle_pause)
         # autoscroll
         self._cb_autoscroll = QCheckBox(self._t('dev_console_autoscroll', 'Autoscroll'))
@@ -166,6 +209,10 @@ class DevConsole(QObject):
         self._cb_wrap.toggled.connect(self._on_toggle_wrap)
         # salva
         self._btn_save = QPushButton(self._t('dev_console_save', 'Save...'))
+        try:
+            self._btn_save.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_DialogSaveButton))
+        except Exception:
+            pass
         self._btn_save.clicked.connect(self._on_save_clicked)
 
         hc.addWidget(self._level_combo)
@@ -177,8 +224,17 @@ class DevConsole(QObject):
         v.addLayout(hc)
 
         h = QHBoxLayout()
+        h.setSpacing(8)
         self._btn_clear = QPushButton(self._t('dev_console_clear', 'Clear'))
+        try:
+            self._btn_clear.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_DialogResetButton))
+        except Exception:
+            pass
         self._btn_copy = QPushButton(self._t('dev_console_copy', 'Copy All'))
+        try:
+            self._btn_copy.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_DialogYesButton))
+        except Exception:
+            pass
         self._btn_clear.clicked.connect(lambda: self._console_text.clear())
         self._btn_copy.clicked.connect(lambda: (self._console_text.selectAll(), self._console_text.copy()))
         h.addStretch(1)
@@ -189,6 +245,10 @@ class DevConsole(QObject):
         self._console_dialog.setLayout(v)
 
         # Initial message to confirm rendering
+        try:
+            self._console_text.setPlaceholderText(self._t('dev_console_placeholder', 'Logs will appear here...'))
+        except Exception:
+            pass
         try:
             self._console_text.append(">>> Console pronta. I log appariranno qui.")
         except Exception:
@@ -341,6 +401,13 @@ class DevConsole(QObject):
             self._paused = not self._paused
             if self._btn_pause:
                 self._btn_pause.setText(self._t('dev_console_pause', 'Pause') if not self._paused else self._t('dev_console_resume', 'Resume'))
+                try:
+                    # Aggiorna icona in base allo stato
+                    st = self._console_dialog.style()
+                    self._btn_pause.setIcon(st.standardIcon(st.SP_MediaPause if not self._paused else st.SP_MediaPlay))
+                    # nessuna colorazione di sfondo, solo icona
+                except Exception:
+                    pass
             if not self._paused and self._pause_buffer:
                 # flush buffer
                 flushed = ''.join(self._pause_buffer)
@@ -384,16 +451,32 @@ class DevConsole(QObject):
         except Exception:
             pass
 
+    @pyqtSlot()
     def _on_save_clicked(self):
         try:
             if not self._console_text:
                 return
-            filename, _ = QFileDialog.getSaveFileName(self._console_dialog, self._t('dev_console_save', 'Save...'), 'console.log', 'Text Files (*.txt);;All Files (*)')
+            import time
+            ts = time.strftime('%Y%m%d-%H%M%S')
+            suggested = f"console-{ts}.log"
+            filename, selected_filter = QFileDialog.getSaveFileName(
+                self._console_dialog,
+                self._t('dev_console_save', 'Save...'),
+                suggested,
+                'Log Files (*.log);;Text Files (*.txt);;All Files (*)'
+            )
             if filename:
+                # Scegli encoding: UTF-8 con BOM solo se necessario (Windows Notepad compatibility)
+                text = self._console_text.toPlainText()
                 try:
                     with open(filename, 'w', encoding='utf-8') as f:
-                        f.write(self._console_text.toPlainText())
+                        f.write(text)
                 except Exception:
-                    pass
+                    # Ritenta con UTF-8-SIG
+                    try:
+                        with open(filename, 'w', encoding='utf-8-sig') as f:
+                            f.write(text)
+                    except Exception:
+                        pass
         except Exception:
             pass

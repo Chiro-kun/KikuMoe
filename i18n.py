@@ -90,6 +90,11 @@ I18N: Dict[str, Dict[str, str]] = {
         'volume_zero_title': 'Volume a zero',
         'volume_zero_text': 'Il volume è impostato a 0. Vuoi ripristinarlo al 60%?',
         'restore': 'Ripristina',
+        'tt_play': 'Riproduci',
+        'tt_pause': 'Pausa/Riprendi',
+        'tt_stop': 'Ferma riproduzione',
+        'tt_mute': 'Disattiva audio',
+        'tt_unmute': 'Riattiva audio',
     },
     'en': {
         'app_title': 'LISTEN.moe Player',
@@ -180,6 +185,11 @@ I18N: Dict[str, Dict[str, str]] = {
         'volume_zero_title': 'Volume is zero',
         'volume_zero_text': 'Volume is set to 0. Do you want to restore it to 60%?',
         'restore': 'Restore',
+        'tt_play': 'Play',
+        'tt_pause': 'Pause/Resume',
+        'tt_stop': 'Stop playback',
+        'tt_mute': 'Mute',
+        'tt_unmute': 'Unmute',
     },
 }
 
