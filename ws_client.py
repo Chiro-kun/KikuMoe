@@ -26,7 +26,11 @@ class NowPlayingWS:
 
     def start(self):
         def on_open(ws):
-            pass
+            # Try to request an immediate TRACK_UPDATE right after opening
+            try:
+                ws.send(json.dumps({"op": 2}))
+            except Exception:
+                pass
 
         def on_message(ws, message):
             try:
@@ -40,6 +44,11 @@ class NowPlayingWS:
                 if isinstance(hb, int):
                     self.ws_heartbeat_interval_ms = hb
                     self._schedule_heartbeat()
+                # After welcome, request current track info immediately
+                try:
+                    ws.send(json.dumps({"op": 2}))
+                except Exception:
+                    pass
             elif op == 1:
                 d = data.get("d", {})
                 t = data.get("t")

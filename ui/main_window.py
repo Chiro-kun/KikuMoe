@@ -548,6 +548,12 @@ class ListenMoePlayer(QWidget):
                                 self.update_now_playing_label()
                         except Exception:
                             pass
+                        # Riavvia WS se è cambiato il canale
+                        if new_channel != prev_channel:
+                            try:
+                                self._restart_ws_for_channel(new_channel)
+                            except Exception:
+                                pass
                         self._restart_stream_after_channel_format_change()
                         # Aggiorna tooltip/menu della tray
                         try:
@@ -735,12 +741,37 @@ class ListenMoePlayer(QWidget):
             pass
 
     def _get_ws_url_for_channel(self, channel: str):
-        # Al momento il gateway WS è unico per canali J-POP/K-POP.
-        # Manteniamo un helper per futura estensibilità o URL differenziati.
+        """Restituisce l'URL del gateway WebSocket corretto in base al canale."""
         try:
+            ch = (channel or '').strip().upper()
+            if ch == 'K-POP' or 'K-POP' in ch:
+                return "wss://listen.moe/kpop/gateway_v2"
             return "wss://listen.moe/gateway_v2"
         except Exception:
             return "wss://listen.moe/gateway_v2"
+
+    def _restart_ws_for_channel(self, channel: str) -> None:
+        """Riavvia il client WebSocket puntando al gateway corretto per il canale specificato."""
+        try:
+            # Arresta il WS corrente
+            try:
+                if hasattr(self, 'ws') and self.ws:
+                    self.ws.shutdown()
+            except Exception:
+                pass
+            # Crea e avvia un nuovo WS sul gateway del canale
+            try:
+                self.ws = NowPlayingWS(
+                    on_now_playing=self._on_now_playing,
+                    on_error_text=self._on_ws_error_text,
+                    on_closed_text=self._on_ws_closed_text,
+                    ws_url=self._get_ws_url_for_channel(channel),
+                )
+                self.ws.start()
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def get_selected_stream_url(self) -> str:
         """Restituisce l'URL dello stream in base a canale e formato nelle impostazioni."""
@@ -1081,6 +1112,11 @@ class ListenMoePlayer(QWidget):
                     self.update_now_playing_label()
             except Exception:
                 pass
+            # Riavvia il WS per il nuovo canale
+            try:
+                self._restart_ws_for_channel(channel)
+            except Exception:
+                pass
             # Riavvia stream se già in riproduzione
             self._restart_stream_after_channel_format_change()
         except Exception:
@@ -1197,6 +1233,21 @@ class ListenMoePlayer(QWidget):
                     pass
                 self.status_changed.emit(self.t('status_opening') if hasattr(self, 't') else 'Opening...')
                 ok = self.player.play_url(url)
+                if not ok:
+                    # Fallback: prova formato alternativo per lo stesso canale
+                    try:
+                        channel = self.settings.value(KEY_CHANNEL, 'J-POP')
+                        cur_fmt = self.settings.value(KEY_FORMAT, 'Vorbis')
+                        alt_fmt = 'MP3' if cur_fmt == 'Vorbis' else 'Vorbis'
+                        alt_url = STREAMS.get(channel, {}).get(alt_fmt)
+                        if alt_url:
+                            try:
+                                self.log.info(f"[UI] primary play failed, trying fallback format {alt_fmt}: {alt_url}")
+                            except Exception:
+                                pass
+                            ok = self.player.play_url(alt_url)
+                    except Exception:
+                        pass
                 if not ok:
                     self.status_changed.emit(self.t('status_error'))
                     try:
@@ -1577,6 +1628,11 @@ class ListenMoePlayer(QWidget):
                     self.label_refresh.emit()
                 except Exception:
                     self.update_now_playing_label()
+            except Exception:
+                pass
+            # Riavvia il WS per il nuovo canale
+            try:
+                self._restart_ws_for_channel(channel)
             except Exception:
                 pass
             # Riavvia stream se già in riproduzione
