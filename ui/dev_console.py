@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog
 from PyQt5.QtGui import QTextCursor, QTextOption
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
 import builtins
@@ -57,6 +57,16 @@ class DevConsole(QObject):
         # pulsanti
         self._btn_clear = None
         self._btn_copy = None
+        # nuovi controlli UI
+        self._btn_pause = None
+        self._btn_save = None
+        self._cb_autoscroll = None
+        self._cb_wrap = None
+        self._level_combo = None
+        # stati
+        self._autoscroll_enabled = True
+        self._paused = False
+        self._pause_buffer = []
         # logging handler dedicato
         self._log_handler = None
         # elenco dei logger a cui ho agganciato l'handler (oltre al root)
@@ -96,6 +106,17 @@ class DevConsole(QObject):
                     self._btn_clear.setText(self._t('dev_console_clear', 'Clear'))
                 if self._btn_copy:
                     self._btn_copy.setText(self._t('dev_console_copy', 'Copy All'))
+                if self._btn_pause:
+                    self._btn_pause.setText(self._t('dev_console_pause', 'Pause') if not self._paused else self._t('dev_console_resume', 'Resume'))
+                if self._btn_save:
+                    self._btn_save.setText(self._t('dev_console_save', 'Save...'))
+                if self._cb_autoscroll:
+                    self._cb_autoscroll.setText(self._t('dev_console_autoscroll', 'Autoscroll'))
+                if self._cb_wrap:
+                    self._cb_wrap.setText(self._t('dev_console_wrap', 'Wrap'))
+                if self._level_combo:
+                    # Placeholder text via accessible name (QComboBox non ha label interno)
+                    self._level_combo.setToolTip(self._t('dev_console_level', 'Level filter'))
         except Exception:
             pass
 
@@ -123,6 +144,37 @@ class DevConsole(QObject):
         except Exception:
             pass
         v.addWidget(self._console_text)
+
+        # Row controlli principali
+        hc = QHBoxLayout()
+        # livello
+        self._level_combo = QComboBox()
+        self._level_combo.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR'])
+        self._level_combo.setCurrentText('DEBUG')
+        self._level_combo.currentTextChanged.connect(self._on_level_changed)
+        self._level_combo.setToolTip(self._t('dev_console_level', 'Level filter'))
+        # pausa
+        self._btn_pause = QPushButton(self._t('dev_console_pause', 'Pause'))
+        self._btn_pause.clicked.connect(self._on_toggle_pause)
+        # autoscroll
+        self._cb_autoscroll = QCheckBox(self._t('dev_console_autoscroll', 'Autoscroll'))
+        self._cb_autoscroll.setChecked(True)
+        self._cb_autoscroll.toggled.connect(self._on_toggle_autoscroll)
+        # wrap
+        self._cb_wrap = QCheckBox(self._t('dev_console_wrap', 'Wrap'))
+        self._cb_wrap.setChecked(True)
+        self._cb_wrap.toggled.connect(self._on_toggle_wrap)
+        # salva
+        self._btn_save = QPushButton(self._t('dev_console_save', 'Save...'))
+        self._btn_save.clicked.connect(self._on_save_clicked)
+
+        hc.addWidget(self._level_combo)
+        hc.addStretch(1)
+        hc.addWidget(self._btn_pause)
+        hc.addWidget(self._cb_autoscroll)
+        hc.addWidget(self._cb_wrap)
+        hc.addWidget(self._btn_save)
+        v.addLayout(hc)
 
         h = QHBoxLayout()
         self._btn_clear = QPushButton(self._t('dev_console_clear', 'Clear'))
@@ -268,8 +320,80 @@ class DevConsole(QObject):
             text = str(s)
             if not text:
                 return
+            if self._paused:
+                self._pause_buffer.append(text)
+                return
+            # Gestione autoscroll: se disabilitato, preservo posizione scrollbar
+            sb = self._console_text.verticalScrollBar() if hasattr(self._console_text, 'verticalScrollBar') else None
+            prev_val = sb.value() if sb is not None else None
             self._console_text.moveCursor(QTextCursor.End)
             self._console_text.insertPlainText(text)
-            self._console_text.moveCursor(QTextCursor.End)
+            if self._autoscroll_enabled:
+                self._console_text.moveCursor(QTextCursor.End)
+            else:
+                if sb is not None and prev_val is not None:
+                    sb.setValue(prev_val)
+        except Exception:
+            pass
+
+    def _on_toggle_pause(self):
+        try:
+            self._paused = not self._paused
+            if self._btn_pause:
+                self._btn_pause.setText(self._t('dev_console_pause', 'Pause') if not self._paused else self._t('dev_console_resume', 'Resume'))
+            if not self._paused and self._pause_buffer:
+                # flush buffer
+                flushed = ''.join(self._pause_buffer)
+                self._pause_buffer = []
+                self._append_console(flushed)
+        except Exception:
+            pass
+
+    def _on_toggle_autoscroll(self, checked: bool):
+        try:
+            self._autoscroll_enabled = bool(checked)
+        except Exception:
+            pass
+
+    def _on_toggle_wrap(self, checked: bool):
+        try:
+            if not self._console_text:
+                return
+            if checked:
+                self._console_text.setLineWrapMode(QTextEdit.WidgetWidth)
+                try:
+                    self._console_text.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+                except Exception:
+                    pass
+            else:
+                self._console_text.setLineWrapMode(QTextEdit.NoWrap)
+        except Exception:
+            pass
+
+    def _on_level_changed(self, level_text: str):
+        try:
+            level_map = {
+                'DEBUG': logging.DEBUG,
+                'INFO': logging.INFO,
+                'WARNING': logging.WARNING,
+                'ERROR': logging.ERROR,
+            }
+            lvl = level_map.get(level_text, logging.DEBUG)
+            if self._log_handler is not None:
+                self._log_handler.setLevel(lvl)
+        except Exception:
+            pass
+
+    def _on_save_clicked(self):
+        try:
+            if not self._console_text:
+                return
+            filename, _ = QFileDialog.getSaveFileName(self._console_dialog, self._t('dev_console_save', 'Save...'), 'console.log', 'Text Files (*.txt);;All Files (*)')
+            if filename:
+                try:
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        f.write(self._console_text.toPlainText())
+                except Exception:
+                    pass
         except Exception:
             pass
