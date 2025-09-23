@@ -507,9 +507,37 @@ class ListenMoePlayer(QWidget):
                 )
             else:
                 app.setStyleSheet("")
+            # Apply dark titlebar on Windows
+            try:
+                self._apply_windows_titlebar_dark_mode(dark)
+            except Exception:
+                pass
             try:
                 if hasattr(self, 'dev_console') and self.dev_console and self.dev_console.is_open():
                     self.dev_console.apply_theme(dark)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
+        try:
+            import sys
+            if sys.platform != 'win32':
+                return
+            hwnd = int(self.winId()) if hasattr(self, 'winId') else None
+            if not hwnd:
+                return
+            import ctypes
+            value = ctypes.c_int(1 if enable else 0)
+            # Windows 10 1903+ (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+            except Exception:
+                pass
+            # Windows 10 1809 (DWMWA_USE_IMMERSIVE_DARK_MODE = 19)
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
             except Exception:
                 pass
         except Exception:
@@ -727,7 +755,7 @@ class ListenMoePlayer(QWidget):
                     pass
                 return
             try:
-                self.dev_console.open()
+                self.dev_console.open(parent_widget or self)
                 try:
                     dark = self._get_bool(KEY_DARK_MODE, False)
                 except Exception:
@@ -1659,6 +1687,23 @@ class ListenMoePlayer(QWidget):
                         restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.AcceptRole)
                         cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
                         msg.setIcon(QMessageBox.Question)
+                        # Forza titlebar scura su Windows per il QMessageBox
+                        try:
+                            import sys
+                            if sys.platform == 'win32' and hasattr(msg, 'winId'):
+                                import ctypes
+                                hwnd = int(msg.winId())
+                                value = ctypes.c_int(1 if (self.settings.value(KEY_DARK_MODE, 'false') == 'true') else 0)
+                                try:
+                                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+                                except Exception:
+                                    pass
+                                try:
+                                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                         msg.exec_()
                         if msg.clickedButton() == restore_btn:
                             if hasattr(self, 'volume_slider'):
@@ -1724,6 +1769,17 @@ class ListenMoePlayer(QWidget):
         # Accetta la chiusura della finestra
         try:
             event.accept()
+        except Exception:
+            pass
+
+    def showEvent(self, event) -> None:
+        try:
+            super().showEvent(event)
+        except Exception:
+            pass
+        try:
+            dark = self._get_bool(KEY_DARK_MODE, False)
+            self._apply_windows_titlebar_dark_mode(dark)
         except Exception:
             pass
 

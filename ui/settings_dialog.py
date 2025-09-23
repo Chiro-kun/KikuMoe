@@ -240,3 +240,36 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_TRAY_ENABLED, 'true' if self.chk_tray_enabled.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_HIDE_ON_MINIMIZE, 'true' if self.chk_tray_hide_on_minimize.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_NOTIFICATIONS, 'true' if self.chk_tray_notifications.isChecked() else 'false')
+
+    def showEvent(self, event):
+        try:
+            super().showEvent(event)
+        except Exception:
+            pass
+        # Riapplica la titlebar scura quando la finestra viene mostrata
+        try:
+            dark = self.settings.value(KEY_DARK_MODE, 'false') == 'true'
+            self._apply_windows_titlebar_dark_mode(dark)
+        except Exception:
+            pass
+
+    def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
+        try:
+            import sys
+            if sys.platform != 'win32':
+                return
+            hwnd = int(self.winId()) if hasattr(self, 'winId') else None
+            if not hwnd:
+                return
+            import ctypes
+            value = ctypes.c_int(1 if enable else 0)
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+            except Exception:
+                pass
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
+            except Exception:
+                pass
+        except Exception:
+            pass
