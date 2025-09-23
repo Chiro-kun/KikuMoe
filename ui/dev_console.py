@@ -116,6 +116,11 @@ class DevConsole(QObject):
                 )
             else:
                 self._console_dialog.setStyleSheet("")
+            # Forza barra del titolo scura su Windows
+            try:
+                self._apply_windows_titlebar_dark_mode(dark)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -141,14 +146,15 @@ class DevConsole(QObject):
         except Exception:
             pass
 
-    def open(self):
+    def open(self, parent=None):
         # If already open, just focus it
         if self._console_dialog:
             self.raise_window()
             return
 
         # Build console dialog UI
-        self._console_dialog = QDialog(self._parent)
+        dlg_parent = parent or self._parent
+        self._console_dialog = QDialog(dlg_parent)
         self._console_dialog.setWindowTitle(self._t('dev_console_title', 'Developer Console'))
         self._console_dialog.setModal(False)
         try:
@@ -478,5 +484,29 @@ class DevConsole(QObject):
                             f.write(text)
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+    def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
+        try:
+            import sys
+            if sys.platform != 'win32':
+                return
+            dlg = getattr(self, '_console_dialog', None)
+            hwnd = int(dlg.winId()) if dlg and hasattr(dlg, 'winId') else None
+            if not hwnd:
+                return
+            import ctypes
+            value = ctypes.c_int(1 if enable else 0)
+            # Windows 10 1903+ (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+            except Exception:
+                pass
+            # Windows 10 1809 (DWMWA_USE_IMMERSIVE_DARK_MODE = 19)
+            try:
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
+            except Exception:
+                pass
         except Exception:
             pass
