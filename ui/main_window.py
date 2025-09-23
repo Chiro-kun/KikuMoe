@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (
     QSlider, QProgressBar, QShortcut, QSpinBox,
     QDialog, QMessageBox, QSizePolicy
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
 from typing import Optional
 import sys
@@ -27,6 +27,7 @@ from constants import (
     KEY_AUTOPLAY,
     KEY_TRAY_ENABLED,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
     KEY_DARK_MODE,
@@ -370,7 +371,7 @@ class ListenMoePlayer(QWidget):
             self.tray_mgr = TrayManager(
                 self,
                 self.i18n,
-                on_show_window=self.show,
+                on_show_window=self.showNormal,
                 on_open_settings=self.open_settings,
                 on_change_channel=self._tray_change_channel,
                 on_change_format=self._tray_change_format,
@@ -1226,7 +1227,7 @@ class ListenMoePlayer(QWidget):
                     self.tray_mgr = TrayManager(
                         self,
                         self.i18n,
-                        on_show_window=self.show,
+                        on_show_window=self.showNormal,
                         on_open_settings=self.open_settings,
                         on_change_channel=self._tray_change_channel,
                         on_change_format=self._tray_change_format,
@@ -1726,6 +1727,26 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def changeEvent(self, event) -> None:
+        try:
+            if event.type() == QEvent.WindowStateChange:
+                if self.isMinimized() and self._get_bool(KEY_TRAY_ENABLED, True) and self._get_bool(KEY_TRAY_HIDE_ON_MINIMIZE, True):
+                    try:
+                        self.hide()
+                    except Exception:
+                        pass
+                    try:
+                        event.accept()
+                    except Exception:
+                        pass
+                    return
+        except Exception:
+            pass
+        try:
+            super().changeEvent(event)
+        except Exception:
+            pass
+
     def _format_mmss(self, seconds: int) -> str:
         """Format seconds as M:SS, capped at 0 if negative."""
         try:
@@ -1866,7 +1887,7 @@ class ListenMoePlayer(QWidget):
                     self.tray_mgr = TrayManager(
                         self,
                         self.i18n,
-                        on_show_window=self.show,
+                        on_show_window=self.showNormal,
                         on_open_settings=self.open_settings,
                         on_change_channel=self._tray_change_channel,
                         on_change_format=self._tray_change_format,

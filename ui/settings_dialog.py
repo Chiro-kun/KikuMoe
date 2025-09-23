@@ -13,6 +13,7 @@ from constants import (
     KEY_AUTOPLAY,
     KEY_TRAY_ENABLED,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
     KEY_DARK_MODE,
@@ -162,6 +163,12 @@ class SettingsDialog(QDialog):
         self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, 'true') == 'true')
         layout.addWidget(self.chk_tray_enabled)
 
+        self.chk_tray_hide_on_minimize = QCheckBox(self.i18n.t('settings_tray_hide_on_minimize'))
+        self.chk_tray_hide_on_minimize.setChecked(self.settings.value(KEY_TRAY_HIDE_ON_MINIMIZE, 'true') == 'true')
+        self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked())
+        self.chk_tray_enabled.stateChanged.connect(lambda s: self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked()))
+        layout.addWidget(self.chk_tray_hide_on_minimize)
+
         self.chk_tray_notifications = QCheckBox(self.i18n.t('settings_tray_notifications'))
         self.chk_tray_notifications.setChecked(self.settings.value(KEY_TRAY_NOTIFICATIONS, 'true') == 'true')
         layout.addWidget(self.chk_tray_notifications)
@@ -231,4 +238,5 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_LIBVLC_PATH, path if path else '')
         self.settings.setValue(KEY_NETWORK_CACHING, int(self.spin_network_caching.value()))
         self.settings.setValue(KEY_TRAY_ENABLED, 'true' if self.chk_tray_enabled.isChecked() else 'false')
+        self.settings.setValue(KEY_TRAY_HIDE_ON_MINIMIZE, 'true' if self.chk_tray_hide_on_minimize.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_NOTIFICATIONS, 'true' if self.chk_tray_notifications.isChecked() else 'false')
