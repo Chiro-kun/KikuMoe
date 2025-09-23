@@ -75,6 +75,31 @@ class PlayerFFmpeg:
         except Exception:
             return False
 
+    def _sanitize_stream_url(self, raw: str) -> str:
+        """Estrae e sanifica un URL di streaming, rimuovendo in modo aggressivo apici/backtick e punteggiatura finale.
+        Usa una classe di caratteri consentiti per l'URL (coerente con la UI) per evitare di catturare simboli indesiderati.
+        """
+        try:
+            s = (raw or "")
+            # Rimuovi globalmente caratteri di apici/backtick e spazi superflui
+            s = re.sub(r"[`'\"“”‘’]+", "", s)
+            s = s.strip()
+            # Estrai il primo token http(s) usando solo caratteri consentiti (no backtick)
+            m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\\\[\]@!$&()*+,;=%]+", s)
+            url = m.group(0) if m else s
+            # Trim spazi
+            url = url.strip()
+            lower = url.lower()
+            # Normalizza suffissi accidentali che terminano con un punto
+            if lower.endswith('/mp3.') or lower.endswith('.mp3.'):
+                url = url[:-1]
+            # Rimuovi comune punteggiatura finale/spazi
+            url = url.rstrip(".,;!?)]}'\"` \t\r\n")
+            return url
+        except Exception:
+            # Fallback: strip basilare di spazi/apici/backtick
+            return (raw or "").strip().strip("`'\"“”‘’")
+
     def play_url(self, url: str) -> bool:
         if not self.is_ready():
             # Backend (ffmpeg) non pronto: emette errore generico
@@ -85,14 +110,7 @@ class PlayerFFmpeg:
             self.log.debug("[DEBUG] play_url: requested for %s", url)
             # Sanitize URL in ingresso (whitelist dei caratteri + estrazione http(s))
             raw_in = url
-            pattern = r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+"
-            m_raw = re.search(pattern, raw_in)
-            if m_raw:
-                safe_url = m_raw.group(0)
-            else:
-                filtered = ''.join(ch for ch in raw_in if (ch.isalnum() or ch in "-._~:/?#[]@!$&()*+,;=%"))
-                m_f = re.search(pattern, filtered)
-                safe_url = m_f.group(0) if m_f else filtered.strip()
+            safe_url = self._sanitize_stream_url(raw_in)
             if safe_url != raw_in:
                 try:
                     self.log.debug("[DEBUG] play_url: sanitized url: %r from raw: %r", safe_url, raw_in)
@@ -400,50 +418,96 @@ class PlayerFFmpeg:
                 self._emit('error', None)
                 return
 
-            # Sanitize URL (robusta e coerente con play_url): whitelist + estrazione http(s)
+            # Sanitize URL (robusta e coerente con play_url)
             raw_url = url
-            pattern = r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+"
-            m_raw = re.search(pattern, raw_url)
-            if m_raw:
-                safe_url = m_raw.group(0)
-            else:
-                filtered = ''.join(ch for ch in raw_url if (ch.isalnum() or ch in "-._~:/?#[]@!$&()*+,;=%"))
-                m_f = re.search(pattern, filtered)
-                safe_url = m_f.group(0) if m_f else filtered.strip()
+            safe_url = self._sanitize_stream_url(raw_url)
             self.log.debug("[DEBUG] _stream_worker: sanitized url: %r from raw: %r", safe_url, raw_url)
 
-            # FFmpeg command to decode stream and output raw audio (with robust HTTP options)
-            ffmpeg_cmd = [
-                'ffmpeg',
-                '-hide_banner',
-                '-nostdin',
-                '-reconnect', '1',
-                '-reconnect_streamed', '1',
-                '-reconnect_delay_max', '5',
-                '-reconnect_at_eof', '1',
-                '-reconnect_on_network_error', '1',
-                '-rw_timeout', '15000000',
-                '-user_agent', self._user_agent,
-                # Removed custom Connection: close header to allow persistent streaming
-                # '-headers', 'Connection: close\r\n',
-                '-i', safe_url,
-                '-vn',
-                '-fflags', 'nobuffer',
-                '-f', 's16le',
-                '-ar', '44100',
-                '-ac', '2',
-                '-acodec', 'pcm_s16le',
-                '-af', 'volume=1.0',
-                '-loglevel', 'error',
-                '-'
-            ]
+            # Costruisci lista di URL candidati con fallback automatici
+            candidates: List[str] = [safe_url]
+            try:
+                u = safe_url.lower()
+                if '/kpop/' in u:
+                    # Preferisci HTTPS Vorbis prima di M3U/HTTP
+                    candidates.append('https://listen.moe/kpop/stream')
+                    candidates.append('https://listen.moe/kpop/stream.m3u')
+                    candidates.append('http://listen.moe:9999/kpop/stream')
+                else:
+                    candidates.append('https://listen.moe/stream')
+                    candidates.append('https://listen.moe/stream.m3u')
+                    candidates.append('http://listen.moe:9999/stream')
+            except Exception:
+                pass
 
-            self.log.debug("[DEBUG] _stream_worker: launching ffmpeg: %s", ffmpeg_cmd)
-            # Delay 'playing' emit until we actually receive audio data
-            
-            # Start ffmpeg process
-            with self._state_lock:
+            # Tenta in sequenza ogni URL candidato finché non si ricevono dati
+            started_streaming = False
+            for attempt_idx, cur_url in enumerate(candidates):
+                if self._stop_event.is_set():
+                    break
                 try:
+                    self.log.debug("[DEBUG] _stream_worker: attempt %d with url: %s", attempt_idx + 1, cur_url)
+                except Exception:
+                    pass
+
+                # FFmpeg command to decode stream and output raw audio (with robust HTTP options)
+                is_mp3 = False
+                try:
+                    uu = cur_url.lower()
+                    is_mp3 = ("/mp3" in uu) or uu.endswith(".mp3")
+                except Exception:
+                    is_mp3 = False
+
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-hide_banner',
+                    '-nostdin',
+                    # Network/HTTP options for robust streaming
+                    '-rw_timeout', '15000000',
+                    '-user_agent', self._user_agent,
+                ]
+                # Add reconnect options to handle stream switches gracefully
+                try:
+                    ffmpeg_cmd.extend([
+                        '-reconnect', '1',
+                        '-reconnect_streamed', '1',
+                        '-reconnect_at_eof', '1',
+                        '-reconnect_delay_max', '2',
+                        '-reconnect_on_network_error', '1',
+                    ])
+                except Exception:
+                    pass
+
+                # Apply MP3-specific headers (some servers expect audio/mpeg Accept)
+                if is_mp3:
+                    try:
+                        ffmpeg_cmd.extend([
+                            '-headers', 'Accept: audio/mpeg\r\nIcy-MetaData: 0\r\n',
+                        ])
+                        self.log.debug("[DEBUG] _stream_worker: applying MP3-specific headers")
+                    except Exception:
+                        pass
+
+                # Input URL
+                ffmpeg_cmd.extend(['-i', cur_url])
+
+                # Output format: raw PCM s16le to stdout
+                ffmpeg_cmd.extend([
+                    '-vn',
+                    '-fflags', 'nobuffer',
+                    '-f', 's16le',
+                    '-ar', '44100',
+                    '-ac', '2',
+                    '-acodec', 'pcm_s16le',
+                    '-af', f'volume={self._volume:.2f}',
+                    '-loglevel', 'error',
+                    '-',
+                ])
+
+                # Launch ffmpeg process
+                with self._state_lock:
+                    self._ffmpeg_process = None
+                try:
+                    self.log.debug("[DEBUG] _stream_worker: launching ffmpeg: %r", ffmpeg_cmd)
                     self._ffmpeg_process = subprocess.Popen(
                         ffmpeg_cmd,
                         stdout=subprocess.PIPE,
@@ -456,115 +520,133 @@ class PlayerFFmpeg:
                 except Exception as e:
                     self.log.debug("[DEBUG] _stream_worker: failed to start ffmpeg: %s", e)
                     self._ffmpeg_process = None
-                    self._emit('error', None)
-                    return
-
-            started_streaming = False
-            chunk_size = 4096
-            empty_reads = 0
-            max_empty_reads_before_check = 100  # ~5s at 50ms sleep
-            while True:
-                with self._state_lock:
-                    if self._stop_event.is_set():
-                        self.log.debug("[DEBUG] _stream_worker: stop event set, breaking loop")
-                        break
-                    proc = self._ffmpeg_process
-                if proc is None:
-                    self.log.debug("[DEBUG] _stream_worker: ffmpeg process missing")
-                    break
-                if proc.poll() is not None:
-                    self.log.debug("[DEBUG] _stream_worker: ffmpeg process ended with code: %s", proc.poll())
-                    # Try to read stderr if possible
-                    try:
-                        if proc.stderr:
-                            err = proc.stderr.read()
-                            if err:
-                                self.log.debug("[DEBUG] ffmpeg stderr: %s", err.decode(errors='ignore'))
-                    except Exception as e:
-                        self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
-                    break
-
-                if proc.stdout is None:
-                    self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
-                    break
-
-                try:
-                    chunk = proc.stdout.read(chunk_size)
-                except Exception as e:
-                    self.log.debug("[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e)
-                    break
-
-                if not chunk:
-                    empty_reads += 1
-                    # If ffmpeg is still running, wait a bit and retry instead of breaking immediately
-                    if proc.poll() is None:
-                        if empty_reads % 20 == 0:
-                            self.log.debug("[DEBUG] _stream_worker: empty chunk (x%d), waiting for data...", empty_reads)
-                        time.sleep(0.05)
-                        continue
-                    else:
-                        self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk after process ended")
-                        break
-
-                # got data
-                empty_reads = 0
-                if not started_streaming:
-                    started_streaming = True
-                    self._emit('playing', None)
-
-                n_bytes = (len(chunk) // 2) * 2
-                if n_bytes == 0:
-                    time.sleep(0.01)
+                    # Prova prossimo candidato
                     continue
-                data = chunk[:n_bytes]
 
-                # Avoid writing to PyAudio when paused/stream inactive to prevent [Errno -9988] spam
-                stream_active = False
-                if self._audio_stream is not None:
+                # Loop di lettura dei dati
+                chunk_size = 4096
+                empty_reads = 0
+                while True:
+                    with self._state_lock:
+                        if self._stop_event.is_set():
+                            self.log.debug("[DEBUG] _stream_worker: stop event set, breaking loop")
+                            break
+                        proc = self._ffmpeg_process
+                    if proc is None:
+                        self.log.debug("[DEBUG] _stream_worker: ffmpeg process missing")
+                        break
+                    if proc.poll() is not None:
+                        self.log.debug("[DEBUG] _stream_worker: ffmpeg process ended with code: %s", proc.poll())
+                        # Try to read stderr if possible
+                        try:
+                            if proc.stderr:
+                                err = proc.stderr.read()
+                                if err:
+                                    self.log.debug("[DEBUG] ffmpeg stderr: %s", err.decode(errors='ignore'))
+                        except Exception as e:
+                            self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
+                        # Fine tentativo corrente: passa al prossimo URL
+                        break
+
+                        
+                    if proc.stdout is None:
+                        self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
+                        break
+
                     try:
-                        stream_active = getattr(self._audio_stream, "is_active", lambda: False)()
+                        chunk = proc.stdout.read(chunk_size)
+                    except Exception as e:
+                        self.log.debug("[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e)
+                        break
+
+                    if not chunk:
+                        empty_reads += 1
+                        # If ffmpeg is still running, wait a bit and retry instead of breaking immediately
+                        if proc.poll() is None:
+                            if empty_reads % 20 == 0:
+                                self.log.debug("[DEBUG] _stream_worker: empty chunk (x%d), waiting for data...", empty_reads)
+                            time.sleep(0.05)
+                            continue
+                        else:
+                            self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk after process ended")
+                            break
+
+                    # got data
+                    empty_reads = 0
+                    if not started_streaming:
+                        started_streaming = True
+                        self._emit('playing', None)
+
+                    n_bytes = (len(chunk) // 2) * 2
+                    if n_bytes == 0:
+                        time.sleep(0.01)
+                        continue
+                    data = chunk[:n_bytes]
+
+                    # Avoid writing to PyAudio when paused/stream inactive to prevent [Errno -9988] spam
+                    stream_active = False
+                    if self._audio_stream is not None:
+                        try:
+                            stream_active = getattr(self._audio_stream, "is_active", lambda: False)()
+                        except Exception:
+                            stream_active = False
+
+                    if not self._muted:
+                        try:
+                            samples = struct.unpack(f'<{n_bytes // 2}h', data)
+                            volume_samples = [int(sample * self._volume) for sample in samples]
+                            volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
+                            volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
+                            if self._audio_stream is not None and stream_active:
+                                self._audio_stream.write(volume_chunk)
+                            else:
+                                # Paused or no audio stream: skip writing to avoid errors
+                                time.sleep(0.02)
+                                continue
+                        except Exception as e:
+                            # Log errors only if stream is active; otherwise likely paused/closed
+                            if stream_active:
+                                self.log.debug("[DEBUG] _stream_worker: error in audio processing: %s", e)
+                                try:
+                                    if self._audio_stream is not None and stream_active:
+                                        self._audio_stream.write(b'\x00' * n_bytes)
+                                except Exception as e2:
+                                    self.log.debug("[DEBUG] _stream_worker: error writing silence: %s", e2)
+                            else:
+                                time.sleep(0.02)
+                                continue
+                    else:
+                        try:
+                            if self._audio_stream is not None and stream_active:
+                                self._audio_stream.write(b'\x00' * n_bytes)
+                            else:
+                                # Paused or no audio stream: skip writing to avoid errors
+                                time.sleep(0.02)
+                                continue
+                        except Exception as e:
+                            if stream_active:
+                                self.log.debug("[DEBUG] _stream_worker: error writing silence (muted): %s", e)
+                            else:
+                                # Suppress spam when paused/closed
+                                pass
+
+                # Fine tentativo: se non abbiamo iniziato a ricevere dati, chiudi il processo e prova il prossimo
+                with self._state_lock:
+                    proc = self._ffmpeg_process
+                if proc and proc.poll() is None and not started_streaming:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=1.0)
                     except Exception:
-                        stream_active = False
-
-                if not self._muted:
-                    try:
-                        samples = struct.unpack(f'<{n_bytes // 2}h', data)
-                        volume_samples = [int(sample * self._volume) for sample in samples]
-                        volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
-                        volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
-                        if self._audio_stream is not None and stream_active:
-                            self._audio_stream.write(volume_chunk)
-                        else:
-                            # Paused or no audio stream: skip writing to avoid errors
-                            time.sleep(0.02)
-                            continue
-                    except Exception as e:
-                        # Log errors only if stream is active; otherwise likely paused/closed
-                        if stream_active:
-                            self.log.debug("[DEBUG] _stream_worker: error in audio processing: %s", e)
-                            try:
-                                if self._audio_stream is not None and stream_active:
-                                    self._audio_stream.write(b'\x00' * n_bytes)
-                            except Exception as e2:
-                                self.log.debug("[DEBUG] _stream_worker: error writing silence: %s", e2)
-                        else:
-                            time.sleep(0.02)
-                            continue
-                else:
-                    try:
-                        if self._audio_stream is not None and stream_active:
-                            self._audio_stream.write(b'\x00' * n_bytes)
-                        else:
-                            # Paused or no audio stream: skip writing to avoid errors
-                            time.sleep(0.02)
-                            continue
-                    except Exception as e:
-                        if stream_active:
-                            self.log.debug("[DEBUG] _stream_worker: error writing silence (muted): %s", e)
-                        else:
-                            # Suppress spam when paused/closed
+                        try:
+                            proc.kill()
+                        except Exception:
                             pass
+                # Se abbiamo iniziato lo streaming, interrompi la catena di fallback
+                if started_streaming or self._stop_event.is_set():
+                    break
 
+            # Post-loop: gestione esiti
             self.log.debug("[DEBUG] _stream_worker: cleaning up ffmpeg process")
             with self._state_lock:
                 proc = self._ffmpeg_process
@@ -583,7 +665,7 @@ class PlayerFFmpeg:
 
             if not self._stop_requested:
                 if not started_streaming:
-                    self.log.debug("[DEBUG] _stream_worker: connection failed before receiving data")
+                    self.log.debug("[DEBUG] _stream_worker: connection failed before receiving data (all attempts)")
                     self._emit('error', None)
                 else:
                     self.log.debug("[DEBUG] _stream_worker: stream ended naturally")
