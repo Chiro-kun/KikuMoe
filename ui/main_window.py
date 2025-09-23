@@ -33,6 +33,7 @@ from constants import (
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
     KEY_DEV_CONSOLE_ENABLED,
+    KEY_SESSION_TIMER_ENABLED,
 )
 import threading
 from logger import get_logger
@@ -84,6 +85,8 @@ class ListenMoePlayer(QWidget):
         self.now_playing_label.setStyleSheet('font-size: 14px; font-weight: 500;')
         self._layout.addWidget(self.label)
         self._layout.addWidget(self.status_label)
+        self.session_label = QLabel("")
+        self._layout.addWidget(self.session_label)
         self._layout.addWidget(self.now_playing_label)
 
         # Stream info (Channel + Format) - non editable
@@ -260,7 +263,7 @@ class ListenMoePlayer(QWidget):
         self.mute_shortcut.activated.connect(self.toggle_mute_shortcut)
 
         # Signals/UI connections
-        self.play_button.clicked.connect(self.play_stream)
+        self.play_button.clicked.connect(self._tray_toggle_play_pause)
         self.pause_button.clicked.connect(self.pause_resume)
         self.stop_button.clicked.connect(self.stop_stream)
         self.force_stop_button.clicked.connect(self.force_stop_all)
@@ -282,6 +285,21 @@ class ListenMoePlayer(QWidget):
 
         # Initialize logger
         self.log = get_logger('KikuMoe')
+        # Session timer runtime
+        self._session_seconds: int = 0
+        self._session_timer: Optional[QTimer] = QTimer(self)
+        try:
+            self._session_timer.setInterval(1000)
+            self._session_timer.timeout.connect(self._on_session_tick)
+            enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            # Do not auto-start timer here; it starts when playback begins
+            if self._session_timer.isActive():
+                self._session_timer.stop()
+            if hasattr(self, 'session_label'):
+                self.session_label.setVisible(bool(enabled))
+        except Exception:
+            pass
+        self._update_session_label()
         # Initialize Dev Console helper
         try:
             self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
@@ -332,6 +350,8 @@ class ListenMoePlayer(QWidget):
             self._progress_timer.start()
         except Exception:
             pass
+        # Stato UI di pausa per sincronizzare la tray in modo affidabile
+        self._ui_paused: bool = False
 
         # WebSocket wrapper
         init_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
@@ -354,6 +374,9 @@ class ListenMoePlayer(QWidget):
                 on_open_settings=self.open_settings,
                 on_change_channel=self._tray_change_channel,
                 on_change_format=self._tray_change_format,
+                on_toggle_play_pause=self._tray_toggle_play_pause,
+                on_stop_stream=self.stop_stream,
+                on_toggle_mute=self.toggle_mute_shortcut,
             )
             # inizializza icona/tooltip coerenti
             tooltip = None
@@ -364,20 +387,45 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            # Applica tema iniziale
+            try:
+                self.apply_theme()
+            except Exception:
+                pass
+            # Aggiorna i testi delle azioni della tray in base allo stato corrente (con override UI pausa)
+            try:
+                has_player = hasattr(self, 'player') and self.player is not None
+                real_playing = bool(self.player.is_playing()) if has_player else False
+                real_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
+                ui_paused = bool(getattr(self, '_ui_paused', False))
+                eff_paused = bool(ui_paused or real_paused)
+                eff_playing = bool(real_playing and not eff_paused)
+                is_muted = bool(getattr(self.player, 'get_mute', lambda: self._get_bool(KEY_MUTE, False))()) if has_player else bool(self._get_bool(KEY_MUTE, False))
+                if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                    self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
+            except Exception:
+                pass
         except Exception:
             pass
 
-        # Autoplay on startup
+    def _tray_toggle_play_pause(self) -> None:
         try:
-            if self._get_bool(KEY_AUTOPLAY, False):
-                QTimer.singleShot(0, self.play_stream)
-        except Exception:
-            pass
-
-        self.update_header_label()
-        # Apply theme (dark/light)
-        try:
-            self.apply_theme()
+            has_player = hasattr(self, 'player') and self.player is not None
+            is_playing = False
+            is_paused = False
+            if has_player:
+                try:
+                    is_playing = bool(self.player.is_playing())
+                except Exception:
+                    is_playing = False
+                try:
+                    is_paused = bool(getattr(self.player, 'is_paused', lambda: False)())
+                except Exception:
+                    is_paused = False
+            if has_player and (is_playing or is_paused):
+                self.pause_resume()
+            else:
+                self.play_stream()
         except Exception:
             pass
 
@@ -412,8 +460,15 @@ class ListenMoePlayer(QWidget):
             self.btn_sleep_cancel.setText(self.i18n.t('sleep_cancel'))
         self.update_header_label()
         self.update_now_playing_label()
-        self.update_tray_texts()
         self.update_vlc_status_label()
+        try:
+            enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            if hasattr(self, 'session_label'):
+                self.session_label.setVisible(bool(enabled))
+        except Exception:
+            pass
+        self._update_session_label()
+        self.update_tray_texts()
         # Update dev console dialog texts if open
         try:
             if hasattr(self, 'dev_console') and self.dev_console and self.dev_console.is_open():
@@ -596,6 +651,31 @@ class ListenMoePlayer(QWidget):
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev_tray_enabled:
                     self._ensure_tray(new_tray_enabled)
+                # Session timer enable/disable may have changed
+                try:
+                    new_session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+                except Exception:
+                    new_session_enabled = True
+                try:
+                    if new_session_enabled:
+                        # If playback is already active, start the session timer now
+                        try:
+                            if hasattr(self, 'player') and self.player and self.player.is_playing():
+                                if self._session_timer and not self._session_timer.isActive():
+                                    self._session_timer.start()
+                        except Exception:
+                            pass
+                        if hasattr(self, 'session_label'):
+                            self.session_label.show()
+                    else:
+                        if self._session_timer and self._session_timer.isActive():
+                            self._session_timer.stop()
+                        if hasattr(self, 'session_label'):
+                            self.session_label.hide()
+                    self._update_session_label()
+                    self.update_tray_texts()
+                except Exception:
+                    pass
                 # Dev console enable/disable may have changed
                 new_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
                 if new_dev_console != prev_dev_console:
@@ -823,6 +903,36 @@ class ListenMoePlayer(QWidget):
         except Exception:
             return ""
 
+    def _format_hhmmss(self, total_seconds: int) -> str:
+        try:
+            s = max(0, int(total_seconds))
+            h, rem = divmod(s, 3600)
+            m, sec = divmod(rem, 60)
+            if h > 0:
+                return f"{h}:{m:02d}:{sec:02d}"
+            return f"{m}:{sec:02d}"
+        except Exception:
+            return "0:00"
+
+    def _update_session_label(self) -> None:
+        try:
+            t = self._format_hhmmss(getattr(self, '_session_seconds', 0))
+            if hasattr(self, 'i18n') and hasattr(self, 'session_label'):
+                self.session_label.setText(self.i18n.t('session_timer', time=t))
+        except Exception:
+            pass
+
+    def _on_session_tick(self) -> None:
+        try:
+            self._session_seconds = getattr(self, '_session_seconds', 0) + 1
+            self._update_session_label()
+            try:
+                self.update_tray_texts()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def update_now_playing_label(self):
         title = self._current_title or self.t('unknown')
         artist = self._current_artist or ''
@@ -916,8 +1026,32 @@ class ListenMoePlayer(QWidget):
                     self.buffering_indeterminate.emit(False)
                 except Exception:
                     pass
+                # Ensure session timer is running when playback starts
+                try:
+                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                        if self._session_timer and not self._session_timer.isActive():
+                            self._session_timer.start()
+                        if hasattr(self, 'session_label'):
+                            self.session_label.show()
+                        self._update_session_label()
+                        self.update_tray_texts()
+                except Exception:
+                    pass
                 try:
                     self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+                # Aggiorna lo stato dei controlli tray (rispetta override pausa UI)
+                try:
+                    has_player = hasattr(self, 'player') and self.player is not None
+                    real_playing = bool(self.player.is_playing()) if has_player else False
+                    real_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
+                    ui_paused = bool(getattr(self, '_ui_paused', False))
+                    eff_paused = bool(ui_paused or real_paused)
+                    eff_playing = bool(real_playing and not eff_paused)
+                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
+                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                        self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
                 except Exception:
                     pass
                 return
@@ -925,6 +1059,25 @@ class ListenMoePlayer(QWidget):
             if c == 'paused':
                 try:
                     self.status_changed.emit(self.t('status_paused'))
+                except Exception:
+                    pass
+                # Stop timer on pause (without reset)
+                try:
+                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                        if self._session_timer and self._session_timer.isActive():
+                            self._session_timer.stop()
+                        if hasattr(self, 'session_label'):
+                            self.session_label.show()
+                        self._update_session_label()
+                        self.update_tray_texts()
+                except Exception:
+                    pass
+                # Aggiorna lo stato dei controlli tray
+                try:
+                    self._ui_paused = True
+                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
+                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                        self.tray_mgr.update_controls_state(False, True, is_muted)
                 except Exception:
                     pass
                 return
@@ -939,8 +1092,28 @@ class ListenMoePlayer(QWidget):
                     self.buffering_indeterminate.emit(False)
                 except Exception:
                     pass
+                # Stop and reset session timer
+                try:
+                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                        if self._session_timer and self._session_timer.isActive():
+                            self._session_timer.stop()
+                        self._session_seconds = 0
+                        if hasattr(self, 'session_label'):
+                            self.session_label.show()
+                        self._update_session_label()
+                        self.update_tray_texts()
+                except Exception:
+                    pass
                 try:
                     self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+                # Aggiorna lo stato dei controlli tray
+                try:
+                    self._ui_paused = False
+                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
+                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                        self.tray_mgr.update_controls_state(False, False, is_muted)
                 except Exception:
                     pass
                 return
@@ -1030,7 +1203,16 @@ class ListenMoePlayer(QWidget):
                 return
             header = self.label.text() if hasattr(self, 'label') else APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
+            if now and session:
+                tooltip = f"{header}\n{now}\n{session}"
+            elif now:
+                tooltip = f"{header}\n{now}"
+            elif session:
+                tooltip = f"{header}\n{session}"
+            else:
+                tooltip = header
             self.tray_mgr.update_tooltip(tooltip)
         except Exception:
             pass
@@ -1048,6 +1230,9 @@ class ListenMoePlayer(QWidget):
                         on_open_settings=self.open_settings,
                         on_change_channel=self._tray_change_channel,
                         on_change_format=self._tray_change_format,
+                        on_toggle_play_pause=self._tray_toggle_play_pause,
+                        on_stop_stream=self.stop_stream,
+                        on_toggle_mute=self.toggle_mute_shortcut,
                     )
                 except Exception:
                     return
@@ -1060,10 +1245,32 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 header = APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
+            if now and session:
+                tooltip = f"{header}\n{now}\n{session}"
+            elif now:
+                tooltip = f"{header}\n{now}"
+            elif session:
+                tooltip = f"{header}\n{session}"
+            else:
+                tooltip = header
             # Apply visibility/icon/tooltip
             try:
                 self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            except Exception:
+                pass
+            # Aggiorna stato dei controlli in base allo stato corrente (con override UI pausa)
+            try:
+                has_player = hasattr(self, 'player') and self.player is not None
+                is_playing = bool(self.player.is_playing()) if has_player else False
+                is_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
+                ui_paused = bool(getattr(self, '_ui_paused', False))
+                eff_paused = bool(ui_paused or is_paused)
+                eff_playing = bool(is_playing and not eff_paused)
+                is_muted = bool(getattr(self.player, 'get_mute', lambda: self._get_bool(KEY_MUTE, False))()) if has_player else bool(self._get_bool(KEY_MUTE, False))
+                if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                    self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
             except Exception:
                 pass
         except Exception:
@@ -1079,7 +1286,16 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 header = APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
+            if now and session:
+                tooltip = f"{header}\n{now}\n{session}"
+            elif now:
+                tooltip = f"{header}\n{now}"
+            elif session:
+                tooltip = f"{header}\n{session}"
+            else:
+                tooltip = header
             self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
         except Exception:
             pass
@@ -1265,10 +1481,17 @@ class ListenMoePlayer(QWidget):
                         self.log.info("[UI] play_stream started")
                     except Exception:
                         pass
-                        pass
-                        pass
-                        pass
-                        pass
+                    # Start session timer on play if enabled
+                    try:
+                        if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                            # Do not reset automatically; keep cumulative during session unless stopped
+                            if self._session_timer and not self._session_timer.isActive():
+                                self._session_timer.start()
+                            if hasattr(self, 'session_label'):
+                                self.session_label.show()
+                            self._update_session_label()
+                            self.update_tray_texts()
+                    except Exception:
                         pass
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
@@ -1280,7 +1503,29 @@ class ListenMoePlayer(QWidget):
                     self.log.info("[UI] pause_resume clicked")
                 except Exception:
                     pass
+                # Aggiorna subito lo stato UI di pausa e la tray (pre-toggle)
+                try:
+                    new_paused = not bool(getattr(self, '_ui_paused', False))
+                    self._ui_paused = new_paused
+                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
+                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                        print(f"[MAIN] pause_resume(pre-toggle): new_paused={new_paused}, sending playing={not new_paused}, paused={new_paused}, is_muted={is_muted}")
+                        self.tray_mgr.update_controls_state(not new_paused, new_paused, is_muted)
+                except Exception:
+                    pass
+                # Esegui il toggle del backend
                 self.player.pause_toggle()
+                # Gestisci il session timer e aggiorna solo il tooltip
+                try:
+                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                        if self._session_timer and self._session_timer.isActive():
+                            self._session_timer.stop()
+                        if hasattr(self, 'session_label'):
+                            self.session_label.show()  # keep visible, showing frozen time
+                        self._update_session_label()
+                        self.update_tray_texts()  # aggiorna tooltip
+                except Exception:
+                    pass
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
@@ -1313,6 +1558,25 @@ class ListenMoePlayer(QWidget):
                     pass
                 try:
                     self.tray_icon_refresh.emit()
+                except Exception:
+                    pass
+                # Stop and reset session timer on stop if enabled
+                try:
+                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                        if self._session_timer and self._session_timer.isActive():
+                            self._session_timer.stop()
+                        self._session_seconds = 0
+                        if hasattr(self, 'session_label'):
+                            self.session_label.show()  # show 0:00 if enabled
+                        self._update_session_label()
+                        self.update_tray_texts()
+                except Exception:
+                    pass
+                # Aggiorna controlli tray dopo stop
+                try:
+                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
+                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                        self.tray_mgr.update_controls_state(False, False, is_muted)
                 except Exception:
                     pass
                 try:
@@ -1366,6 +1630,18 @@ class ListenMoePlayer(QWidget):
                 self.player.set_mute(checked)
         except Exception:
             pass
+        # Aggiorna testi azioni tray (Muto/Unmute e Play/Pausa) rispettando lo stato UI di pausa
+        try:
+            has_player = hasattr(self, 'player') and self.player is not None
+            is_playing = bool(self.player.is_playing()) if has_player else False
+            is_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
+            ui_paused = bool(getattr(self, '_ui_paused', False))
+            eff_paused = bool(ui_paused or is_paused)
+            eff_playing = bool(is_playing and not eff_paused)
+            if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                self.tray_mgr.update_controls_state(eff_playing, eff_paused, bool(checked))
+        except Exception:
+            pass
 
         # Salvaguardia: se abbiamo appena disattivato il muto ma il volume è 0, proponi ripristino a 60%
         try:
@@ -1417,12 +1693,31 @@ class ListenMoePlayer(QWidget):
                 self.player.force_cleanup()
         except Exception:
             pass
+        # Stop and reset session timer when forcing stop
+        try:
+            if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                if hasattr(self, '_session_timer') and self._session_timer and self._session_timer.isActive():
+                    self._session_timer.stop()
+                self._session_seconds = 0
+                if hasattr(self, 'session_label'):
+                    self.session_label.show()
+                self._update_session_label()
+                self.update_tray_texts()
+        except Exception:
+            pass
 
     def closeEvent(self, event) -> None:
         # Chiudi DevConsole per ripristinare stdout/stderr e print
         try:
             if hasattr(self, 'dev_console') and self.dev_console:
                 self.dev_console.close()
+        except Exception:
+            pass
+        # Stoppa e resetta session timer
+        try:
+            if hasattr(self, '_session_timer') and self._session_timer:
+                self._session_timer.stop()
+            self._session_seconds = 0
         except Exception:
             pass
         # Accetta la chiusura della finestra
@@ -1548,7 +1843,16 @@ class ListenMoePlayer(QWidget):
                 return
             header = self.label.text() if hasattr(self, 'label') else APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
+            if now and session:
+                tooltip = f"{header}\n{now}\n{session}"
+            elif now:
+                tooltip = f"{header}\n{now}"
+            elif session:
+                tooltip = f"{header}\n{session}"
+            else:
+                tooltip = header
             self.tray_mgr.update_tooltip(tooltip)
         except Exception:
             pass
@@ -1566,6 +1870,9 @@ class ListenMoePlayer(QWidget):
                         on_open_settings=self.open_settings,
                         on_change_channel=self._tray_change_channel,
                         on_change_format=self._tray_change_format,
+                        on_toggle_play_pause=self._tray_toggle_play_pause,
+                        on_stop_stream=self.stop_stream,
+                        on_toggle_mute=self.toggle_mute_shortcut,
                     )
                 except Exception:
                     return
@@ -1578,10 +1885,32 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 header = APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
+            if now and session:
+                tooltip = f"{header}\n{now}\n{session}"
+            elif now:
+                tooltip = f"{header}\n{now}"
+            elif session:
+                tooltip = f"{header}\n{session}"
+            else:
+                tooltip = header
             # Apply visibility/icon/tooltip
             try:
                 self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            except Exception:
+                pass
+            # Aggiorna anche i testi delle azioni della tray in base allo stato corrente (con override UI pausa)
+            try:
+                has_player = hasattr(self, 'player') and self.player is not None
+                real_playing = bool(self.player.is_playing()) if has_player else False
+                real_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
+                ui_paused = bool(getattr(self, '_ui_paused', False))
+                eff_paused = bool(ui_paused or real_paused)
+                eff_playing = bool(real_playing and not eff_paused)
+                is_muted = bool(getattr(self.player, 'get_mute', lambda: self._get_bool(KEY_MUTE, False))()) if has_player else bool(self._get_bool(KEY_MUTE, False))
+                if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                    self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
             except Exception:
                 pass
         except Exception:
@@ -1597,7 +1926,16 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 header = APP_TITLE
             now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            tooltip = f"{header}\n{now}" if now else header
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
+            if now and session:
+                tooltip = f"{header}\n{now}\n{session}"
+            elif now:
+                tooltip = f"{header}\n{now}"
+            elif session:
+                tooltip = f"{header}\n{session}"
+            else:
+                tooltip = header
             self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
         except Exception:
             pass

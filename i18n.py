@@ -26,6 +26,10 @@ I18N: Dict[str, Dict[str, str]] = {
         'ws_closed_reconnect': 'In riproduzione: WS chiuso, riconnessione...',
         'ws_error_prefix': 'In riproduzione: errore WS: ',
         'unknown': 'Sconosciuto',
+        # Timer di sessione
+        'session_timer': 'Sessione: {time}',
+        'settings_session_timer_enable': 'Mostra timer di sessione',
+        'settings_session_timer_tip': 'Mostra il tempo trascorso dall’avvio dell’app (si azzera alla chiusura).',
         'libvlc_not_ready': 'Backend non inizializzato. Installa FFmpeg (consigliato) o imposta il percorso di libVLC dalle Impostazioni.',
         'libvlc_init_failed': 'Impossibile inizializzare il backend. Verifica FFmpeg/libVLC e la compatibilità (x64/x86).',
         'libvlc_button': 'Imposta percorso VLC…',
@@ -48,6 +52,10 @@ I18N: Dict[str, Dict[str, str]] = {
         'tray_channel': 'Canale',
         'tray_format': 'Formato (codec)',
         'tray_quit': 'Esci',
+        # Intestazioni di sezione per il menu Tray
+        'tray_section_playback': 'Riproduzione',
+        'tray_section_window': 'Finestra',
+        'tray_section_preferences': 'Preferenze',
         # Chiavi per finestra impostazioni
         'settings_button': 'Impostazioni',
         'settings_title': 'Impostazioni',
@@ -121,6 +129,10 @@ I18N: Dict[str, Dict[str, str]] = {
         'ws_closed_reconnect': 'Now Playing: WS closed, reconnecting...',
         'ws_error_prefix': 'Now Playing: WS error: ',
         'unknown': 'Unknown',
+        # Session timer
+        'session_timer': 'Session: {time}',
+        'settings_session_timer_enable': 'Show session timer',
+        'settings_session_timer_tip': 'Display elapsed time since app start (resets on close).',
         'libvlc_not_ready': 'Backend not initialized. Install FFmpeg (recommended) or set libVLC path in Settings.',
         'libvlc_init_failed': 'Failed to initialize backend. Check FFmpeg/libVLC and architecture (x64/x86).',
         'libvlc_button': 'Set VLC Path…',
@@ -143,6 +155,10 @@ I18N: Dict[str, Dict[str, str]] = {
         'tray_channel': 'Channel',
         'tray_format': 'Format/Codec',
         'tray_quit': 'Quit',
+        # Section headers for Tray menu
+        'tray_section_playback': 'Playback',
+        'tray_section_window': 'Window',
+        'tray_section_preferences': 'Preferences',
         # Keys for settings window
         'settings_button': 'Settings',
         'settings_title': 'Settings',

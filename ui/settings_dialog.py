@@ -18,6 +18,7 @@ from constants import (
     KEY_DARK_MODE,
     KEY_SLEEP_STOP_ON_END,
     KEY_DEV_CONSOLE_ENABLED,
+    KEY_SESSION_TIMER_ENABLED,
 )
 
 class SettingsDialog(QDialog):
@@ -51,6 +52,12 @@ class SettingsDialog(QDialog):
         self.chk_sleep_stop = QCheckBox(self.i18n.t('settings_sleep_stop_on_end'))
         self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, 'true') == 'true')
         layout.addWidget(self.chk_sleep_stop)
+
+        # Session timer enable
+        self.chk_session_timer = QCheckBox(self.i18n.t('settings_session_timer_enable'))
+        self.chk_session_timer.setToolTip(self.i18n.t('settings_session_timer_tip'))
+        self.chk_session_timer.setChecked(self.settings.value(KEY_SESSION_TIMER_ENABLED, 'true') == 'true')
+        layout.addWidget(self.chk_session_timer)
 
         # Developer Console (optional)
         self.chk_dev_console = QCheckBox(self.i18n.t('settings_dev_console'))
@@ -215,6 +222,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_AUTOPLAY, 'true' if self.chk_autoplay.isChecked() else 'false')
         self.settings.setValue(KEY_DARK_MODE, 'true' if self.chk_dark_mode.isChecked() else 'false')
         self.settings.setValue(KEY_SLEEP_STOP_ON_END, 'true' if self.chk_sleep_stop.isChecked() else 'false')
+        self.settings.setValue(KEY_SESSION_TIMER_ENABLED, 'true' if self.chk_session_timer.isChecked() else 'false')
         self.settings.setValue(KEY_DEV_CONSOLE_ENABLED, 'true' if self.chk_dev_console.isChecked() else 'false')
         self.settings.setValue(KEY_LANG, 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
