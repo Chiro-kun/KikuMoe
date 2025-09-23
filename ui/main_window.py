@@ -9,6 +9,7 @@ from typing import Optional
 import sys
 import os
 import time
+import re
 from i18n import I18n
 from ws_client import NowPlayingWS
 from player_ffmpeg import PlayerFFmpeg
@@ -1473,11 +1474,19 @@ class ListenMoePlayer(QWidget):
                     return
                 try:
                     self.log.info(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
-                    self.log.info(f"[UI] play_stream url={url}")
+                    # Sanitizza URL prima di log e play
+                    try:
+                        m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or "")
+                        safe_url = (m.group(0) if m else (url or "").strip()).rstrip(".,;!?)]}'\" \t\r\n")
+                        if safe_url.lower().endswith('/mp3.') or safe_url.lower().endswith('.mp3.'):
+                            safe_url = safe_url[:-1]
+                    except Exception:
+                        safe_url = url
+                    self.log.info(f"[UI] play_stream url={safe_url}")
                 except Exception:
-                    pass
+                    safe_url = url
                 self.status_changed.emit(self.t('status_opening') if hasattr(self, 't') else 'Opening...')
-                ok = self.player.play_url(url)
+                ok = self.player.play_url(safe_url)
                 if not ok:
                     # Fallback: prova formato alternativo per lo stesso canale
                     try:
@@ -1487,10 +1496,14 @@ class ListenMoePlayer(QWidget):
                         alt_url = STREAMS.get(channel, {}).get(alt_fmt)
                         if alt_url:
                             try:
-                                self.log.info(f"[UI] primary play failed, trying fallback format {alt_fmt}: {alt_url}")
+                                m2 = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", alt_url or "")
+                                alt_safe = (m2.group(0) if m2 else (alt_url or "").strip()).rstrip(".,;!?)]}'\" \t\r\n")
+                                if alt_safe.lower().endswith('/mp3.') or alt_safe.lower().endswith('.mp3.'):
+                                    alt_safe = alt_safe[:-1]
+                                self.log.info(f"[UI] primary play failed, trying fallback format {alt_fmt}: {alt_safe}")
                             except Exception:
-                                pass
-                            ok = self.player.play_url(alt_url)
+                                alt_safe = alt_url
+                            ok = self.player.play_url(alt_safe)
                     except Exception:
                         pass
                 if not ok:
