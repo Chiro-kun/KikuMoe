@@ -36,6 +36,7 @@ from constants import (
     KEY_SLEEP_STOP_ON_END,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_SESSION_TIMER_ENABLED,
+    KEY_AUDIO_DEVICE_INDEX,
 )
 import threading
 from logger import get_logger
@@ -604,7 +605,45 @@ class ListenMoePlayer(QWidget):
                 prev_nc = 1000
             prev_dark = self._get_bool(KEY_DARK_MODE, False)
             prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
+            prev_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
             dlg = SettingsDialog(self)
+            try:
+                self._apply_prev_audio_idx = prev_audio_idx
+                def _on_apply_from_dialog():
+                    try:
+                        new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+                        if new_audio_idx != getattr(self, '_apply_prev_audio_idx', ''):
+                            if was_playing:
+                                try:
+                                    self._skip_session_reset_once = True
+                                except Exception:
+                                    pass
+                                try:
+                                    self.stop_stream(reset_session=False)
+                                except Exception:
+                                    pass
+                                try:
+                                    time.sleep(0.2)
+                                except Exception:
+                                    pass
+                                try:
+                                    self.play_stream()
+                                except Exception:
+                                    pass
+                                try:
+                                    if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
+                                except Exception:
+                                    pass
+                            self._apply_prev_audio_idx = new_audio_idx
+                    except Exception:
+                        pass
+                try:
+                    dlg.settings_changed.connect(_on_apply_from_dialog)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             if dlg.exec_() == QDialog.Accepted:
                 # Lingua
                 lang = self.settings.value(KEY_LANG, 'it')
@@ -646,6 +685,34 @@ class ListenMoePlayer(QWidget):
                             self.tray_icon_refresh.emit()
                         except Exception:
                             pass
+                except Exception:
+                    pass
+                # Se il dispositivo audio è cambiato, riavvia il playback per applicarlo
+                try:
+                    new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+                    if new_audio_idx != prev_audio_idx:
+                        if was_playing:
+                            try:
+                                self._skip_session_reset_once = True
+                            except Exception:
+                                pass
+                            try:
+                                self.stop_stream(reset_session=False)
+                            except Exception:
+                                pass
+                            try:
+                                time.sleep(0.2)
+                            except Exception:
+                                pass
+                            try:
+                                self.play_stream()
+                            except Exception:
+                                pass
+                            try:
+                                if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                                    self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
+                            except Exception:
+                                pass
                 except Exception:
                     pass
                 # Percorso VLC
@@ -1122,16 +1189,27 @@ class ListenMoePlayer(QWidget):
                     self.buffering_indeterminate.emit(False)
                 except Exception:
                     pass
-                # Stop and reset session timer
+                # Stop e reset del timer di sessione (salvo riavvii interni)
                 try:
                     if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if self._session_timer and self._session_timer.isActive():
-                            self._session_timer.stop()
-                        self._session_seconds = 0
-                        if hasattr(self, 'session_label'):
-                            self.session_label.show()
-                        self._update_session_label()
-                        self.update_tray_texts()
+                        if bool(getattr(self, '_skip_session_reset_once', False)):
+                            # Riavvio interno: preserva il timer e non azzerare i secondi
+                            try:
+                                self._skip_session_reset_once = False
+                            except Exception:
+                                pass
+                            if hasattr(self, 'session_label'):
+                                self.session_label.show()
+                            self._update_session_label()
+                            self.update_tray_texts()
+                        else:
+                            if self._session_timer and self._session_timer.isActive():
+                                self._session_timer.stop()
+                            self._session_seconds = 0
+                            if hasattr(self, 'session_label'):
+                                self.session_label.show()
+                            self._update_session_label()
+                            self.update_tray_texts()
                 except Exception:
                     pass
                 try:
@@ -1244,6 +1322,25 @@ class ListenMoePlayer(QWidget):
             else:
                 tooltip = header
             self.tray_mgr.update_tooltip(tooltip)
+        except Exception:
+            pass
+
+    def _notify_tray(self, title: str, body: str) -> None:
+        try:
+            # Rispetta impostazioni utente
+            if not self._get_bool(KEY_TRAY_ENABLED, True) or not self._get_bool(KEY_TRAY_NOTIFICATIONS, True):
+                return
+        except Exception:
+            pass
+        # Assicura che la tray sia inizializzata secondo il flag corrente
+        try:
+            self._ensure_tray(self._get_bool(KEY_TRAY_ENABLED, True))
+        except Exception:
+            pass
+        # Mostra la notifica tramite TrayManager
+        try:
+            if hasattr(self, 'tray_mgr') and self.tray_mgr is not None:
+                self.tray_mgr.show_message(title or '', body or '')
         except Exception:
             pass
 
@@ -1410,7 +1507,11 @@ class ListenMoePlayer(QWidget):
                 was_playing = False
             if was_playing:
                 try:
-                    self.stop_stream()
+                    self._skip_session_reset_once = True
+                except Exception:
+                    pass
+                try:
+                    self.stop_stream(reset_session=False)
                 except Exception:
                     pass
                 # Piccolo delay per lasciare tempo al backend di fermarsi
@@ -1419,6 +1520,11 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     # Fallback sincrono
                     self.play_stream()
+                try:
+                    if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
+                except Exception:
+                    pass
             else:
                 # Se non stava riproducendo, aggiorna comunque icona/tooltip
                 try:
@@ -1571,7 +1677,7 @@ class ListenMoePlayer(QWidget):
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
-    def stop_stream(self) -> None:
+    def stop_stream(self, reset_session: bool = True) -> None:
         try:
             try:
                 self.log.info("[UI] stop_stream clicked")
@@ -1602,16 +1708,24 @@ class ListenMoePlayer(QWidget):
                     self.tray_icon_refresh.emit()
                 except Exception:
                     pass
-                # Stop and reset session timer on stop if enabled
+                # Stop and optionally reset session timer on stop if enabled
                 try:
                     if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if self._session_timer and self._session_timer.isActive():
-                            self._session_timer.stop()
-                        self._session_seconds = 0
-                        if hasattr(self, 'session_label'):
-                            self.session_label.show()  # show 0:00 if enabled
-                        self._update_session_label()
-                        self.update_tray_texts()
+                        if reset_session:
+                            if self._session_timer and self._session_timer.isActive():
+                                self._session_timer.stop()
+                            self._session_seconds = 0
+                            if hasattr(self, 'session_label'):
+                                self.session_label.show()  # show 0:00 if enabled
+                            self._update_session_label()
+                            self.update_tray_texts()
+                        else:
+                            # Preserve session timer during internal restarts (device/channel changes)
+                            # Keep label visible and refresh tooltip without resetting seconds
+                            if hasattr(self, 'session_label'):
+                                self.session_label.show()
+                            self._update_session_label()
+                            self.update_tray_texts()
                 except Exception:
                     pass
                 # Aggiorna controlli tray dopo stop

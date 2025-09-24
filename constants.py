@@ -79,3 +79,5 @@ KEY_SLEEP_MINUTES = "sleep_minutes"
 KEY_SLEEP_STOP_ON_END = "sleep_stop_on_end"
 KEY_DEV_CONSOLE_ENABLED = "dev_console_enabled"
 KEY_SESSION_TIMER_ENABLED = "session_timer_enabled"
+# Audio output selection
+KEY_AUDIO_DEVICE_INDEX = "audio_device_index"

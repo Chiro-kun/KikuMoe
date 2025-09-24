@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox,
     QPushButton, QLineEdit, QFileDialog, QSpinBox
 )
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import Qt, QSettings, pyqtSignal
 from i18n import I18n
 from constants import (
     ORG_NAME,
@@ -20,9 +20,11 @@ from constants import (
     KEY_SLEEP_STOP_ON_END,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_SESSION_TIMER_ENABLED,
+    KEY_AUDIO_DEVICE_INDEX,
 )
 
 class SettingsDialog(QDialog):
+    settings_changed = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setModal(True)
@@ -119,6 +121,37 @@ class SettingsDialog(QDialog):
         fmt_row.addWidget(self.cmb_format, 1)
         layout.addLayout(fmt_row)
 
+        # Audio Output Device
+        audio_row = QHBoxLayout()
+        audio_row.setSpacing(8)
+        lab_audio = QLabel(self.i18n.t('settings_audio_output'))
+        lab_audio.setMinimumWidth(140)
+        audio_row.addWidget(lab_audio)
+        self.cmb_audio_device = QComboBox()
+        try:
+            self.cmb_audio_device.setMinimumWidth(260)
+        except Exception:
+            pass
+        # Placeholder entries: will be filled on showEvent via PortAudio enumeration
+        self.cmb_audio_device.addItem(self.i18n.t('settings_audio_default'), userData=None)
+        # load persisted selection if any
+        persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+        try:
+            # select default initially; if persisted exists, selection will be applied when list is populated
+            self.cmb_audio_device.setCurrentIndex(0)
+        except Exception:
+            pass
+        audio_row.addWidget(self.cmb_audio_device, 1)
+        # Refresh button to re-enumerate
+        self.btn_audio_refresh = QPushButton(self.i18n.t('settings_audio_refresh'))
+        audio_row.addWidget(self.btn_audio_refresh)
+        layout.addLayout(audio_row)
+        # Hook refresh
+        try:
+            self.btn_audio_refresh.clicked.connect(self._populate_audio_devices)
+        except Exception:
+            pass
+
         # VLC Path
         vlc_row = QHBoxLayout()
         vlc_row.setSpacing(8)
@@ -205,6 +238,10 @@ class SettingsDialog(QDialog):
     def _on_apply(self):
         """Salva i valori senza chiudere la finestra."""
         self._save_settings()
+        try:
+            self.settings_changed.emit()
+        except Exception:
+            pass
 
     def _on_ok(self):
         """Salva i valori e chiude la finestra."""
@@ -240,6 +277,15 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_TRAY_ENABLED, 'true' if self.chk_tray_enabled.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_HIDE_ON_MINIMIZE, 'true' if self.chk_tray_hide_on_minimize.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_NOTIFICATIONS, 'true' if self.chk_tray_notifications.isChecked() else 'false')
+        # Save audio device selection: None => use system default
+        try:
+            idx_data = self.cmb_audio_device.currentData()
+            if idx_data is None:
+                self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, '')
+            else:
+                self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, int(idx_data))
+        except Exception:
+            pass
 
     def showEvent(self, event):
         try:
@@ -250,6 +296,11 @@ class SettingsDialog(QDialog):
         try:
             dark = self.settings.value(KEY_DARK_MODE, 'false') == 'true'
             self._apply_windows_titlebar_dark_mode(dark)
+        except Exception:
+            pass
+        # Populate audio devices on show
+        try:
+            self._populate_audio_devices()
         except Exception:
             pass
 
@@ -273,3 +324,62 @@ class SettingsDialog(QDialog):
                 pass
         except Exception:
             pass
+
+    def _populate_audio_devices(self):
+        """Enumerate PortAudio devices via PyAudio and fill combo box.
+        Keeps first entry as 'System default'; lists output-capable devices with index.
+        """
+        try:
+            import pyaudio
+        except Exception:
+            pyaudio = None
+        # Keep 'System default' as index 0
+        try:
+            # Clear all except first
+            for i in range(self.cmb_audio_device.count() - 1, 0, -1):
+                self.cmb_audio_device.removeItem(i)
+        except Exception:
+            pass
+        if pyaudio is None:
+            return
+        pa = None
+        try:
+            pa = pyaudio.PyAudio()
+            host_info = pa.get_host_api_info_by_index(0) if hasattr(pa, 'get_host_api_info_by_index') else None
+            device_count = host_info.get('deviceCount', 0) if isinstance(host_info, dict) else (
+                pa.get_device_count() if hasattr(pa, 'get_device_count') else 0
+            )
+            for i in range(device_count):
+                try:
+                    info = pa.get_device_info_by_index(i)
+                except Exception:
+                    info = None
+                if not isinstance(info, dict):
+                    continue
+                max_output = int(info.get('maxOutputChannels', 0))
+                name = str(info.get('name', f'Device {i}'))
+                # Include only devices that can output
+                if max_output > 0:
+                    # Show name and index in label
+                    label = f"{name} (#{i})"
+                    self.cmb_audio_device.addItem(label, userData=i)
+            # Restore persisted selection if available
+            persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+            if persisted != '' and persisted is not None:
+                try:
+                    persisted = int(persisted)
+                    # Find index in combo where userData == persisted
+                    for combo_idx in range(self.cmb_audio_device.count()):
+                        if self.cmb_audio_device.itemData(combo_idx) == persisted:
+                            self.cmb_audio_device.setCurrentIndex(combo_idx)
+                            break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        finally:
+            try:
+                if pa is not None and hasattr(pa, 'terminate'):
+                    pa.terminate()
+            except Exception:
+                pass
