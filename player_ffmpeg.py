@@ -8,7 +8,8 @@ import sys
 import struct
 import re
 from logger import get_logger
-from constants import APP_NAME, APP_VERSION
+from PyQt5.QtCore import QSettings
+from constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
 
 try:
     import pyaudio
@@ -74,6 +75,20 @@ class PlayerFFmpeg:
             return result.returncode == 0
         except Exception:
             return False
+
+    def _get_output_device_index(self) -> Optional[int]:
+        """Legge l'indice del dispositivo di output da QSettings; None => predefinito di Windows."""
+        try:
+            settings = QSettings(ORG_NAME, APP_SETTINGS)
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+            if val in (None, ''):
+                return None
+            try:
+                return int(val)
+            except Exception:
+                return None
+        except Exception:
+            return None
 
     def _sanitize_stream_url(self, raw: str) -> str:
         """Estrae e sanifica un URL di streaming, rimuovendo in modo aggressivo apici/backtick e punteggiatura finale.
@@ -395,13 +410,37 @@ class PlayerFFmpeg:
             if self._pyaudio_instance is not None and hasattr(self._pyaudio_instance, "open"):
                 pa_format = getattr(pyaudio, "paInt16", None)
                 try:
-                    self._audio_stream = self._pyaudio_instance.open(
-                        format=pa_format,
-                        channels=2,
-                        rate=44100,
-                        output=True,
-                        frames_per_buffer=1024
-                    )
+                    device_idx = self._get_output_device_index()
+                    if device_idx is None:
+                        self.log.debug("[DEBUG] _stream_worker: using Windows default output device")
+                    else:
+                        self.log.debug("[DEBUG] _stream_worker: using output_device_index=%s", device_idx)
+                    open_kwargs = {
+                        'format': pa_format,
+                        'channels': 2,
+                        'rate': 44100,
+                        'output': True,
+                        'frames_per_buffer': 1024,
+                    }
+                    if device_idx is not None:
+                        open_kwargs['output_device_index'] = device_idx
+                    # Try open; if fails with a specific device, retry with default system device
+                    try:
+                        self._audio_stream = self._pyaudio_instance.open(**open_kwargs)
+                    except Exception as oe:
+                        if device_idx is not None:
+                            try:
+                                self.log.debug("[DEBUG] _stream_worker: failed to open with device %s, retrying with Windows default: %s", device_idx, oe)
+                            except Exception:
+                                pass
+                            try:
+                                open_kwargs.pop('output_device_index', None)
+                                self._audio_stream = self._pyaudio_instance.open(**open_kwargs)
+                            except Exception as oe2:
+                                self.log.debug("[DEBUG] _stream_worker: also failed to open default device: %s", oe2)
+                                raise
+                        else:
+                            raise
                     self.log.debug("[DEBUG] _stream_worker: PyAudio stream opened")
                     try:
                         if hasattr(self._audio_stream, "start_stream"):

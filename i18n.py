@@ -74,6 +74,10 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_ok': 'OK',
         'settings_cancel': 'Annulla',
         'settings_apply': 'Applica',
+        # Audio device selection
+        'settings_audio_output': 'Uscita audio',
+        'settings_audio_default': 'Sistema (predefinito di Windows)',
+        'settings_audio_refresh': 'Aggiorna',
         # Sleep Timer & Dark Mode
         'sleep_timer': 'Sleeptimer',
         'sleep_minutes': 'Minuti:',
@@ -178,6 +182,10 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_ok': 'OK',
         'settings_cancel': 'Cancel',
         'settings_apply': 'Apply',
+        # Audio device selection
+        'settings_audio_output': 'Audio output',
+        'settings_audio_default': 'System (Windows default device)',
+        'settings_audio_refresh': 'Refresh',
         # Sleep Timer & Dark Mode
         'sleep_timer': 'Sleep timer',
         'sleep_minutes': 'Minutes:',
