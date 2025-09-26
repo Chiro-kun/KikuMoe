@@ -89,6 +89,7 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_sleep_stop_on_end': 'Alla scadenza Sleep Timer: ferma riproduzione',
         # Dev console
         'settings_dev_console': 'Abilita console sviluppatore',
+        'settings_dev_console_show_dev': 'Mostra messaggi con tag [DEV]',
         'dev_console_button': 'Console',
         'dev_console_title': 'Console sviluppatore',
         'dev_console_clear': 'Pulisci',
@@ -99,6 +100,8 @@ I18N: Dict[str, Dict[str, str]] = {
         'dev_console_autoscroll': 'Autoscroll',
         'dev_console_wrap': 'A capo automatico',
         'dev_console_level': 'Filtro livello',
+        'dev_console_placeholder': 'I log appariranno qui...'
+        ,
         # Volume zero safeguard
         'volume_zero_title': 'Volume a zero',
         'volume_zero_text': 'Il volume è impostato a 0. Vuoi ripristinarlo al 60%?',
@@ -197,6 +200,7 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_sleep_stop_on_end': 'When Sleep Timer elapses: stop playback',
         # Dev console
         'settings_dev_console': 'Enable developer console',
+        'settings_dev_console_show_dev': 'Show messages tagged [DEV]',
         'dev_console_button': 'Console',
         'dev_console_title': 'Developer Console',
         'dev_console_clear': 'Clear',
@@ -207,6 +211,8 @@ I18N: Dict[str, Dict[str, str]] = {
         'dev_console_autoscroll': 'Autoscroll',
         'dev_console_wrap': 'Wrap',
         'dev_console_level': 'Level filter',
+        'dev_console_placeholder': 'Logs will appear here...'
+        ,
         # Volume zero safeguard
         'volume_zero_title': 'Volume is zero',
         'volume_zero_text': 'Volume is set to 0. Do you want to restore it to 60%?',

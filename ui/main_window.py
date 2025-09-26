@@ -37,6 +37,7 @@ from constants import (
     KEY_DEV_CONSOLE_ENABLED,
     KEY_SESSION_TIMER_ENABLED,
     KEY_AUDIO_DEVICE_INDEX,
+    KEY_DEV_CONSOLE_SHOW_DEV,
 )
 import threading
 from logger import get_logger
@@ -56,10 +57,18 @@ class ListenMoePlayer(QWidget):
     notify_tray = pyqtSignal(str, str)
     # Control QProgressBar range (determinate vs indeterminate)
     buffering_indeterminate = pyqtSignal(bool)
+    # Delayed play signal to ensure timers are created from UI thread
+    schedule_play = pyqtSignal(int)
 
     def __init__(self):
         super().__init__()
         self._playback_lock = threading.Lock()
+
+        # Connect cross-thread delayed play to UI slot
+        try:
+            self.schedule_play.connect(self._schedule_play_stream)
+        except Exception:
+            pass
 
         # settings
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
@@ -306,8 +315,19 @@ class ListenMoePlayer(QWidget):
         # Initialize Dev Console helper
         try:
             self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
+            try:
+                self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
+            except Exception:
+                pass
         except Exception:
             self.dev_console = None
+
+        # Ensure DevConsole logging is active if enabled in settings
+        try:
+            if self._get_bool(KEY_DEV_CONSOLE_ENABLED, False) and self.dev_console:
+                self.dev_console.activate_logging()
+        except Exception:
+            pass
 
         # Sleep timer runtime
         self._sleep_timer: Optional[QTimer] = QTimer(self)
@@ -433,8 +453,12 @@ class ListenMoePlayer(QWidget):
             pass
 
     def apply_translations(self):
-        # Mantieni titolo costante
-        self.setWindowTitle(APP_TITLE)
+        # Mantieni o aggiorna titolo finestra in base al Now Playing
+        try:
+            title = getattr(self, '_current_title', '') or ''
+            self.setWindowTitle(f"{APP_TITLE} — {title}" if title else APP_TITLE)
+        except Exception:
+            pass
         self.channel_label.setText(self.i18n.t('channel_label'))
         self.format_label.setText(self.i18n.t('format_label'))
         self.play_button.setText(self.i18n.t('play'))
@@ -586,8 +610,12 @@ class ListenMoePlayer(QWidget):
                 self.channel_value.setText(channel)
             if hasattr(self, 'format_value'):
                 self.format_value.setText(fmt)
-            # Mantieni titolo finestra fisso
-            self.setWindowTitle(APP_TITLE)
+            # Mantieni o aggiorna titolo finestra in base al Now Playing
+            try:
+                title = getattr(self, '_current_title', '') or ''
+                self.setWindowTitle(f"{APP_TITLE} — {title}" if title else APP_TITLE)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -640,11 +668,22 @@ class ListenMoePlayer(QWidget):
                         pass
                 try:
                     dlg.settings_changed.connect(_on_apply_from_dialog)
+                    # Also update DevConsole [DEV] filter live on settings_changed
+                    try:
+                        def _on_settings_changed_apply_filter():
+                            try:
+                                if hasattr(self, 'dev_console') and self.dev_console:
+                                    self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
+                            except Exception:
+                                pass
+                        dlg.settings_changed.connect(_on_settings_changed_apply_filter)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             except Exception:
                 pass
-            if dlg.exec_() == QDialog.Accepted:
+            def _on_dialog_accepted():
                 # Lingua
                 lang = self.settings.value(KEY_LANG, 'it')
                 self.i18n.set_lang('it' if lang not in ('it','en') else lang)
@@ -655,23 +694,12 @@ class ListenMoePlayer(QWidget):
                     self.channel_value.setText(self.settings.value(KEY_CHANNEL, 'J-POP'))
                 if hasattr(self, 'format_value'):
                     self.format_value.setText(self.settings.value(KEY_FORMAT, 'Vorbis'))
-                # Se canale o formato sono cambiati, resetta subito Now Playing e riavvia lo stream, poi aggiorna la tray
+                # Se canale o formato sono cambiati, riavvia WS/stream ma mantieni il Now Playing finché non arriva un nuovo evento
                 try:
                     new_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
                     new_format = self.settings.value(KEY_FORMAT, 'Vorbis')
                     if new_channel != prev_channel or new_format != prev_format:
-                        # Reset immediato del Now Playing per evitare titolo obsoleto
-                        try:
-                            self._current_title = '–'
-                            self._current_artist = ''
-                            self._current_duration_seconds = None
-                            self._current_start_epoch = None
-                            try:
-                                self.label_refresh.emit()
-                            except Exception:
-                                self.update_now_playing_label()
-                        except Exception:
-                            pass
+                        # Mantieni il Now Playing corrente; il WS invierà il nuovo titolo a breve
                         # Riavvia WS se è cambiato il canale
                         if new_channel != prev_channel:
                             try:
@@ -779,15 +807,33 @@ class ListenMoePlayer(QWidget):
                     try:
                         if not new_dev_console:
                             if hasattr(self, 'dev_console') and self.dev_console:
-                                self.dev_console.close()
+                                try:
+                                    self.dev_console.deactivate_logging()
+                                except Exception:
+                                    pass
+                                # Non chiudere la UI della console: consenti all'utente di aprirla/vederla anche se il logging di background è disattivato
+                                # (prima: self.dev_console.close())
                         else:
-                            # Apertura immediata quando abilitata dalle impostazioni
-                            try:
-                                self.open_dev_console(parent_widget=self)
-                            except Exception:
-                                pass
+                            if hasattr(self, 'dev_console') and self.dev_console:
+                                try:
+                                    self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
+                                except Exception:
+                                    pass
+                                try:
+                                    self.dev_console.activate_logging()
+                                except Exception:
+                                    pass
                     except Exception:
                         pass
+            # collega e mostra non-modale
+            try:
+                dlg.accepted.connect(_on_dialog_accepted)
+            except Exception:
+                pass
+            try:
+                dlg.show()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -799,23 +845,23 @@ class ListenMoePlayer(QWidget):
 
     def open_dev_console(self, parent_widget=None):
         try:
-            # Open only if enabled in settings (but allow explicit call from Settings dialog)
+            # Ensure settings are synced, but always allow opening the console on user action
             try:
                 self.settings.sync()
             except Exception:
                 pass
-            try:
-                invoked_from_settings = parent_widget is not None
-            except Exception:
-                invoked_from_settings = False
-            if not invoked_from_settings:
-                if not self._get_bool(KEY_DEV_CONSOLE_ENABLED, False):
-                    return
+            # KEY_DEV_CONSOLE_ENABLED controls background logging; opening the UI is always allowed
             if not hasattr(self, 'dev_console') or self.dev_console is None:
                 try:
                     self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
                 except Exception:
                     return
+            # Ensure the [DEV] filter is up-to-date with settings
+            try:
+                if hasattr(self, 'dev_console') and self.dev_console:
+                    self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
+            except Exception:
+                pass
             if self.dev_console.is_open():
                 try:
                     self.dev_console.raise_window()
@@ -1180,6 +1226,12 @@ class ListenMoePlayer(QWidget):
                 return
 
             if c in ('stopped', 'ended'):
+                # Se il flusso è terminato naturalmente, prepara un riavvio interno preservando il timer
+                if c == 'ended':
+                    try:
+                        self._skip_session_reset_once = True
+                    except Exception:
+                        pass
                 try:
                     self.status_changed.emit(self.t('status_stopped'))
                 except Exception:
@@ -1224,6 +1276,18 @@ class ListenMoePlayer(QWidget):
                         self.tray_mgr.update_controls_state(False, False, is_muted)
                 except Exception:
                     pass
+                # Auto-riconnessione solo su 'ended' (non su 'stopped')
+                try:
+                    if c == 'ended':
+                        self.schedule_play.emit(1000)
+                except Exception:
+                    pass
+                # Notifica tray del riavvio automatico (timer di sessione preservato)
+                try:
+                    if c == 'ended':
+                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
+                except Exception:
+                    pass
                 return
 
             if c in ('error', 'libvlc_init_failed'):
@@ -1238,6 +1302,20 @@ class ListenMoePlayer(QWidget):
                     pass
                 try:
                     self.backend_status_refresh.emit()
+                except Exception:
+                    pass
+                # Auto-riconnessione in caso di errore (evita reset sessione)
+                try:
+                    self._skip_session_reset_once = True
+                except Exception:
+                    pass
+                try:
+                    self.schedule_play.emit(1200)
+                except Exception:
+                    pass
+                # Notifica tray del riavvio automatico dopo errore (timer di sessione preservato)
+                try:
+                    self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
                 except Exception:
                     pass
                 return
@@ -1443,18 +1521,6 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
             except Exception:
                 pass
-            # Reset immediato del Now Playing per evitare titolo obsoleto
-            try:
-                self._current_title = '–'
-                self._current_artist = ''
-                self._current_duration_seconds = None
-                self._current_start_epoch = None
-                try:
-                    self.label_refresh.emit()
-                except Exception:
-                    self.update_now_playing_label()
-            except Exception:
-                pass
             # Riavvia il WS per il nuovo canale
             try:
                 self._restart_ws_for_channel(channel)
@@ -1481,18 +1547,6 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
             except Exception:
                 pass
-            # Reset immediato del Now Playing per evitare titolo obsoleto
-            try:
-                self._current_title = '–'
-                self._current_artist = ''
-                self._current_duration_seconds = None
-                self._current_start_epoch = None
-                try:
-                    self.label_refresh.emit()
-                except Exception:
-                    self.update_now_playing_label()
-            except Exception:
-                pass
             # Riavvia stream se già in riproduzione
             self._restart_stream_after_channel_format_change()
         except Exception:
@@ -1516,7 +1570,7 @@ class ListenMoePlayer(QWidget):
                     pass
                 # Piccolo delay per lasciare tempo al backend di fermarsi
                 try:
-                    QTimer.singleShot(200, self.play_stream)
+                    self.schedule_play.emit(200)
                 except Exception:
                     # Fallback sincrono
                     self.play_stream()
@@ -1535,6 +1589,16 @@ class ListenMoePlayer(QWidget):
             pass
 
     # ------------------- Backend status -------------------
+    def _schedule_play_stream(self, delay_ms: int) -> None:
+        """UI-thread slot to (re)start the stream after a delay."""
+        try:
+            QTimer.singleShot(int(delay_ms), self.play_stream)
+        except Exception:
+            try:
+                self.play_stream()
+            except Exception:
+                pass
+
     def update_vlc_status_label(self) -> None:
         try:
             ok = bool(self.player and self.player.is_ready())
@@ -1736,9 +1800,20 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
                 try:
-                    # reset title
-                    base = APP_TITLE
-                    self.setWindowTitle(base)
+                    # Aggiorna titolo finestra: preserva il Now Playing durante riavvii interni
+                    if reset_session:
+                        base = APP_TITLE
+                        self.setWindowTitle(base)
+                    else:
+                        # Mantieni il titolo corrente se disponibile, altrimenti fallback a base
+                        try:
+                            title = getattr(self, '_current_title', '') or ''
+                        except Exception:
+                            title = ''
+                        if title:
+                            self.setWindowTitle(f"{APP_TITLE} — {title}")
+                        else:
+                            self.setWindowTitle(APP_TITLE)
                 except Exception:
                     pass
         except Exception as e:
@@ -1880,10 +1955,17 @@ class ListenMoePlayer(QWidget):
             pass
 
     def closeEvent(self, event) -> None:
-        # Chiudi DevConsole per ripristinare stdout/stderr e print
+        # Chiudi DevConsole e disattiva la cattura logging
         try:
             if hasattr(self, 'dev_console') and self.dev_console:
-                self.dev_console.close()
+                try:
+                    self.dev_console.deactivate_logging()
+                except Exception:
+                    pass
+                try:
+                    self.dev_console.close()
+                except Exception:
+                    pass
         except Exception:
             pass
         # Stoppa e resetta session timer
@@ -2160,18 +2242,6 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
             except Exception:
                 pass
-            # Reset immediato del Now Playing per evitare titolo obsoleto
-            try:
-                self._current_title = '–'
-                self._current_artist = ''
-                self._current_duration_seconds = None
-                self._current_start_epoch = None
-                try:
-                    self.label_refresh.emit()
-                except Exception:
-                    self.update_now_playing_label()
-            except Exception:
-                pass
             # Riavvia il WS per il nuovo canale
             try:
                 self._restart_ws_for_channel(channel)
@@ -2198,18 +2268,6 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
             except Exception:
                 pass
-            # Reset immediato del Now Playing per evitare titolo obsoleto
-            try:
-                self._current_title = '–'
-                self._current_artist = ''
-                self._current_duration_seconds = None
-                self._current_start_epoch = None
-                try:
-                    self.label_refresh.emit()
-                except Exception:
-                    self.update_now_playing_label()
-            except Exception:
-                pass
             # Riavvia stream se già in riproduzione
             self._restart_stream_after_channel_format_change()
         except Exception:
@@ -2223,16 +2281,30 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 was_playing = False
             if was_playing:
+                # Preserva il timer di sessione e non azzerarlo
                 try:
-                    self.stop_stream()
+                    self._skip_session_reset_once = True
+                except Exception:
+                    pass
+                try:
+                    self.stop_stream(reset_session=False)
                 except Exception:
                     pass
                 # Piccolo delay per lasciare tempo al backend di fermarsi
                 try:
-                    QTimer.singleShot(200, self.play_stream)
+                    self.schedule_play.emit(200)
                 except Exception:
                     # Fallback sincrono
-                    self.play_stream()
+                    try:
+                        self.play_stream()
+                    except Exception:
+                        pass
+                # Notifica tray del riavvio (timer preservato)
+                try:
+                    if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
+                except Exception:
+                    pass
             else:
                 # Se non stava riproducendo, aggiorna comunque icona/tooltip
                 try:

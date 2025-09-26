@@ -81,3 +81,5 @@ KEY_DEV_CONSOLE_ENABLED = "dev_console_enabled"
 KEY_SESSION_TIMER_ENABLED = "session_timer_enabled"
 # Audio output selection
 KEY_AUDIO_DEVICE_INDEX = "audio_device_index"
+# New: Dev console option to show [DEV] tagged messages
+KEY_DEV_CONSOLE_SHOW_DEV = "dev_console_show_dev"

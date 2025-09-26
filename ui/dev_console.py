@@ -71,6 +71,12 @@ class DevConsole(QObject):
         self._log_handler = None
         # elenco dei logger a cui ho agganciato l'handler (oltre al root)
         self._attached_loggers = []
+        # stato logging indipendente dalla UI
+        self._logging_active = False
+        # buffer dei log ricevuti prima che la UI sia aperta
+        self._preopen_buffer = []
+        # filtro per i messaggi [DEV]
+        self._show_dev = False
 
     def _t(self, key: str, default: str = None):
         try:
@@ -81,11 +87,127 @@ class DevConsole(QObject):
         return default or key
 
     def is_open(self) -> bool:
-        return bool(self._console_dialog)
+        try:
+            dlg = getattr(self, '_console_dialog', None)
+            return bool(dlg and dlg.isVisible())
+        except Exception:
+            return False
 
+    def set_show_dev(self, show: bool) -> None:
+        try:
+            self._show_dev = bool(show)
+        except Exception:
+            pass
+
+    # Nuovo: attiva la cattura dei log anche senza UI aperta
+    def activate_logging(self) -> None:
+        try:
+            if getattr(self, '_logging_active', False):
+                return
+        except Exception:
+            pass
+        # Prepara stream Qt che invia a _append_console (thread-safe)
+        try:
+            if self._qt_stream is None:
+                self._qt_stream = _QtStream(self._append_console)
+        except Exception:
+            self._qt_stream = None
+        # Monkeypatch di print per catturare stdout
+        try:
+            if self._old_print is None:
+                self._old_print = getattr(builtins, 'print', None)
+                def _console_print(*args, **kwargs):
+                    try:
+                        sep = kwargs.get('sep', ' ')
+                        end = kwargs.get('end', '\n')
+                        text = sep.join(str(a) for a in args) + end
+                        try:
+                            if self._qt_stream:
+                                self._qt_stream.write(text)
+                        except Exception:
+                            pass
+                        try:
+                            if self._old_print is not None:
+                                file_kw = kwargs.copy()
+                                self._old_print(*args, **file_kw)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                try:
+                    builtins.print = _console_print
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Aggiungi logging handler
+        try:
+            if self._qt_stream and self._log_handler is None:
+                self._log_handler = _DevConsoleHandler(self._qt_stream.write)
+                self._log_handler.setLevel(logging.DEBUG)
+                fmt = logging.Formatter('[%(levelname)s] [%(name)s] %(message)s')
+                self._log_handler.setFormatter(fmt)
+                root_logger = logging.getLogger()
+                if self._log_handler not in getattr(root_logger, 'handlers', []):
+                    root_logger.addHandler(self._log_handler)
+                try:
+                    for lname in list(logging.Logger.manager.loggerDict.keys()):
+                        try:
+                            lg = logging.getLogger(lname)
+                            if self._log_handler not in getattr(lg, 'handlers', []):
+                                lg.addHandler(self._log_handler)
+                                self._attached_loggers.append(lg)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._logging_active = True
+
+    # Nuovo: disattiva la cattura dei log e ripristina gli hook
+    def deactivate_logging(self) -> None:
+        try:
+            if not getattr(self, '_logging_active', False) and self._log_handler is None and self._old_print is None:
+                return
+        except Exception:
+            pass
+        # Ripristina print originale
+        try:
+            if self._old_print is not None:
+                builtins.print = self._old_print
+        except Exception:
+            pass
+        self._old_print = None
+        # Sgancia handler di logging
+        try:
+            if self._log_handler is not None:
+                try:
+                    logging.getLogger().removeHandler(self._log_handler)
+                except Exception:
+                    pass
+                try:
+                    for lg in list(self._attached_loggers):
+                        try:
+                            lg.removeHandler(self._log_handler)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        self._attached_loggers = []
+        self._log_handler = None
+        self._qt_stream = None
+        self._logging_active = False
     def raise_window(self):
         try:
             if self._console_dialog:
+                try:
+                    if not self._console_dialog.isVisible():
+                        self._console_dialog.show()
+                except Exception:
+                    pass
                 self._console_dialog.raise_()
                 self._console_dialog.activateWindow()
         except Exception:
@@ -147,6 +269,11 @@ class DevConsole(QObject):
             pass
 
     def open(self, parent=None):
+        # Ensure logging is active even if UI was not open
+        try:
+            self.activate_logging()
+        except Exception:
+            pass
         # If already open, just focus it
         if self._console_dialog:
             self.raise_window()
@@ -157,6 +284,12 @@ class DevConsole(QObject):
         self._console_dialog = QDialog(dlg_parent)
         self._console_dialog.setWindowTitle(self._t('dev_console_title', 'Developer Console'))
         self._console_dialog.setModal(False)
+        try:
+            # Quando l'utente chiude la finestra (X) o viene distrutta, azzera i riferimenti
+            self._console_dialog.finished.connect(self._on_dialog_closed)
+            self._console_dialog.destroyed.connect(self._on_dialog_destroyed)
+        except Exception:
+            pass
         try:
             self._console_dialog.setMinimumSize(700, 420)
         except Exception:
@@ -260,75 +393,16 @@ class DevConsole(QObject):
         except Exception:
             pass
 
-        # Prepara stream Qt per uso con print e logging handler
+        # Svuota eventuali log accumulati prima dell'apertura della UI
         try:
-            self._qt_stream = _QtStream(self._append_console)
-        except Exception:
-            self._qt_stream = None
-
-        # Monkeypatch print per catturare anche librerie che usano print
-        try:
-            self._old_print = getattr(builtins, 'print', None)
-
-            def _console_print(*args, **kwargs):
-                try:
-                    sep = kwargs.get('sep', ' ')
-                    end = kwargs.get('end', '\n')
-                    text = sep.join(str(a) for a in args) + end
-                    try:
-                        if self._qt_stream:
-                            self._qt_stream.write(text)
-                    except Exception:
-                        pass
-                    try:
-                        if self._old_print is not None:
-                            file_kw = kwargs.copy()
-                            self._old_print(*args, **file_kw)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-
-            try:
-                builtins.print = _console_print
-            except Exception:
-                pass
+            if getattr(self, '_preopen_buffer', None):
+                buffered = ''.join(self._preopen_buffer)
+                self._preopen_buffer.clear()
+                if buffered:
+                    self._append_console(buffered)
         except Exception:
             pass
 
-        # Aggiungi un logging.Handler dedicato alla DevConsole
-        try:
-            if self._qt_stream and self._log_handler is None:
-                self._log_handler = _DevConsoleHandler(self._qt_stream.write)
-                self._log_handler.setLevel(logging.DEBUG)
-                fmt = logging.Formatter('[%(levelname)s] [%(name)s] %(message)s')
-                self._log_handler.setFormatter(fmt)
-                # Aggancio al root
-                root_logger = logging.getLogger()
-                if self._log_handler not in getattr(root_logger, 'handlers', []):
-                    root_logger.addHandler(self._log_handler)
-                # Aggancio a tutti i logger esistenti (propagate=False)
-                try:
-                    for lname in list(logging.Logger.manager.loggerDict.keys()):
-                        try:
-                            lg = logging.getLogger(lname)
-                            if self._log_handler not in getattr(lg, 'handlers', []):
-                                lg.addHandler(self._log_handler)
-                                self._attached_loggers.append(lg)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        try:
-            if self._logger:
-                self._logger.info('[DEV] Console sviluppatore attivata.')
-        except Exception:
-            pass
-        QTimer.singleShot(150, lambda: self._logger and self._logger.debug('[DEV] Test timer: console attiva?'))
-        QTimer.singleShot(300, lambda: self._append_console('[DEV] Test timer (append diretto)\n'))
         try:
             self._console_dialog.show()
             self.raise_window()
@@ -336,35 +410,6 @@ class DevConsole(QObject):
             pass
 
     def close(self):
-        # Ripristina print monkeypatch
-        try:
-            if self._old_print is not None:
-                builtins.print = self._old_print
-        except Exception:
-            pass
-        self._old_print = None
-
-        # Rimuovi logging handler dedicato
-        try:
-            if self._log_handler is not None:
-                try:
-                    logging.getLogger().removeHandler(self._log_handler)
-                except Exception:
-                    pass
-                try:
-                    for lg in list(self._attached_loggers):
-                        try:
-                            lg.removeHandler(self._log_handler)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        self._attached_loggers = []
-        self._log_handler = None
-        self._qt_stream = None
-        # Cleanup dialog references
         try:
             if self._console_dialog:
                 try:
@@ -373,27 +418,66 @@ class DevConsole(QObject):
                     pass
                 self._console_dialog.deleteLater()
                 self._console_dialog = None
+                self._console_text = None
+        except Exception:
+            pass
+        # Non toccare gli hook di logging qui
+
+    def _on_dialog_closed(self, *args, **kwargs):
+        try:
+            self._console_dialog = None
+            self._console_text = None
+        except Exception:
+            pass
+
+    def _on_dialog_destroyed(self, *args, **kwargs):
+        try:
+            self._console_dialog = None
+            self._console_text = None
         except Exception:
             pass
 
     @pyqtSlot(str)
     def _append_console(self, s: str):
         try:
-            if not self._console_text:
-                return
             if s is None:
                 return
             text = str(s)
             if not text:
                 return
+            # Se la UI non è pronta, bufferizza i log pre-apertura quando il logging è attivo
+            if not self._console_text:
+                if getattr(self, '_logging_active', False) and not self._paused:
+                    self._preopen_buffer.append(text)
+                return
             if self._paused:
                 self._pause_buffer.append(text)
                 return
+            # Applica filtro [DEV] per linea
+            try:
+                lines = text.splitlines(True)
+            except Exception:
+                lines = [text]
+            try:
+                if not getattr(self, '_show_dev', False):
+                    lines = [ln for ln in lines if '[DEV]' not in ln]
+            except Exception:
+                pass
+            filtered = ''.join(lines)
+            if not filtered:
+                return
+            # Garantisce a capo tra blocchi: se l'ultimo carattere non è '\n' e il nuovo testo non inizia con '\n', premetti '\n'
+            try:
+                current = self._console_text.toPlainText()
+                if current and not current.endswith("\n") and not filtered.startswith("\n"):
+                    filtered = "\n" + filtered
+            except Exception:
+                pass
             # Gestione autoscroll: se disabilitato, preservo posizione scrollbar
             sb = self._console_text.verticalScrollBar() if hasattr(self._console_text, 'verticalScrollBar') else None
             prev_val = sb.value() if sb is not None else None
             self._console_text.moveCursor(QTextCursor.End)
-            self._console_text.insertPlainText(text)
+            self._console_text.insertPlainText(filtered)
             if self._autoscroll_enabled:
                 self._console_text.moveCursor(QTextCursor.End)
             else:

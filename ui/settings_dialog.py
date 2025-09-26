@@ -21,13 +21,15 @@ from constants import (
     KEY_DEV_CONSOLE_ENABLED,
     KEY_SESSION_TIMER_ENABLED,
     KEY_AUDIO_DEVICE_INDEX,
+    KEY_DEV_CONSOLE_SHOW_DEV,
 )
 
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setModal(True)
+        # Rendi il dialogo non modale per permettere interazione con altre finestre (es. DevConsole)
+        self.setModal(False)
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, 'it'))
         self.setWindowTitle(self.i18n.t('settings_title'))
@@ -74,13 +76,22 @@ class SettingsDialog(QDialog):
             self.btn_open_console.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
         except Exception:
             pass
-        self.btn_open_console.setEnabled(self.chk_dev_console.isChecked())
+        # Mantieni il pulsante sempre abilitato, indipendentemente dallo stato della checkbox
+        self.btn_open_console.setEnabled(True)
         self.btn_open_console.clicked.connect(self._on_open_console)
         dev_row.addStretch(1)
         dev_row.addWidget(self.btn_open_console)
         layout.addLayout(dev_row)
-        # Enable/disable button based on checkbox state
-        self.chk_dev_console.stateChanged.connect(lambda s: self.btn_open_console.setEnabled(self.chk_dev_console.isChecked()))
+        # RIMOSSO: non disabilitare più il pulsante quando la console è disattivata
+        # self.chk_dev_console.stateChanged.connect(lambda s: self.btn_open_console.setEnabled(self.chk_dev_console.isChecked()))
+
+        # New: show [DEV] tagged messages toggle (only meaningful when console enabled)
+        self.chk_dev_show_dev = QCheckBox(self.i18n.t('settings_dev_console_show_dev'))
+        self.chk_dev_show_dev.setChecked(self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, 'false') == 'true')
+        self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
+        # sync enabled state
+        self.chk_dev_console.stateChanged.connect(lambda s: self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked()))
+        layout.addWidget(self.chk_dev_show_dev)
 
         # Language
         lang_row = QHBoxLayout()
@@ -110,13 +121,21 @@ class SettingsDialog(QDialog):
         ch_row.addWidget(self.cmb_channel, 1)
         layout.addLayout(ch_row)
 
+        # Format
         fmt_row = QHBoxLayout()
         fmt_row.setSpacing(8)
         lab_fmt = QLabel(self.i18n.t('settings_format'))
         lab_fmt.setMinimumWidth(140)
         fmt_row.addWidget(lab_fmt)
         self.cmb_format = QComboBox()
-        self.cmb_format.addItems(['Vorbis', 'MP3'])
+        try:
+            self.cmb_format.addItems(['Vorbis', 'MP3'])
+        except Exception:
+            pass
+        try:
+            self.cmb_format.setMinimumWidth(160)
+        except Exception:
+            pass
         self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, 'Vorbis'))
         fmt_row.addWidget(self.cmb_format, 1)
         layout.addLayout(fmt_row)
@@ -132,62 +151,57 @@ class SettingsDialog(QDialog):
             self.cmb_audio_device.setMinimumWidth(260)
         except Exception:
             pass
-        # Placeholder entries: will be filled on showEvent via PortAudio enumeration
-        self.cmb_audio_device.addItem(self.i18n.t('settings_audio_default'), userData=None)
-        # load persisted selection if any
-        persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+        # Prima voce: default di sistema
         try:
-            # select default initially; if persisted exists, selection will be applied when list is populated
-            self.cmb_audio_device.setCurrentIndex(0)
+            self.cmb_audio_device.addItem(self.i18n.t('settings_audio_default'), userData=None)
         except Exception:
             pass
         audio_row.addWidget(self.cmb_audio_device, 1)
-        # Refresh button to re-enumerate
         self.btn_audio_refresh = QPushButton(self.i18n.t('settings_audio_refresh'))
-        audio_row.addWidget(self.btn_audio_refresh)
-        layout.addLayout(audio_row)
-        # Hook refresh
         try:
             self.btn_audio_refresh.clicked.connect(self._populate_audio_devices)
         except Exception:
             pass
+        audio_row.addWidget(self.btn_audio_refresh)
+        layout.addLayout(audio_row)
 
-        # VLC Path
-        vlc_row = QHBoxLayout()
-        vlc_row.setSpacing(8)
-        lab_vlc = QLabel(self.i18n.t('settings_vlc_path'))
-        lab_vlc.setMinimumWidth(140)
-        vlc_row.addWidget(lab_vlc)
-        self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, '') or '')
-        self.txt_vlc_path.setPlaceholderText('C:/Program Files/VideoLAN/VLC' if Qt.Key_Enter else '')
-        try:
-            self.txt_vlc_path.setMinimumWidth(260)
-        except Exception:
-            pass
-        vlc_row.addWidget(self.txt_vlc_path, 1)
-        self.btn_browse_vlc = QPushButton(self.i18n.t('settings_browse'))
-        try:
-            self.btn_browse_vlc.setIcon(self.style().standardIcon(self.style().SP_DialogOpenButton))
-        except Exception:
-            pass
-        self.btn_browse_vlc.clicked.connect(self._browse_vlc_path)
-        vlc_row.addWidget(self.btn_browse_vlc)
-        layout.addLayout(vlc_row)
+        # LibVLC Path
+        path_row = QHBoxLayout()
+        path_row.setSpacing(8)
+        lab_path = QLabel(self.i18n.t('libvlc_path'))
+        lab_path.setMinimumWidth(140)
+        path_row.addWidget(lab_path)
+        self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ''))
+        path_row.addWidget(self.txt_vlc_path, 1)
+        self.btn_browse = QPushButton(self.i18n.t('browse'))
+        self.btn_browse.clicked.connect(self._browse_vlc_path)
+        path_row.addWidget(self.btn_browse)
+        layout.addLayout(path_row)
 
-        # Network caching (ms)
+        # Network caching
         nc_row = QHBoxLayout()
         nc_row.setSpacing(8)
         lab_nc = QLabel(self.i18n.t('settings_network_caching'))
         lab_nc.setMinimumWidth(140)
         nc_row.addWidget(lab_nc)
         self.spin_network_caching = QSpinBox()
-        self.spin_network_caching.setRange(0, 20000)
-        self.spin_network_caching.setSingleStep(250)
+        self.spin_network_caching.setRange(100, 5000)
         try:
-            default_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+            self.spin_network_caching.setSingleStep(100)
         except Exception:
-            default_nc = 1000
-        self.spin_network_caching.setValue(default_nc)
+            pass
+        try:
+            self.spin_network_caching.setSuffix(' ms')
+        except Exception:
+            pass
+        try:
+            self.spin_network_caching.setMinimumWidth(120)
+        except Exception:
+            pass
+        try:
+            self.spin_network_caching.setValue(int(self.settings.value(KEY_NETWORK_CACHING, 1000)))
+        except Exception:
+            self.spin_network_caching.setValue(1000)
         nc_row.addWidget(self.spin_network_caching)
         layout.addLayout(nc_row)
 
@@ -249,15 +263,15 @@ class SettingsDialog(QDialog):
         self.accept()
 
     def _on_open_console(self):
-        # Only open if enabled
-        if not self.chk_dev_console.isChecked():
-            return
+        # Apri la console senza chiudere questo dialogo, che rimane aperto/non modale
         try:
-            # Salva subito lo stato della checkbox per permettere al gating del parent di leggere 'true'
+            # Salva subito le impostazioni (incluso KEY_DEV_CONSOLE_SHOW_DEV)
             self._save_settings()
             parent = self.parent()
             if parent and hasattr(parent, 'open_dev_console'):
-                parent.open_dev_console(self)
+                # Apri la console con parent = finestra principale
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(0, lambda: parent.open_dev_console(parent))
         except Exception:
             pass
 
@@ -268,6 +282,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_SLEEP_STOP_ON_END, 'true' if self.chk_sleep_stop.isChecked() else 'false')
         self.settings.setValue(KEY_SESSION_TIMER_ENABLED, 'true' if self.chk_session_timer.isChecked() else 'false')
         self.settings.setValue(KEY_DEV_CONSOLE_ENABLED, 'true' if self.chk_dev_console.isChecked() else 'false')
+        self.settings.setValue(KEY_DEV_CONSOLE_SHOW_DEV, 'true' if self.chk_dev_show_dev.isChecked() else 'false')
         self.settings.setValue(KEY_LANG, 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())
