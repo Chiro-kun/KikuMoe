@@ -480,6 +480,7 @@ class PlayerFFmpeg:
 
             # Tenta in sequenza ogni URL candidato finché non si ricevono dati
             started_streaming = False
+            forced_error = False
             for attempt_idx, cur_url in enumerate(candidates):
                 if self._stop_event.is_set():
                     break
@@ -565,6 +566,52 @@ class PlayerFFmpeg:
                 # Loop di lettura dei dati
                 chunk_size = 4096
                 empty_reads = 0
+                stall_timeout = 10.0
+                last_data_ts = time.time()
+                # Watchdog di stallo: se non arrivano dati per troppo tempo, forza riavvio di ffmpeg
+                watchdog_stop = threading.Event()
+                forced_error_ref = {'v': False}
+
+                def _stall_watchdog_local():
+                    while not watchdog_stop.is_set():
+                        if self._stop_event.is_set():
+                            break
+                        with self._state_lock:
+                            p = self._ffmpeg_process
+                        try:
+                            ended = (p is None) or (p.poll() is not None)
+                        except Exception:
+                            ended = True
+                        if ended:
+                            break
+                        try:
+                            delta = time.time() - last_data_ts
+                        except Exception:
+                            delta = stall_timeout + 1
+                        if delta > stall_timeout:
+                            try:
+                                self.log.debug("[DEBUG] _stall_watchdog: stall detected (%.2fs > %.2fs), terminating ffmpeg", delta, stall_timeout)
+                            except Exception:
+                                pass
+                            forced_error_ref['v'] = True
+                            try:
+                                p.terminate()
+                                p.wait(timeout=1.0)
+                            except Exception:
+                                try:
+                                    p.kill()
+                                except Exception:
+                                    pass
+                            break
+                        time.sleep(0.5)
+
+                watchdog_thread = threading.Thread(target=_stall_watchdog_local, daemon=True)
+                try:
+                    watchdog_thread.start()
+                except Exception:
+                    # Se il watchdog non parte, prosegui comunque (sarà lo stdout.read a segnalare problemi)
+                    pass
+
                 while True:
                     with self._state_lock:
                         if self._stop_event.is_set():
@@ -573,29 +620,49 @@ class PlayerFFmpeg:
                         proc = self._ffmpeg_process
                     if proc is None:
                         self.log.debug("[DEBUG] _stream_worker: ffmpeg process missing")
+                        forced_error = True
                         break
                     if proc.poll() is not None:
-                        self.log.debug("[DEBUG] _stream_worker: ffmpeg process ended with code: %s", proc.poll())
+                        code = proc.poll()
+                        self.log.debug("[DEBUG] _stream_worker: ffmpeg process ended with code: %s", code)
                         # Try to read stderr if possible
+                        err = b""
                         try:
                             if proc.stderr:
-                                err = proc.stderr.read()
+                                err = proc.stderr.read() or b""
                                 if err:
                                     self.log.debug("[DEBUG] ffmpeg stderr: %s", err.decode(errors='ignore'))
                         except Exception as e:
                             self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
+                        # Se il watchdog ha segnalato stallo, marca come errore forzato
+                        try:
+                            if 'forced_error_ref' in locals() and forced_error_ref.get('v'):
+                                forced_error = True
+                        except Exception:
+                            pass
+                        # Se ffmpeg è terminato con codice != 0 o ha scritto su stderr, considera errore
+                        if not forced_error:
+                            try:
+                                if code not in (0, None):
+                                    forced_error = True
+                                elif err and err.strip():
+                                    forced_error = True
+                            except Exception:
+                                pass
                         # Fine tentativo corrente: passa al prossimo URL
                         break
 
                         
                     if proc.stdout is None:
                         self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
+                        forced_error = True
                         break
 
                     try:
                         chunk = proc.stdout.read(chunk_size)
                     except Exception as e:
                         self.log.debug("[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e)
+                        forced_error = True
                         break
 
                     if not chunk:
@@ -612,6 +679,7 @@ class PlayerFFmpeg:
 
                     # got data
                     empty_reads = 0
+                    last_data_ts = time.time()
                     if not started_streaming:
                         started_streaming = True
                         self._emit('playing', None)
@@ -669,6 +737,113 @@ class PlayerFFmpeg:
                                 # Suppress spam when paused/closed
                                 pass
 
+                # prova a spegnere il watchdog
+                try:
+                    watchdog_stop.set()
+                    if 'watchdog_thread' in locals() and watchdog_thread.is_alive():
+                        watchdog_thread.join(timeout=1.0)
+                except Exception:
+                    pass
+                # Propaga eventuale errore forzato dal watchdog per questo tentativo
+                try:
+                    if 'forced_error_ref' in locals() and forced_error_ref.get('v'):
+                        forced_error = True
+                except Exception:
+                    pass
+
+                        
+                    if proc.stdout is None:
+                        self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
+                        forced_error = True
+                        break
+
+                    try:
+                        chunk = proc.stdout.read(chunk_size)
+                    except Exception as e:
+                        self.log.debug("[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e)
+                        forced_error = True
+                        break
+
+                    if not chunk:
+                        empty_reads += 1
+                        # If ffmpeg is still running, wait a bit and retry instead of breaking immediately
+                        if proc.poll() is None:
+                            if empty_reads % 20 == 0:
+                                self.log.debug("[DEBUG] _stream_worker: empty chunk (x%d), waiting for data...", empty_reads)
+                            time.sleep(0.05)
+                            continue
+                        else:
+                            self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk after process ended")
+                            break
+
+                    # got data
+                    empty_reads = 0
+                    last_data_ts = time.time()
+                    if not started_streaming:
+                        started_streaming = True
+                        self._emit('playing', None)
+
+                    n_bytes = (len(chunk) // 2) * 2
+                    if n_bytes == 0:
+                        time.sleep(0.01)
+                        continue
+                    data = chunk[:n_bytes]
+
+                    # Avoid writing to PyAudio when paused/stream inactive to prevent [Errno -9988] spam
+                    stream_active = False
+                    if self._audio_stream is not None:
+                        try:
+                            stream_active = getattr(self._audio_stream, "is_active", lambda: False)()
+                        except Exception:
+                            stream_active = False
+
+                    if not self._muted:
+                        try:
+                            samples = struct.unpack(f'<{n_bytes // 2}h', data)
+                            volume_samples = [int(sample * self._volume) for sample in samples]
+                            volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
+                            volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
+                            if self._audio_stream is not None and stream_active:
+                                self._audio_stream.write(volume_chunk)
+                            else:
+                                # Paused or no audio stream: skip writing to avoid errors
+                                time.sleep(0.02)
+                                continue
+                        except Exception as e:
+                            # Log errors only if stream is active; otherwise likely paused/closed
+                            if stream_active:
+                                self.log.debug("[DEBUG] _stream_worker: error in audio processing: %s", e)
+                                try:
+                                    if self._audio_stream is not None and stream_active:
+                                        self._audio_stream.write(b'\x00' * n_bytes)
+                                except Exception as e2:
+                                    self.log.debug("[DEBUG] _stream_worker: error writing silence: %s", e2)
+                            else:
+                                time.sleep(0.02)
+                                continue
+                    else:
+                        try:
+                            if self._audio_stream is not None and stream_active:
+                                self._audio_stream.write(b'\x00' * n_bytes)
+                            else:
+                                # Paused or no audio stream: skip writing to avoid errors
+                                time.sleep(0.02)
+                                continue
+                        except Exception as e:
+                            if stream_active:
+                                self.log.debug("[DEBUG] _stream_worker: error writing silence (muted): %s", e)
+                            else:
+                                # Suppress spam when paused/closed
+                                pass
+
+                # prova a spegnere il watchdog
+                try:
+                    watchdog_stop.set()
+                    if 'watchdog_thread' in locals() and watchdog_thread.is_alive():
+                        watchdog_thread.join(timeout=1.0)
+                except Exception:
+                    pass
+
                 # Fine tentativo: se non abbiamo iniziato a ricevere dati, chiudi il processo e prova il prossimo
                 with self._state_lock:
                     proc = self._ffmpeg_process
@@ -703,7 +878,10 @@ class PlayerFFmpeg:
                         self.log.debug("[DEBUG] _stream_worker: error killing ffmpeg: %s", e2)
 
             if not self._stop_requested:
-                if not started_streaming:
+                if forced_error:
+                    self.log.debug("[DEBUG] _stream_worker: emitting error due to forced_error")
+                    self._emit('error', None)
+                elif not started_streaming:
                     self.log.debug("[DEBUG] _stream_worker: connection failed before receiving data (all attempts)")
                     self._emit('error', None)
                 else:
