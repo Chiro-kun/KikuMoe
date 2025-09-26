@@ -16,6 +16,8 @@ if icon_dir.is_dir():
             full = Path(root) / f
             dest = str(Path(root).relative_to(src_dir))  # e.g. "icons" or "icons/subdir"
             datas.append((str(full), dest))
+# Include version.yml so the app can read version at runtime in onefile
+datas.append((str(project_root / 'version.yml'), '.'))
 
 # Force ONEFILE build
 onefile = True
@@ -60,7 +62,7 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='KikuMoe-1.8.2',
+    name='KikuMoe-1.8.3',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
