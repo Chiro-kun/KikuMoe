@@ -1,6 +1,7 @@
 # Application constants and settings keys
 import os
 import re
+import sys
 
 APP_NAME = "KikuMoe"
 
@@ -16,10 +17,18 @@ def _read_version_from_files() -> str:
     # 1) Try version.yml (simple to parse without YAML dep)
     try:
         root = _get_project_root()
-        for path in (
+        search_paths = [
             os.path.join(root, "version.yml"),
             os.path.join(os.path.dirname(__file__), "version.yml"),
-        ):
+        ]
+        try:
+            if getattr(sys, "frozen", False):
+                meipass = getattr(sys, "_MEIPASS", None)
+                if meipass:
+                    search_paths.insert(0, os.path.join(meipass, "version.yml"))
+        except Exception:
+            pass
+        for path in search_paths:
             if os.path.isfile(path):
                 with open(path, "r", encoding="utf-8") as f:
                     for line in f:
@@ -29,26 +38,38 @@ def _read_version_from_files() -> str:
                                 return ver
     except Exception:
         pass
-    
+
     # 2) Try version_info.txt (parse FileVersion or filevers tuple)
     try:
         root = _get_project_root()
-        path = os.path.join(root, "version_info.txt")
-        if os.path.isfile(path):
-            data = ""
-            with open(path, "r", encoding="utf-8") as f:
-                data = f.read()
-            # Prefer StringStruct 'FileVersion', e.g. 1.8.0.0
+        candidate_paths = [
+            os.path.join(root, "version_info.txt"),
+        ]
+        try:
+            if getattr(sys, "frozen", False):
+                meipass = getattr(sys, "_MEIPASS", None)
+                if meipass:
+                    candidate_paths.insert(0, os.path.join(meipass, "version_info.txt"))
+        except Exception:
+            pass
+        data = ""
+        for path in candidate_paths:
+            if os.path.isfile(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = f.read()
+                break
+        if data:
+            # Prefer StringStruct 'FileVersion', e.g. 1.8.3.0
             m = re.search(r"FileVersion\'\s*,\s*u?\'([^\']+)\'", data)
             if m:
                 return m.group(1).strip()
-            # Fallback to filevers=(1,8,0,0)
+            # Fallback to filevers=(1,8,3,0)
             m2 = re.search(r"filevers=\((\d+),(\d+),(\d+),(\d+)\)", data)
             if m2:
                 return ".".join(m2.groups())
     except Exception:
         pass
-    
+
     # 3) Fallback to default
     return "1.8"
 
