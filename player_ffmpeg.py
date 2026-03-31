@@ -237,18 +237,8 @@ class PlayerFFmpeg:
             if self._stream_thread and not self._stream_thread.is_alive():
                 self._stream_thread = None
 
-            # Ora che il thread è terminato, è sicuro rilasciare/ricreare PyAudio (se necessario)
-            if self._pyaudio_instance:
-                try:
-                    self._pyaudio_instance.terminate()
-                except Exception:
-                    pass
-                self._pyaudio_instance = None
-                try:
-                    import pyaudio
-                    self._pyaudio_instance = pyaudio.PyAudio()
-                except Exception:
-                    self._ready = False
+            # Keep PyAudio instance alive for performance
+            self._current_stream = None
 
             self._current_stream = None
             # Evita doppio emit: se c'era un worker attivo, sarà il worker ad emettere 'stopped'
@@ -378,18 +368,6 @@ class PlayerFFmpeg:
                 self._stream_thread = None
 
             self._current_stream = None
-        except Exception:
-            pass
-
-    def force_kill_all_vlc(self) -> None:
-        """Kill any remaining ffmpeg processes (method name kept for UI compatibility)."""
-        try:
-            if sys.platform == "win32":
-                subprocess.run(["taskkill", "/f", "/im", "ffmpeg.exe"],
-                               capture_output=True, check=False, **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
-            else:
-                subprocess.run(["pkill", "-f", "ffmpeg"],
-                               capture_output=True, check=False)
         except Exception:
             pass
 
@@ -700,10 +678,15 @@ class PlayerFFmpeg:
 
                     if not self._muted:
                         try:
-                            samples = struct.unpack(f'<{n_bytes // 2}h', data)
-                            volume_samples = [int(sample * self._volume) for sample in samples]
-                            volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
-                            volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
+                            # Optimize: skip scaling if volume is 100%
+                            if self._volume >= 0.99:
+                                volume_chunk = data
+                            else:
+                                samples = struct.unpack(f'<{n_bytes // 2}h', data)
+                                volume_samples = [int(sample * self._volume) for sample in samples]
+                                volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
+                                volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
+
                             if self._audio_stream is not None and stream_active:
                                 self._audio_stream.write(volume_chunk)
                             else:

@@ -98,6 +98,11 @@ I18N: Dict[str, Dict[str, str]] = {
         'dev_console_resume': 'Riprendi',
         'dev_console_save': 'Salva...',
         'dev_console_autoscroll': 'Autoscroll',
+        'close_dialog_title': 'Chiudi KikuMoe',
+        'close_dialog_text': 'Vuoi chiudere l’app o ridurla nella tray?',
+        'close_option_quit': 'Esci dall’app',
+        'close_option_tray': 'Riduci nella tray',
+        'close_remember': 'Ricorda scelta',
         'dev_console_wrap': 'A capo automatico',
         'dev_console_level': 'Filtro livello',
         'dev_console_placeholder': 'I log appariranno qui...'
@@ -222,6 +227,11 @@ I18N: Dict[str, Dict[str, str]] = {
         'tt_stop': 'Stop playback',
         'tt_mute': 'Mute',
         'tt_unmute': 'Unmute',
+        'close_dialog_title': 'Close KikuMoe',
+        'close_dialog_text': 'Do you want to close the app or minimize it to the tray?',
+        'close_remember': 'Remember choice',
+        'close_option_quit': 'Quit App',
+        'close_option_tray': 'Minimize to Tray',
     },
 }
 

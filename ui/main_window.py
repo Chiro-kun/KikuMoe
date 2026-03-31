@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut, QSpinBox,
-    QDialog, QMessageBox, QSizePolicy
+    QDialog, QMessageBox, QSizePolicy, QCheckBox
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
@@ -38,6 +38,9 @@ from constants import (
     KEY_SESSION_TIMER_ENABLED,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_DEV_CONSOLE_SHOW_DEV,
+    KEY_WINDOW_GEOMETRY,
+    KEY_DONT_ASK_ON_CLOSE,
+    KEY_CLOSE_TO_TRAY
 )
 import threading
 from logger import get_logger
@@ -79,9 +82,17 @@ class ListenMoePlayer(QWidget):
         self._lang_map = {"Italiano": 'it', "English": 'en'}
 
         self.setWindowTitle(APP_TITLE)
-        # Riduci leggermente la dimensione iniziale della finestra
-        self.resize(480, 430)
-        self.setMinimumSize(500, 400)
+        # Restore geometry if saved
+        try:
+            geom = self.settings.value(KEY_WINDOW_GEOMETRY)
+            if geom:
+                self.restoreGeometry(geom)
+            else:
+                self.resize(480, 430)
+                self.setMinimumSize(500, 400)
+        except Exception:
+            self.resize(480, 430)
+            self.setMinimumSize(500, 400)
         # uso _layout per non sovrascrivere QWidget.layout()
         self._layout = QVBoxLayout()
         self._layout.setContentsMargins(16, 16, 16, 16)
@@ -428,6 +439,42 @@ class ListenMoePlayer(QWidget):
                     self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
             except Exception:
                 pass
+        except Exception:
+            pass
+        
+        # Autoplay: se abilitato, avvia la riproduzione automatica dopo 500ms
+        try:
+            if self._get_bool(KEY_AUTOPLAY, False):
+                QTimer.singleShot(500, self.play_stream)
+        except Exception:
+            pass
+
+        # Shortcuts Volume: Frecce Su/Giù e +/- per step del 5%
+        try:
+            QShortcut(QKeySequence(Qt.Key_Up), self, self._vol_up)
+            QShortcut(QKeySequence(Qt.Key_Down), self, self._vol_down)
+            QShortcut(QKeySequence(Qt.Key_Plus), self, self._vol_up)
+            QShortcut(QKeySequence(Qt.Key_Minus), self, self._vol_down)
+            # Shortcut '=' for layouts where '+' needs Shift
+            QShortcut(QKeySequence("="), self, self._vol_up)
+        except Exception:
+            pass
+
+    def _vol_up(self) -> None:
+        """Aumenta il volume di 5%."""
+        try:
+            if hasattr(self, 'volume_slider'):
+                val = self.volume_slider.value()
+                self.volume_slider.setValue(min(100, val + 5))
+        except Exception:
+            pass
+
+    def _vol_down(self) -> None:
+        """Diminuisce il volume di 5%."""
+        try:
+            if hasattr(self, 'volume_slider'):
+                val = self.volume_slider.value()
+                self.volume_slider.setValue(max(0, val - 5))
         except Exception:
             pass
 
@@ -1955,29 +2002,108 @@ class ListenMoePlayer(QWidget):
             pass
 
     def closeEvent(self, event) -> None:
-        # Chiudi DevConsole e disattiva la cattura logging
+        """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
+        # Salva la geometria della finestra prima di ogni altra cosa
+        try:
+            self.settings.setValue(KEY_WINDOW_GEOMETRY, self.saveGeometry())
+        except Exception:
+            pass
+
+        # Se la tray non è abilitata, chiudi normalmente
+        tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+        if not tray_enabled:
+            self._cleanup_before_close()
+            event.accept()
+            return
+
+        # Controlla se l'utente ha chiesto di non chiedere più
+        dont_ask = self._get_bool(KEY_DONT_ASK_ON_CLOSE, False)
+        close_to_tray = self._get_bool(KEY_CLOSE_TO_TRAY, False)
+
+        if dont_ask:
+            if close_to_tray:
+                self.hide()
+                event.ignore()
+            else:
+                self._cleanup_before_close()
+                event.accept()
+            return
+
+        # Mostra il dialogo di scelta
+        try:
+            from PyQt5.QtWidgets import QDialogButtonBox, QVBoxLayout, QLabel, QCheckBox, QMessageBox, QPushButton
+            
+            msg = QMessageBox(self)
+            msg.setWindowTitle(self.i18n.t('close_dialog_title'))
+            msg.setText(self.i18n.t('close_dialog_text'))
+            msg.setIcon(QMessageBox.Question)
+            
+            tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.AcceptRole)
+            quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.DestructiveRole)
+            
+            # Checkbox per ricordare la scelta
+            cb = QCheckBox(self.i18n.t('close_remember'))
+            msg.setCheckBox(cb)
+            
+            # Applica tema scuro se necessario (per coerenza con UI)
+            try:
+                if self._get_bool(KEY_DARK_MODE, False):
+                    # MessageBox di Qt su Windows non segue sempre il tema scuro, proviamo l'hook dwmapi
+                    import ctypes
+                    hwnd = int(msg.winId())
+                    val = ctypes.c_int(1)
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+            except Exception:
+                pass
+
+            msg.exec_()
+            
+            remember = cb.isChecked()
+            choice_tray = (msg.clickedButton() == tray_btn)
+            
+            if remember:
+                self.settings.setValue(KEY_DONT_ASK_ON_CLOSE, True)
+                self.settings.setValue(KEY_CLOSE_TO_TRAY, choice_tray)
+            
+            if choice_tray:
+                self.hide()
+                event.ignore()
+            else:
+                self._cleanup_before_close()
+                event.accept()
+                
+        except Exception:
+            # Fallback in caso di errori: chiudi normalmente
+            self._cleanup_before_close()
+            event.accept()
+
+    def _cleanup_before_close(self) -> None:
+        """Operazioni di pulizia prima dell'uscita definitiva."""
         try:
             if hasattr(self, 'dev_console') and self.dev_console:
                 try:
                     self.dev_console.deactivate_logging()
                 except Exception:
                     pass
-                try:
-                    self.dev_console.close()
-                except Exception:
-                    pass
+                self.dev_console.close()
         except Exception:
             pass
-        # Stoppa e resetta session timer
+
         try:
             if hasattr(self, '_session_timer') and self._session_timer:
                 self._session_timer.stop()
-            self._session_seconds = 0
         except Exception:
             pass
-        # Accetta la chiusura della finestra
+
         try:
-            event.accept()
+            if hasattr(self, 'player') and self.player:
+                self.player.stop()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'ws') and self.ws:
+                self.ws.stop()
         except Exception:
             pass
 
