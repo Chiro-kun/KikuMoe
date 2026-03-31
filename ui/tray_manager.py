@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication, QActionGroup, QWidgetAction, QFrame
-from PyQt5.QtGui import QIcon, QFont, QPalette
-from PyQt5.QtCore import QObject
+from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication, QActionGroup
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import QObject, QPoint, QTimer
 from typing import Optional, Callable
 from constants import KEY_CHANNEL, KEY_FORMAT
 
@@ -15,6 +15,7 @@ class TrayManager(QObject):
                  on_change_format: Optional[Callable[[str], None]] = None,
                  on_toggle_play_pause: Optional[Callable] = None,
                  on_stop_stream: Optional[Callable] = None,
+                 on_force_stop: Optional[Callable] = None,
                  on_toggle_mute: Optional[Callable] = None):
         super().__init__(parent)
         self._parent = parent
@@ -27,6 +28,7 @@ class TrayManager(QObject):
         self._on_change_format = on_change_format
         self._on_toggle_play_pause = on_toggle_play_pause
         self._on_stop_stream = on_stop_stream
+        self._on_force_stop = on_force_stop
         self._on_toggle_mute = on_toggle_mute
         # Azioni informative in cima al menu
         self._act_info_now: Optional[QAction] = None
@@ -35,13 +37,19 @@ class TrayManager(QObject):
         # Azioni di controllo riproduzione
         self._act_play_pause: Optional[QAction] = None
         self._act_stop: Optional[QAction] = None
+        self._act_force_stop: Optional[QAction] = None
         self._act_mute: Optional[QAction] = None
+        self._act_quit: Optional[QAction] = None
+        self._act_ch: Optional[QAction] = None
+        self._act_fmt: Optional[QAction] = None
         # Intestazioni e separatori di sezione
         self._act_hdr_playback: Optional[QAction] = None
         self._sep_playback_end: Optional[QAction] = None
         self._act_hdr_window: Optional[QAction] = None
         self._sep_window_end: Optional[QAction] = None
         self._act_hdr_prefs: Optional[QAction] = None
+        # Icone per i controlli
+        self._icons = {}
 
     def ensure_tray_enabled(self, enabled: bool, window_icon: Optional[QIcon] = None, tooltip: Optional[str] = None) -> None:
         try:
@@ -56,20 +64,39 @@ class TrayManager(QObject):
                         pass
                     # Effetto hover per evidenziare le voci selezionabili nel menu, con colore dei titoli adattato al tema
                     try:
-                        pal = menu.palette()
-                        txt_col = pal.color(QPalette.WindowText)
-                        bg_col = pal.color(QPalette.Window)
-                        lightness = bg_col.lightness() if hasattr(bg_col, 'lightness') else bg_col.value()
-                        # Aumenta il contrasto dei separatori: più alto in dark mode
-                        alpha = 0.42 if lightness < 128 else 0.20
-                        sep_rgba = "rgba(128, 128, 128, 0.65)"
-                        hover_rgba = "rgba(0, 120, 215, 0.20)"
+                        sep_rgba = "rgba(255, 255, 255, 0.12)"
+                        hover_rgba = "rgba(194, 24, 91, 0.25)"
                         menu.setStyleSheet(
                             f"""
-                            QMenu::item {{ padding: 6px 24px; }}
-                            QMenu::item:enabled:selected {{ background-color: {hover_rgba}; }}
-                            QMenu::item:disabled {{ background-color: transparent; }}
-                            QMenu::separator {{ height: 2px; background: {sep_rgba}; margin: 6px 8px; }}
+                            QMenu {{ 
+                                background-color: #1a1a1a; 
+                                border: 1px solid #333333; 
+                                padding: 6px 0px;
+                                spacing: 4px;
+                            }}
+                            QMenu::item {{ 
+                                padding: 6px 32px 6px 8px; 
+                                border-radius: 4px; 
+                                margin: 1px 6px;
+                                color: #e0e0e0;
+                                font-size: 13px;
+                            }}
+                            QMenu::icon {{
+                                padding-right: 2px;
+                            }}
+                            QMenu::item:enabled:selected {{ 
+                                background-color: {hover_rgba}; 
+                                color: #ffffff;
+                            }}
+                            QMenu::item:disabled {{ 
+                                color: #666666; 
+                                background-color: transparent;
+                            }}
+                            QMenu::separator {{ 
+                                height: 1px; 
+                                background-color: {sep_rgba}; 
+                                margin: 8px 14px; 
+                            }}
                             """
                         )
                     except Exception:
@@ -77,15 +104,9 @@ class TrayManager(QObject):
                     # Font per intestazioni: leggermente più grande e in grassetto
                     try:
                         base_font = menu.font()
-                        header_font = QFont(base_font)
-                        # Preferisci il point size se disponibile, altrimenti pixel size
-                        if base_font.pointSize() > 0:
-                            header_font.setPointSize(base_font.pointSize() + 1)
-                        elif base_font.pixelSize() > 0:
-                            header_font.setPixelSize(base_font.pixelSize() + 2)
-                        else:
-                            header_font.setPointSize(11)
+                        # Standard text with bold for headers instead of increased size
                         header_font.setBold(True)
+                        header_font.setPointSize(base_font.pointSize() if base_font.pointSize() > 0 else 10)
                     except Exception:
                         header_font = QFont()
                         header_font.setPointSize(11)
@@ -215,7 +236,10 @@ class TrayManager(QObject):
                             act.triggered.connect(lambda checked, v=ch: (checked and self._on_change_channel and self._on_change_channel(v)))
                         grp_channel.addAction(act)
                         sub_channel.addAction(act)
-                    menu.addMenu(sub_channel)
+                    act_ch = menu.addMenu(sub_channel)
+                    self._act_ch = act_ch
+                    if 'channel' in self._icons:
+                        self._act_ch.setIcon(self._icons['channel'])
                     
                     # Formato (Vorbis/MP3)
                     try:
@@ -237,7 +261,10 @@ class TrayManager(QObject):
                             actf.triggered.connect(lambda checked, v=fmt: (checked and self._on_change_format and self._on_change_format(v)))
                         grp_format.addAction(actf)
                         sub_format.addAction(actf)
-                    menu.addMenu(sub_format)
+                    act_fmt = menu.addMenu(sub_format)
+                    self._act_fmt = act_fmt
+                    if 'codec' in self._icons:
+                        self._act_fmt.setIcon(self._icons['codec'])
                     
                     # Esci
                     try:
@@ -245,12 +272,16 @@ class TrayManager(QObject):
                     except Exception:
                         txt_quit = 'Esci'
                     menu.addSeparator()
-                    act_quit = QAction(txt_quit, self._parent)
+                    self._act_quit = QAction(txt_quit, self._parent)
+                    if 'quit' in self._icons:
+                        self._act_quit.setIcon(self._icons['quit'])
                     if self._on_quit:
-                        act_quit.triggered.connect(self._on_quit)
-                    menu.addAction(act_quit)
+                        self._act_quit.triggered.connect(self._on_quit)
+                    menu.addAction(self._act_quit)
                     
                     self._tray.setContextMenu(menu)
+                    # Sposta il menu a sinistra per evitare che i sottomenu escano dallo schermo
+                    menu.aboutToShow.connect(self._nudge_menu_left)
                     if tooltip:
                         self.update_tooltip(tooltip)
                     self._tray.setVisible(True)
@@ -321,6 +352,24 @@ class TrayManager(QObject):
         except Exception:
             pass
 
+    def update_controls_icons(self, icons: dict) -> None:
+        """Aggiorna i riferimenti alle icone caricate e tintate."""
+        try:
+            self._icons = icons
+            # Forza aggiornamento immediato icone se visibili
+            if 'stop' in icons and self._act_stop:
+                self._act_stop.setIcon(icons['stop'])
+            if 'force_stop' in icons and self._act_force_stop:
+                self._act_force_stop.setIcon(icons['force_stop'])
+            if 'channel' in icons and self._act_ch:
+                self._act_ch.setIcon(icons['channel'])
+            if 'codec' in icons and self._act_fmt:
+                self._act_fmt.setIcon(icons['codec'])
+            if 'quit' in icons and self._act_quit:
+                self._act_quit.setIcon(icons['quit'])
+        except Exception:
+            pass
+
     def update_controls_state(self, is_playing: bool, is_paused: bool, is_muted: bool) -> None:
         """Aggiorna i testi delle azioni di controllo (Play/Pausa e Muto) in base allo stato corrente."""
         try:
@@ -337,6 +386,8 @@ class TrayManager(QObject):
                     effective_playing = bool(is_playing and not effective_paused)
                     txt = 'Pause' if effective_playing else 'Play'
                 self._act_play_pause.setText(txt)
+                if 'play' in self._icons and 'pause' in self._icons:
+                    self._act_play_pause.setIcon(self._icons['pause'] if effective_playing else self._icons['play'])
 
         except Exception:
             pass
@@ -347,6 +398,8 @@ class TrayManager(QObject):
                 except Exception:
                     txtm = 'Unmute' if is_muted else 'Mute'
                 self._act_mute.setText(txtm)
+                if 'mute' in self._icons and 'unmute' in self._icons:
+                    self._act_mute.setIcon(self._icons['mute'] if is_muted else self._icons['unmute'])
 
         except Exception:
             pass
@@ -360,3 +413,27 @@ class TrayManager(QObject):
 
     def has_tray(self) -> bool:
         return self._tray is not None
+
+    def _nudge_menu_left(self):
+        """Sposta il menu della tray a sinistra per evitare overflow dei sottomenu."""
+        try:
+            menu = self._tray.contextMenu()
+            if menu:
+                QTimer.singleShot(0, lambda: self._do_nudge(menu))
+        except Exception:
+            pass
+
+    def _do_nudge(self, menu):
+        try:
+            pos = menu.pos()
+            screen = QApplication.screenAt(pos)
+            if screen:
+                screen_right = screen.availableGeometry().right()
+                menu_right = pos.x() + menu.width()
+                # Se il menu + sottomenu potrebbe uscire, sposta a sinistra
+                submenu_width = 150  # larghezza stimata dei sottomenu
+                if menu_right + submenu_width > screen_right:
+                    shift = (menu_right + submenu_width) - screen_right + 8
+                    menu.move(pos.x() - shift, pos.y())
+        except Exception:
+            pass

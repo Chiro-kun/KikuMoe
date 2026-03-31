@@ -153,17 +153,49 @@ class ListenMoePlayer(QWidget):
         """Load and prepare application icons for window and tray."""
         try:
             icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
-            self._icon_play = QIcon(os.path.join(icon_dir, 'app_play.svg'))
-            self._icon_stop = QIcon(os.path.join(icon_dir, 'app_stop.svg'))
-            if self._icon_stop.isNull():
-                self._icon_stop = self.style().standardIcon(self.style().SP_MediaStop)
-            if self._icon_play.isNull():
-                self._icon_play = self.style().standardIcon(self.style().SP_MediaPlay)
-            self._icon_pause = self.style().standardIcon(self.style().SP_MediaPause)
-        except Exception:
+            # Loader helper considering fallback to standard icons
+            def get_icon(name, std_fallback):
+                path = os.path.join(icon_dir, name)
+                icon = QIcon(path)
+                if icon.isNull():
+                    return self.style().standardIcon(std_fallback)
+                return icon
+
+            self._icon_play_raw = get_icon('app_play.png', self.style().SP_MediaPlay)
+            self._icon_pause_raw = get_icon('app_pause.png', self.style().SP_MediaPause)
+            self._icon_stop_raw = get_icon('app_stop.png', self.style().SP_MediaStop)
+            self._icon_mute_raw = get_icon('app_mute.png', self.style().SP_MediaVolumeMuted)
+            self._icon_unmute_raw = get_icon('app_unmute.png', self.style().SP_MediaVolume)
+            self._icon_settings_raw = get_icon('app_settings.png', self.style().SP_FileDialogDetailedView)
+            self._icon_force_stop_raw = get_icon('app_force_stop.png', self.style().SP_BrowserStop)
+            self._icon_channel_raw = get_icon('app_channel.png', self.style().SP_DriveNetIcon)
+            self._icon_codec_raw = get_icon('app_codec.png', self.style().SP_FileIcon)
+            self._icon_quit_raw = get_icon('app_quit.png', self.style().SP_DialogCloseButton)
+            
+            # Initial assignment
+            self._icon_play = self._icon_play_raw
+            self._icon_pause = self._icon_pause_raw
+            self._icon_stop = self._icon_stop_raw
+            self._icon_mute = self._icon_mute_raw
+            self._icon_unmute = self._icon_unmute_raw
+            self._icon_settings = self._icon_settings_raw
+            self._icon_force_stop = self._icon_force_stop_raw
+            self._icon_channel = self._icon_channel_raw
+            self._icon_codec = self._icon_codec_raw
+            self._icon_quit = self._icon_quit_raw
+
+        except Exception as e:
+            self.log.error(f"[UI] Error loading icons: {str(e)}")
             self._icon_play = self.style().standardIcon(self.style().SP_MediaPlay)
             self._icon_stop = self.style().standardIcon(self.style().SP_MediaStop)
             self._icon_pause = self.style().standardIcon(self.style().SP_MediaPause)
+            self._icon_mute = self.style().standardIcon(self.style().SP_MediaVolumeMuted)
+            self._icon_unmute = self.style().standardIcon(self.style().SP_MediaVolume)
+            self._icon_settings = self.style().standardIcon(self.style().SP_FileDialogDetailedView)
+            self._icon_force_stop = self.style().standardIcon(self.style().SP_BrowserStop)
+            self._icon_channel = self.style().standardIcon(self.style().SP_DriveNetIcon)
+            self._icon_codec = self.style().standardIcon(self.style().SP_FileIcon)
+            self._icon_quit = self.style().standardIcon(self.style().SP_DialogCloseButton)
 
     def _init_ui_base(self):
         """
@@ -191,7 +223,8 @@ class ListenMoePlayer(QWidget):
             self.setMinimumSize(500, 400)
 
         self._layout = QVBoxLayout()
-        self._layout.setContentsMargins(0, 0, 16, 16)
+        # Minimal margins for a tight, modern top-aligned look
+        self._layout.setContentsMargins(8, 2, 8, 16)
         self._layout.setSpacing(8)
         self.setLayout(self._layout)
 
@@ -212,17 +245,10 @@ class ListenMoePlayer(QWidget):
         
         self.menu_bar_layout.addWidget(self.settings_button)
         self.menu_bar_layout.addStretch(1)
+        # 1. Settings button at the very top (under the Windows title bar)
         self._layout.addLayout(self.menu_bar_layout)
 
-        # Create a sub-layout for the rest of the UI (with 16px left margin)
-        # and rebind self._layout so that all subsequent sections are correctly aligned.
-        self.main_content_layout = QVBoxLayout()
-        self.main_content_layout.setContentsMargins(16, 0, 0, 0)
-        self.main_content_layout.setSpacing(8)
-        self._layout.addLayout(self.main_content_layout)
-        self._layout = self.main_content_layout
-
-        # Header Label (Title)
+        # 2. Header Label (Title)
         self.label = QLabel(self.i18n.t('header').format(channel='J-POP', format='Vorbis'))
         self.label.setObjectName('headerLabel')
         self.label.setStyleSheet('font-size: 16px; font-weight: 600;')
@@ -263,23 +289,40 @@ class ListenMoePlayer(QWidget):
     def _init_meta_section(self):
         """Restore Channel and Format information row."""
         meta_row = QHBoxLayout()
-        meta_row.setContentsMargins(0, 4, 0, 4)
+        meta_row.setContentsMargins(0, 0, 0, 0)
         meta_row.setSpacing(8)
         
         self.channel_label = QLabel(self.i18n.t('channel_label'))
+        if hasattr(self, '_icon_channel'):
+            self.channel_icon_label = QLabel()
+            self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
+            
         self.channel_value = QLabel(self.settings.value(KEY_CHANNEL, 'J-POP'))
         self.channel_value.setStyleSheet("font-weight: bold;")
         
         self.format_label = QLabel(self.i18n.t('format_label'))
+        if hasattr(self, '_icon_codec'):
+            self.format_icon_label = QLabel()
+            self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
+            
         self.format_value = QLabel(self.settings.value(KEY_FORMAT, 'Vorbis'))
         self.format_value.setStyleSheet("font-weight: bold;")
         
+        # Pack elements tightly: [Icon][Label][Value]
+        if hasattr(self, 'channel_icon_label'):
+            meta_row.addWidget(self.channel_icon_label)
         meta_row.addWidget(self.channel_label)
         meta_row.addWidget(self.channel_value)
+        
         meta_row.addStretch(1)
+        
+        if hasattr(self, 'format_icon_label'):
+            meta_row.addWidget(self.format_icon_label)
         meta_row.addWidget(self.format_label)
         meta_row.addWidget(self.format_value)
         
+        # Set a small spacing specifically for this row to keep icons close to labels
+        meta_row.setSpacing(4)
         self._layout.addLayout(meta_row)
 
     def _init_controls_section(self):
@@ -339,8 +382,7 @@ class ListenMoePlayer(QWidget):
         self.mute_button = QPushButton(self.i18n.t('mute'))
         self.mute_button.setCheckable(True)
         self.mute_button.setFixedHeight(30)
-        icon_mute = self.style().standardIcon(self.style().SP_MediaVolume)
-        self.mute_button.setIcon(icon_mute)
+        self.mute_button.setIcon(self._icon_unmute)
         self.mute_button.clicked.connect(self.toggle_mute)
         
         self.volume_value_label = QLabel(f"{saved_vol}%")
@@ -360,6 +402,11 @@ class ListenMoePlayer(QWidget):
 
         # Emergency "FORCE STOP" button (kept as requested)
         self.force_stop_button = QPushButton("FORCE STOP")
+        if hasattr(self, '_icon_force_stop'):
+            self.force_stop_button.setIcon(self._icon_force_stop)
+            self.force_stop_button.setIconSize(QSize(16, 16))
+            # Spacing between icon and text (at least 2px)
+            self.force_stop_button.setStyleSheet("QPushButton { text-align: center; padding-left: 4px; }")
         self.force_stop_button.clicked.connect(self.force_stop_all)
         self._layout.addWidget(self.force_stop_button)
 
@@ -517,6 +564,7 @@ class ListenMoePlayer(QWidget):
                 on_change_format=self._tray_change_format,
                 on_toggle_play_pause=self._tray_toggle_play_pause,
                 on_stop_stream=self.stop_stream,
+                on_force_stop=self.force_stop_all,
                 on_toggle_mute=self.toggle_mute_shortcut,
             )
             self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon())
@@ -735,9 +783,10 @@ class ListenMoePlayer(QWidget):
                 self.log.debug(f"[DEV] Metadata received: title={title}, dur={duration}, start_ts={start_ts}")
             except Exception: pass
             
-            self._current_title = title or self.t('unknown')
+            self._current_title = title or self.i18n.t('unknown')
             self._current_artist = artist or ''
-            self._current_duration_seconds = int(duration) if duration is not None and int(duration) > 0 else None
+            # Support dur=0 as a valid state (Live/Unknown) instead of resetting to None
+            self._current_duration_seconds = int(duration) if duration is not None and int(duration) >= 0 else None
             self._current_start_epoch = float(start_ts) if start_ts is not None else None
             
             # --- Automatic Skew Compensation ---
@@ -759,7 +808,8 @@ class ListenMoePlayer(QWidget):
             
             # --- Update Song Progress Bar ---
             if hasattr(self, 'song_progress'):
-                if self._current_duration_seconds and self._current_duration_seconds > 0:
+                # Only show and set progress bar if we have a valid, positive duration
+                if self._current_duration_seconds is not None and self._current_duration_seconds > 0:
                     # Multiplier (1000) for sub-second smoothness
                     self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
                     self.song_progress.setValue(0)
@@ -807,9 +857,14 @@ class ListenMoePlayer(QWidget):
             dur = getattr(self, '_current_duration_seconds', None)
             
             if epoch is None or dur is None:
-                # Log once every 10s if metadata is missing to see if ticker is alive
-                if int(now) % 10 == 0:
-                    self.log.debug("[DEV] Song ticker ALIVE: (waiting for metadata)")
+                return
+            
+            if dur <= 0:
+                # Live stream or unknown duration: ticker is alive but doesn't update bar
+                now_int = int(now)
+                if now_int != getattr(self, '_last_live_log', 0) and now_int % 30 == 0:
+                    self._last_live_log = now_int
+                    self.log.debug(f"[DEV] Song ticker: LIVE MODE (title={self._current_title})")
                 return
             
             # Apply skew offset to the local clock comparison
@@ -946,8 +1001,8 @@ class ListenMoePlayer(QWidget):
                     QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
                     QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
                     QPushButton:hover {{ background-color: #2a2a2a; }}
-                    QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 0; padding: 4px 6px; color: #e0e0e0; font-size: 13px; }}
-                    QPushButton#menuButton:hover {{ background-color: {accent}; color: #ffffff; }}
+                    QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
+                    QPushButton#menuButton:hover {{ background-color: #444444; color: #ffffff; }}
                     QPushButton:disabled {{ background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }}
                     QLineEdit, QSpinBox, QComboBox {{ background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }}
                     QMenu {{ background-color: #121212; color: #e0e0e0; border: 1px solid #333; }}
@@ -961,6 +1016,73 @@ class ListenMoePlayer(QWidget):
                 )
             else:
                 app.setStyleSheet("")
+            
+            # --- Icon Dynamic Tinting ---
+            # All icons now use the accent color (Magenta) for consistent branding
+            icon_color = QColor(accent)
+            
+            # Use smaller icons for the top menu to facilitate edge alignment
+            sz_small = QSize(18, 18)
+            sz_std = QSize(24, 24)
+            
+            self._icon_play = self._tint_icon(self._icon_play_raw, icon_color, sz_std)
+            self._icon_pause = self._tint_icon(self._icon_pause_raw, icon_color, sz_std)
+            self._icon_stop = self._tint_icon(self._icon_stop_raw, icon_color, sz_std)
+            self._icon_mute = self._tint_icon(self._icon_mute_raw, icon_color, sz_std)
+            self._icon_unmute = self._tint_icon(self._icon_unmute_raw, icon_color, sz_std)
+            self._icon_force_stop = self._tint_icon(self._icon_force_stop_raw, icon_color, sz_std)
+            self._icon_channel = self._tint_icon(self._icon_channel_raw, icon_color, sz_small)
+            self._icon_codec = self._tint_icon(self._icon_codec_raw, icon_color, sz_small)
+            self._icon_quit = self._tint_icon(self._icon_quit_raw, icon_color, sz_std)
+            # Skip settings icon as requested (text-only for cleaner alignment)
+            # self._icon_settings = self._tint_icon(self._icon_settings_raw, icon_color, sz_small)
+
+            # Assign to UI buttons
+            if hasattr(self, 'play_button'): self.play_button.setIcon(self._icon_play)
+            if hasattr(self, 'pause_button'): self.pause_button.setIcon(self._icon_pause)
+            if hasattr(self, 'stop_button'): self.stop_button.setIcon(self._icon_stop)
+            if hasattr(self, 'force_stop_button'): self.force_stop_button.setIcon(self._icon_force_stop)
+            
+            # Update metadata icon labels with the new tinted icons
+            if hasattr(self, 'channel_icon_label'):
+                self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
+            if hasattr(self, 'format_icon_label'):
+                self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
+            
+            # Skip settings icon as requested (text-only for cleaner alignment)
+            if hasattr(self, 'mute_button'):
+                is_muted = self._get_bool(KEY_MUTE, False)
+                self.mute_button.setIcon(self._icon_mute if is_muted else self._icon_unmute)
+            
+            try:
+                self.setWindowIcon(self._icon_stop)
+            except Exception:
+                pass
+
+            if hasattr(self, 'mute_button'):
+                self.mute_button.setIcon(self._icon_unmute if not self.mute_button.isChecked() else self._icon_mute)
+            # Settings icon removed as requested
+            # if hasattr(self, 'settings_button'): self.settings_button.setIcon(self._icon_settings)
+            
+            # Synchronize icons with TrayManager
+            if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                self.tray_mgr.update_icon(self._icon_stop)
+                self.tray_mgr.update_controls_icons({
+                    'play': self._icon_play,
+                    'pause': self._icon_pause,
+                    'stop': self._icon_stop,
+                    'mute': self._icon_mute,
+                    'unmute': self._icon_unmute,
+                    'force_stop': self._icon_force_stop,
+                    'channel': self._icon_channel,
+                    'codec': self._icon_codec,
+                    'quit': self._icon_quit
+                })
+                # Refresh tray menu state to apply icons immediately
+                try:
+                    self._update_tray_controls()
+                except Exception:
+                    pass
             
             # Synchronize custom progress bar color
             if hasattr(self, 'song_progress'):
@@ -1919,10 +2041,7 @@ class ListenMoePlayer(QWidget):
             # Update tooltip and icon according to state
             try:
                 self.mute_button.setToolTip(self.i18n.t('tt_unmute') if checked else self.i18n.t('tt_mute'))
-                self.mute_button.setIcon(
-                    self.style().standardIcon(self.style().SP_MediaVolumeMuted)
-                    if checked else self.style().standardIcon(self.style().SP_MediaVolume)
-                )
+                self.mute_button.setIcon(self._icon_mute if checked else self._icon_unmute)
             except Exception:
                 pass
         except Exception:

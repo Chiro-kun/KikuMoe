@@ -552,6 +552,7 @@ class PlayerFFmpeg:
                 forced_error_ref = {'v': False}
 
                 def _stall_watchdog_local():
+                    _last_wd_log = [0]
                     while not watchdog_stop.is_set():
                         if self._stop_event.is_set():
                             break
@@ -567,6 +568,15 @@ class PlayerFFmpeg:
                             delta = time.time() - last_data_ts
                         except Exception:
                             delta = stall_timeout + 1
+                            
+                        # Throttled status log for debugging stalls (once per 5s)
+                        now_int = int(time.time())
+                        if now_int != _last_wd_log[0] and now_int % 5 == 0:
+                            _last_wd_log[0] = now_int
+                            try:
+                                self.log.debug("[DEBUG] _stall_watchdog: delta=%.1f s, pid=%s, started=%s", delta, p.pid if p else 'None', started_streaming)
+                            except Exception: pass
+
                         if delta > stall_timeout:
                             try:
                                 self.log.debug("[DEBUG] _stall_watchdog: stall detected (%.2fs > %.2fs), terminating ffmpeg", delta, stall_timeout)
@@ -661,6 +671,9 @@ class PlayerFFmpeg:
                     last_data_ts = time.time()
                     if not started_streaming:
                         started_streaming = True
+                        try:
+                            self.log.debug("[DEBUG] _stream_worker: first audio chunk received (len=%d), emitting playing", len(chunk))
+                        except Exception: pass
                         self._emit('playing', None)
 
                     n_bytes = (len(chunk) // 2) * 2
