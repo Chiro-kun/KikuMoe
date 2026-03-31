@@ -55,8 +55,13 @@ class SmoothProgressBar(QWidget):
         super().__init__(parent)
         self._value = 0
         self._max = 100
+        self._accent_color = QColor("#c2185b") # Match app default accent color
         self.setFixedHeight(4)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def setAccentColor(self, color_str):
+        self._accent_color = QColor(color_str)
+        self.update()
 
     def setMaximum(self, val):
         self._max = max(1, val)
@@ -83,7 +88,7 @@ class SmoothProgressBar(QWidget):
         if self._max > 0:
             w = (self._value / self._max) * self.width()
             if w > 0:
-                painter.setBrush(QColor("#05B8CC"))
+                painter.setBrush(self._accent_color)
                 # Clamp width to widget width
                 painter.drawRoundedRect(0, 0, int(min(w, self.width())), self.height(), 2, 2)
 
@@ -956,6 +961,11 @@ class ListenMoePlayer(QWidget):
                 )
             else:
                 app.setStyleSheet("")
+            
+            # Synchronize custom progress bar color
+            if hasattr(self, 'song_progress'):
+                self.song_progress.setAccentColor(accent)
+            
             # Apply dark titlebar on Windows
             try:
                 self._apply_windows_titlebar_dark_mode(dark)
