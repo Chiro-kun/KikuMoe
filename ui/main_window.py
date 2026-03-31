@@ -49,6 +49,44 @@ from now_playing import compute_display_mmss
 from ui.tray_manager import TrayManager
 from ui.dev_console import DevConsole
 
+# Custom Progress Bar for Pixel-Perfect Fluidity
+class SmoothProgressBar(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._value = 0
+        self._max = 100
+        self.setFixedHeight(4)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def setMaximum(self, val):
+        self._max = max(1, val)
+        self.update()
+
+    def setValue(self, val):
+        if self._value != val:
+            self._value = val
+            self.update()
+
+    def value(self):
+        return self._value
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Background track
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(200, 200, 200, 40)) # Translucent track
+        painter.drawRoundedRect(self.rect(), 2, 2)
+
+        # Progress chunk
+        if self._max > 0:
+            w = (self._value / self._max) * self.width()
+            if w > 0:
+                painter.setBrush(QColor("#05B8CC"))
+                # Clamp width to widget width
+                painter.drawRoundedRect(0, 0, int(min(w, self.width())), self.height(), 2, 2)
+
 class ListenMoePlayer(QWidget):
     status_changed = pyqtSignal(str)
     now_playing_changed = pyqtSignal(str)
@@ -203,10 +241,8 @@ class ListenMoePlayer(QWidget):
         self.now_playing_label.setWordWrap(True)
         self._layout.addWidget(self.now_playing_label)
         
-        # Song Progress Bar (Dynamic)
-        self.song_progress = QProgressBar()
-        self.song_progress.setFixedHeight(4)
-        self.song_progress.setTextVisible(False)
+        # Song Progress Bar (Dynamic custom widget for smoothness)
+        self.song_progress = SmoothProgressBar()
         self.song_progress.setVisible(False)
         self.song_progress.setObjectName("songProgressBar")
         self._layout.addWidget(self.song_progress)
@@ -417,11 +453,15 @@ class ListenMoePlayer(QWidget):
         self._session_timer.setInterval(1000)
         self._session_timer.timeout.connect(self._on_session_tick)
         
-        # Song Progress Ticker
+        # Song Progress Ticker (Smoother transitions with 50ms interval)
         self.song_tick_timer = QTimer(self)
-        self.song_tick_timer.setInterval(1000)
+        self.song_tick_timer.setTimerType(Qt.PreciseTimer)
+        self.song_tick_timer.setInterval(50)
         self.song_tick_timer.timeout.connect(self._on_song_tick)
         self.song_tick_timer.start()
+        
+        # Track last integer second to avoid redundant label updates
+        self._last_integer_second = -1
         
         # Sleep Timer
         self._sleep_timer = QTimer(self)
@@ -686,15 +726,37 @@ class ListenMoePlayer(QWidget):
     # 3. WebSocket & Metadata Events
     def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
         try:
+            try:
+                self.log.debug(f"[DEV] Metadata received: title={title}, dur={duration}, start_ts={start_ts}")
+            except Exception: pass
+            
             self._current_title = title or self.t('unknown')
             self._current_artist = artist or ''
             self._current_duration_seconds = int(duration) if duration is not None and int(duration) > 0 else None
             self._current_start_epoch = float(start_ts) if start_ts is not None else None
             
+            # --- Automatic Skew Compensation ---
+            try:
+                import time
+                if self._current_start_epoch is not None:
+                    raw_elapsed = time.time() - self._current_start_epoch
+                    # If PC is significantly behind (elapsed is negative), offset it.
+                    # We also allow up to 10s of positive skew (for buffering slack).
+                    if raw_elapsed < -2:
+                        self._skew_offset = abs(raw_elapsed)
+                        self.log.info(f"[UI] Automatic skew compensation applied: +{self._skew_offset:.1f}s")
+                    else:
+                        self._skew_offset = 0
+                else:
+                    self._skew_offset = 0
+            except Exception:
+                self._skew_offset = 0
+            
             # --- Update Song Progress Bar ---
             if hasattr(self, 'song_progress'):
                 if self._current_duration_seconds and self._current_duration_seconds > 0:
-                    self.song_progress.setMaximum(self._current_duration_seconds)
+                    # Multiplier (1000) for sub-second smoothness
+                    self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
                     self.song_progress.setValue(0)
                     self.song_progress.show()
                 else:
@@ -734,15 +796,37 @@ class ListenMoePlayer(QWidget):
     def _on_song_tick(self) -> None:
         """Updates the song progress bar every second based on start timestamp."""
         try:
-            if not hasattr(self, 'song_progress') or not self.song_progress.isVisible():
-                return
-            if not self._current_start_epoch or not self._current_duration_seconds:
+            import time
+            now = time.time()
+            epoch = getattr(self, '_current_start_epoch', None)
+            dur = getattr(self, '_current_duration_seconds', None)
+            
+            if epoch is None or dur is None:
+                # Log once every 10s if metadata is missing to see if ticker is alive
+                if int(now) % 10 == 0:
+                    self.log.debug("[DEV] Song ticker ALIVE: (waiting for metadata)")
                 return
             
-            import time
-            elapsed = int(time.time() - self._current_start_epoch)
-            if 0 <= elapsed <= self._current_duration_seconds:
-                self.song_progress.setValue(elapsed)
+            # Apply skew offset to the local clock comparison
+            skew = getattr(self, '_skew_offset', 0)
+            elapsed_raw = now - epoch + skew
+            
+            # --- Progress Bar (Fluid 50ms update) ---
+            # Use milliseconds for the internal bar value
+            effective_ms = int(max(0, min(elapsed_raw, dur)) * 1000)
+            self.song_progress.setValue(effective_ms)
+
+            # --- Label Update (Optimized 1s update) ---
+            current_int_sec = int(elapsed_raw)
+            if current_int_sec != getattr(self, '_last_integer_second', -1):
+                self._last_integer_second = current_int_sec
+                
+                # Diagnostic log for [DEV] filters (every 5s)
+                if current_int_sec % 5 == 0:
+                    self.log.debug(f"[DEV] Song ticker: elapsed={current_int_sec}s (skewed), dur={dur}s, skew_val={skew:.1f}")
+
+                # Update the [M:SS] text in the metadata label every second
+                self.update_now_playing_label()
         except Exception:
             pass
 
@@ -1340,17 +1424,19 @@ class ListenMoePlayer(QWidget):
                     dur = None
                 if dur and self._current_start_epoch is not None:
                     try:
-                        elapsed = int(time.time()) - int(self._current_start_epoch)
+                        skew = int(getattr(self, '_skew_offset', 0))
+                        elapsed = int(time.time()) - int(self._current_start_epoch) + skew
                     except Exception:
                         elapsed = None
-                    # Use remaining only when 0 <= elapsed <= dur + small slack (handle clock skew)
-                    if elapsed is not None and 0 <= elapsed <= dur + 5:
-                        remaining = dur - elapsed
+                    # Use remaining only when elapsed is within plausible range (+/- 60s slack for clock skew)
+                    if elapsed is not None and -60 <= elapsed <= dur + 60:
+                        # If PC clock is behind (elapsed < 0), remaining shouldn't exceed dur
+                        remaining = dur - max(0, elapsed)
                         if remaining < 0:
                             remaining = 0
                         mmss = self._format_mmss(remaining)
                     else:
-                        # Fallback to total duration to avoid misleading 0:00
+                        # Fallback to total duration to avoid misleading or extreme values
                         mmss = self._format_mmss(dur)
                 elif dur:
                     mmss = self._format_mmss(dur)

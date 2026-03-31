@@ -70,16 +70,30 @@ class NowPlayingWS:
                         duration = int(duration) if duration is not None else None
                     except Exception:
                         duration = None
-                    # startTime ISO8601 (UTC) -> epoch seconds
                     start_ts = None
                     try:
                         start_time_iso = d.get("startTime")
                         if isinstance(start_time_iso, str):
+                            # Debug raw value to terminal
+                            print(f"[WS DEBUG] startTime from server: {start_time_iso}")
+                            # Listen.moe API v2: "2026-03-31T17:28:46.000Z"
+                            # Handle "Z" as UTC
                             iso = start_time_iso.replace("Z", "+00:00")
-                            dt = datetime.fromisoformat(iso)
-                            if dt.tzinfo is None:
-                                dt = dt.replace(tzinfo=timezone.utc)
-                            start_ts = dt.timestamp()
+                            try:
+                                dt = datetime.fromisoformat(iso)
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                start_ts = dt.timestamp()
+                            except ValueError:
+                                # Fallback for older Python or weird formats
+                                try:
+                                    # Try without milliseconds if fromisoformat fails
+                                    if "." in iso:
+                                        iso_no_ms = iso.split(".")[0] + "+00:00"
+                                        dt = datetime.fromisoformat(iso_no_ms)
+                                        start_ts = dt.replace(tzinfo=timezone.utc).timestamp()
+                                except Exception:
+                                    start_ts = None
                     except Exception:
                         start_ts = None
                     self.on_now_playing(title, artist_name, duration, start_ts)
