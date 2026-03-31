@@ -29,7 +29,7 @@ class PlayerFFmpeg:
         self._stop_requested = False
         self._stop_event = threading.Event()
         # lock protecting _ffmpeg_process and _audio_stream
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()
         self._stream_thread: Optional[threading.Thread] = None
         self._audio_stream: Optional[Any] = None
         self._pyaudio_instance: Optional[Any] = None  # type: ignore
@@ -225,13 +225,14 @@ class PlayerFFmpeg:
                     pass
 
             # Wait for thread to finish with timeout
-            if self._stream_thread and self._stream_thread.is_alive():
+            thread_ref = self._stream_thread
+            if thread_ref and thread_ref.is_alive():
                 try:
                     self.log.debug("[DEBUG] Waiting for stream thread to terminate after stop...")
-                    self._stream_thread.join(timeout=2.0)
+                    thread_ref.join(timeout=2.0)
                 except Exception:
                     pass
-                if self._stream_thread.is_alive():
+                if thread_ref.is_alive():
                     self.log.debug("[DEBUG] Stream thread did not terminate after stop.")
             # Clear thread reference if it's no longer alive
             if self._stream_thread and not self._stream_thread.is_alive():

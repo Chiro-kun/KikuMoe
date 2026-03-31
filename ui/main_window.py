@@ -6,10 +6,11 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
 from typing import Optional
-import sys
 import os
 import time
 import re
+import ctypes
+import sys
 from i18n import I18n
 from ws_client import NowPlayingWS
 from player_ffmpeg import PlayerFFmpeg
@@ -65,24 +66,73 @@ class ListenMoePlayer(QWidget):
 
     def __init__(self):
         super().__init__()
+        # State variables
         self._playback_lock = threading.Lock()
+        self._ui_paused: bool = False
+        self._current_title = None
+        self._current_artist = None
+        self._current_duration_seconds = None
+        self._current_start_epoch = None
+        self._session_seconds = 0
+        self._sleep_remaining_sec = 0
+        self._sleep_fadeout_sec = 15
+        self._sleep_saved_volume = None
 
-        # Connect cross-thread delayed play to UI slot
-        try:
-            self.schedule_play.connect(self._schedule_play_stream)
-        except Exception:
-            pass
+        # 1. Start initialization sequence
+        self._init_settings_and_i18n()
+        self._init_icons()
+        self._init_ui_base()
+        self._init_header_section()
+        self._init_meta_section()
+        self._init_controls_section()
+        self._init_progress_section()
+        self._init_sleep_timer_section()
+        self._init_audio_backend()
+        self._init_timers_and_console()
+        self._init_websocket()
+        self._init_tray()
+        self._init_extra_logic()
 
-        # settings
+    # ------------------- Initialization Helpers -------------------
+
+    def _init_settings_and_i18n(self):
+        """
+        Initializes the application settings (QSettings) and the internationalization engine.
+        Sets up the language based on stored settings and initializes the logger.
+        """
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
-
-        # i18n
         saved_lang = self.settings.value(KEY_LANG, 'it')
         self.i18n = I18n(saved_lang if saved_lang in ('it', 'en') else 'it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
+        self.log = get_logger('KikuMoe')
 
+    def _init_icons(self):
+        """Load and prepare application icons for window and tray."""
+        try:
+            icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
+            self._icon_play = QIcon(os.path.join(icon_dir, 'app_play.svg'))
+            self._icon_stop = QIcon(os.path.join(icon_dir, 'app_stop.svg'))
+            if self._icon_stop.isNull():
+                self._icon_stop = self.style().standardIcon(self.style().SP_MediaStop)
+            if self._icon_play.isNull():
+                self._icon_play = self.style().standardIcon(self.style().SP_MediaPlay)
+            self._icon_pause = self.style().standardIcon(self.style().SP_MediaPause)
+        except Exception:
+            self._icon_play = self.style().standardIcon(self.style().SP_MediaPlay)
+            self._icon_stop = self.style().standardIcon(self.style().SP_MediaStop)
+            self._icon_pause = self.style().standardIcon(self.style().SP_MediaPause)
+
+    def _init_ui_base(self):
+        """
+        Sets up the basic window properties such as title, icon, geometry, and main layout.
+        Also initializes the custom title bar behavior (if applicable).
+        """
         self.setWindowTitle(APP_TITLE)
-        # Restore geometry if saved
+        try:
+            if hasattr(self, '_icon_stop') and not self._icon_stop.isNull():
+                self.setWindowIcon(self._icon_stop)
+        except Exception:
+            pass
         try:
             geom = self.settings.value(KEY_WINDOW_GEOMETRY)
             if geom:
@@ -90,304 +140,317 @@ class ListenMoePlayer(QWidget):
             else:
                 self.resize(480, 430)
                 self.setMinimumSize(500, 400)
+            
+            # --- Branding Colors ---
+            self.COLOR_ACCENT = "#c2185b" # Magenta from KikuMoe Logo
         except Exception:
             self.resize(480, 430)
             self.setMinimumSize(500, 400)
-        # uso _layout per non sovrascrivere QWidget.layout()
-        self._layout = QVBoxLayout()
-        self._layout.setContentsMargins(16, 16, 16, 16)
-        self._layout.setSpacing(8)
 
-        # Header + Now playing
+        self._layout = QVBoxLayout()
+        self._layout.setContentsMargins(0, 0, 16, 16)
+        self._layout.setSpacing(8)
+        self.setLayout(self._layout)
+
+    def _init_header_section(self):
+        """
+        Creates and adds the header section components to the UI, including
+        the channel logo, source indicators, and current broadcast information.
+        """
+        self.menu_bar_layout = QHBoxLayout()
+        self.menu_bar_layout.setContentsMargins(0, 0, 0, 0)
+        self.menu_bar_layout.setSpacing(0)
+        
+        # Settings button in menu style at the very top (under the app bar)
+        self.settings_button = QPushButton(self.i18n.t('settings_button'))
+        self.settings_button.setObjectName('menuButton')
+        self.settings_button.setFixedHeight(30)
+        self.settings_button.clicked.connect(self.open_settings)
+        
+        self.menu_bar_layout.addWidget(self.settings_button)
+        self.menu_bar_layout.addStretch(1)
+        self._layout.addLayout(self.menu_bar_layout)
+
+        # Create a sub-layout for the rest of the UI (with 16px left margin)
+        # and rebind self._layout so that all subsequent sections are correctly aligned.
+        self.main_content_layout = QVBoxLayout()
+        self.main_content_layout.setContentsMargins(16, 0, 0, 0)
+        self.main_content_layout.setSpacing(8)
+        self._layout.addLayout(self.main_content_layout)
+        self._layout = self.main_content_layout
+
+        # Header Label (Title)
         self.label = QLabel(self.i18n.t('header').format(channel='J-POP', format='Vorbis'))
         self.label.setObjectName('headerLabel')
         self.label.setStyleSheet('font-size: 16px; font-weight: 600;')
+        self._layout.addWidget(self.label)
+        
         self.status_label = QLabel("")
+        self.status_label.setObjectName('status_label_val')
+        self._layout.addWidget(self.status_label)
+        
+        self.session_label = QLabel("")
+        self.session_label.setObjectName('sessionLabel')
+        self._layout.addWidget(self.session_label)
+        
+        self.sleep_label = QLabel("")
+        self.sleep_label.setObjectName('sleepLabel')
+        self._layout.addWidget(self.sleep_label)
+        
         self.now_playing_label = QLabel(f"{self.i18n.t('now_playing_prefix')} –")
         self.now_playing_label.setObjectName('nowPlayingLabel')
         self.now_playing_label.setStyleSheet('font-size: 14px; font-weight: 500;')
-        self._layout.addWidget(self.label)
-        self._layout.addWidget(self.status_label)
-        self.session_label = QLabel("")
-        self._layout.addWidget(self.session_label)
+        self.now_playing_label.setWordWrap(True)
         self._layout.addWidget(self.now_playing_label)
+        
+        # Song Progress Bar (Dynamic)
+        self.song_progress = QProgressBar()
+        self.song_progress.setFixedHeight(4)
+        self.song_progress.setTextVisible(False)
+        self.song_progress.setVisible(False)
+        self.song_progress.setObjectName("songProgressBar")
+        self._layout.addWidget(self.song_progress)
+        
+        # Connections for signals that update these labels
+        try:
+            self.now_playing_changed.connect(self.now_playing_label.setText)
+            self.status_changed.connect(self.status_label.setText)
+            self.label_refresh.connect(self.update_now_playing_label)
+        except Exception:
+            pass
 
-        # Stream info (Channel + Format) - non editable
-        sel_row = QHBoxLayout()
+    def _init_meta_section(self):
+        """Restore Channel and Format information row."""
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 4, 0, 4)
+        meta_row.setSpacing(8)
+        
         self.channel_label = QLabel(self.i18n.t('channel_label'))
         self.channel_value = QLabel(self.settings.value(KEY_CHANNEL, 'J-POP'))
+        self.channel_value.setStyleSheet("font-weight: bold;")
+        
         self.format_label = QLabel(self.i18n.t('format_label'))
         self.format_value = QLabel(self.settings.value(KEY_FORMAT, 'Vorbis'))
-        sel_row.addWidget(self.channel_label)
-        sel_row.addWidget(self.channel_value)
-        sel_row.addWidget(self.format_label)
-        sel_row.addWidget(self.format_value)
-        self._layout.addLayout(sel_row)
+        self.format_value.setStyleSheet("font-weight: bold;")
+        
+        meta_row.addWidget(self.channel_label)
+        meta_row.addWidget(self.channel_value)
+        meta_row.addStretch(1)
+        meta_row.addWidget(self.format_label)
+        meta_row.addWidget(self.format_value)
+        
+        self._layout.addLayout(meta_row)
 
-        # Barra superiore: solo pulsante Impostazioni
-        self.top_row = QHBoxLayout()
-        # Icone SVG (app)
-        try:
-            base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(__file__)))
-            self._icon_play = QIcon(os.path.join(base_dir, 'icons', 'app_play.svg'))
-            self._icon_stop = QIcon(os.path.join(base_dir, 'icons', 'app_stop.svg'))
-            self._icon_status_ok = QIcon(os.path.join(base_dir, 'icons', 'status_ok.svg'))
-            self._icon_status_bad = QIcon(os.path.join(base_dir, 'icons', 'status_error.svg'))
-            # Imposta icona finestra di default
-            if not self._icon_stop.isNull():
-                self.setWindowIcon(self._icon_stop)
-        except Exception:
-            pass
-        # Pulsante Impostazioni
-        self.settings_button = QPushButton(self.i18n.t('settings_button'))
-        self.settings_button.clicked.connect(self.open_settings)
-        self.top_row.addStretch(1)
-        # Dev console disponibile solo nella finestra Impostazioni: niente bottone o scorciatoia nella top bar
-        try:
-            self._dev_console_enabled = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
-        except Exception:
-            self._dev_console_enabled = False
-        self.top_row.addWidget(self.settings_button)
-        self._layout.addLayout(self.top_row)
+    def _init_controls_section(self):
+        """
+        Sets up the primary playback controls (Play, Pause, Stop) and the
+        volume/mute management widgets.
+        """
 
-        # Indicatore stato VLC (icona + testo)
-        status_row = QHBoxLayout()
-        self.vlc_status_icon = QLabel()
-        self.vlc_status_icon.setFixedSize(10, 10)
-        self.vlc_status_icon.setStyleSheet("background-color: #c62828; border-radius: 5px;")
-        self.vlc_status = QLabel(self.i18n.t('vlc_not_found'))
-        status_row.addWidget(self.vlc_status_icon)
-        status_row.addWidget(self.vlc_status)
-        status_row.addStretch(1)
-        self._layout.addLayout(status_row)
-
-        # Buffering progress bar
-        self.buffer_bar = QProgressBar()
-        self.buffer_bar.setRange(0, 100)
-        self.buffer_bar.setVisible(False)
-        self._layout.addWidget(self.buffer_bar)
-
-        # Controls
+        # Main Playback Controls
+        # Row 1: Play (Priority 1)
+        play_row = QHBoxLayout()
         self.play_button = QPushButton(self.i18n.t('play'))
-        self.pause_button = QPushButton(self.i18n.t('pause'))  # toggle
-        self.stop_button = QPushButton(self.i18n.t('stop'))
-        self.force_stop_button = QPushButton("FORCE STOP")  # Emergency stop
+        self.play_button.setFixedHeight(40)
+        if hasattr(self, '_icon_play'):
+            self.play_button.setIcon(self._icon_play)
+        self.play_button.setIconSize(QSize(20, 20))
+        self.play_button.clicked.connect(self.play_stream)
+        play_row.addWidget(self.play_button)
+        self._layout.addLayout(play_row)
+        
+        # Row 2: Pause and Stop (Priority 2)
+        secondary_controls_layout = QHBoxLayout()
+        secondary_controls_layout.setSpacing(12)
+        
+        self.pause_button = QPushButton(self.i18n.t('pause'))
+        self.pause_button.setFixedHeight(40)
+        if hasattr(self, '_icon_pause'):
+            self.pause_button.setIcon(self._icon_pause)
+        self.pause_button.setIconSize(QSize(20, 20))
+        self.pause_button.clicked.connect(self.pause_resume)
 
+        self.stop_button = QPushButton(self.i18n.t('stop'))
+        self.stop_button.setFixedHeight(40)
+        if hasattr(self, '_icon_stop'):
+            self.stop_button.setIcon(self._icon_stop)
+        self.stop_button.setIconSize(QSize(20, 20))
+        self.stop_button.clicked.connect(self.stop_stream)
+        
+        secondary_controls_layout.addWidget(self.pause_button)
+        secondary_controls_layout.addWidget(self.stop_button)
+        self._layout.addLayout(secondary_controls_layout)
+
+        # Volume Controls
         vol_row = QHBoxLayout()
-        vol_row.setSpacing(8)
         self.volume_label = QLabel(self.i18n.t('volume'))
-        self.volume_slider = QSlider()
-        # QSlider default è orizzontale: evitiamo chiamate che i type-stub possono segnalare
-        # (riduce falsi positivi di Pylance mantenendo comportamento runtime)
+        self.volume_slider = QSlider(Qt.Horizontal)
         self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(int(self.settings.value(KEY_VOLUME, 80)))
-        # Miglioramenti UX per lo slider del volume
+        
+        saved_vol = self.settings.value(KEY_VOLUME, 60)
         try:
-            self.volume_slider.setOrientation(Qt.Horizontal)
-            self.volume_slider.setTickPosition(QSlider.TicksBelow)
-            self.volume_slider.setTickInterval(10)
-            self.volume_slider.setSingleStep(1)
-            self.volume_slider.setPageStep(5)
-            self.volume_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            self.volume_slider.setMinimumWidth(160)
-            self.volume_slider.setToolTip(f"{int(self.volume_slider.value())}%")
+            self.volume_slider.setValue(int(saved_vol))
         except Exception:
-            pass
-        # Etichetta percentuale accanto allo slider
-        try:
-            self.volume_value_label = QLabel(f"{int(self.volume_slider.value())}%")
-        except Exception:
-            self.volume_value_label = QLabel("-")
+            self.volume_slider.setValue(60)
+            
+        self.volume_slider.valueChanged.connect(self.change_volume)
+        
         self.mute_button = QPushButton(self.i18n.t('mute'))
         self.mute_button.setCheckable(True)
-        self.mute_button.setChecked(self._get_bool(KEY_MUTE, False))
+        self.mute_button.setFixedHeight(30)
+        icon_mute = self.style().standardIcon(self.style().SP_MediaVolume)
+        self.mute_button.setIcon(icon_mute)
+        self.mute_button.clicked.connect(self.toggle_mute)
+        
+        self.volume_value_label = QLabel(f"{saved_vol}%")
+        self.volume_value_label.setFixedWidth(40)
+        
+        # Autoplay Toggle (on main UI)
+        self.autoplay_checkbox = QCheckBox(self.i18n.t('settings_autoplay'))
+        self.autoplay_checkbox.setChecked(self._get_bool(KEY_AUTOPLAY, False))
+        self.autoplay_checkbox.toggled.connect(self._on_autoplay_toggled)
+        
         vol_row.addWidget(self.volume_label)
         vol_row.addWidget(self.volume_slider)
         vol_row.addWidget(self.volume_value_label)
         vol_row.addWidget(self.mute_button)
-
-        self._layout.addWidget(self.play_button)
-        self._layout.addWidget(self.pause_button)
-        self._layout.addWidget(self.stop_button)
-        self._layout.addWidget(self.force_stop_button)
+        vol_row.addWidget(self.autoplay_checkbox)
         self._layout.addLayout(vol_row)
-        # Imposta icone e tooltip dei pulsanti principali
-        try:
-            # Play: preferisci l'icona bundled, altrimenti fallback al sistema
-            if hasattr(self, '_icon_play') and not self._icon_play.isNull():
-                self.play_button.setIcon(self._icon_play)
-            else:
-                self.play_button.setIcon(self.style().standardIcon(self.style().SP_MediaPlay))
-            # Pause: icona di sistema
-            self.pause_button.setIcon(self.style().standardIcon(self.style().SP_MediaPause))
-            self.pause_button.setStyleSheet("")
-            self.pause_button.setIcon(self._tint_icon(self.pause_button.icon(), QColor("#f39c12"), self.pause_button.iconSize()))
-            self.pause_button.setObjectName('pauseButton')
-            self.pause_button.setStyleSheet("")
-            # Stop: forza icona standard "quadrato"
-            self.stop_button.setIcon(self.style().standardIcon(self.style().SP_MediaStop))
-            self.stop_button.setStyleSheet("")
-            self.stop_button.setIcon(self._tint_icon(self.stop_button.icon(), QColor("#e53935"), self.stop_button.iconSize()))
-            self.stop_button.setObjectName('stopButton')
-            self.stop_button.setStyleSheet("")
-            # Mute: icona in base allo stato attuale
-            self.mute_button.setIcon(
-                self.style().standardIcon(self.style().SP_MediaVolumeMuted)
-                if self.mute_button.isChecked() else
-                self.style().standardIcon(self.style().SP_MediaVolume)
-            )
-            # Tooltip localizzati
-            self.play_button.setToolTip(self.i18n.t('tt_play'))
-            self.pause_button.setToolTip(self.i18n.t('tt_pause'))
-            self.stop_button.setToolTip(self.i18n.t('tt_stop'))
-            self.mute_button.setToolTip(self.i18n.t('tt_unmute') if self.mute_button.isChecked() else self.i18n.t('tt_mute'))
-        except Exception:
-            pass
 
-        # Sleep Timer row
-        sleep_row = QHBoxLayout()
-        sleep_row.setSpacing(8)
-        self.sleep_title = QLabel(self.i18n.t('sleep_timer'))
-        self.sleep_minutes_label = QLabel(self.i18n.t('sleep_minutes'))
-        self.spin_sleep = QSpinBox()
-        self.spin_sleep.setRange(1, 300)
-        try:
-            default_sleep = int(self.settings.value(KEY_SLEEP_MINUTES, 30))
-        except Exception:
-            default_sleep = 30
-        self.spin_sleep.setValue(default_sleep)
-        self.btn_sleep_start = QPushButton(self.i18n.t('sleep_start'))
-        self.btn_sleep_cancel = QPushButton(self.i18n.t('sleep_cancel'))
-        self.btn_sleep_start.clicked.connect(self.sleep_start_clicked)
-        self.btn_sleep_cancel.clicked.connect(self.sleep_cancel_clicked)
-        sleep_row.addWidget(self.sleep_title)
-        sleep_row.addStretch(1)
-        sleep_row.addWidget(self.sleep_minutes_label)
-        sleep_row.addWidget(self.spin_sleep)
-        sleep_row.addWidget(self.btn_sleep_start)
-        sleep_row.addWidget(self.btn_sleep_cancel)
-        self._layout.addLayout(sleep_row)
-        self.sleep_label = QLabel("")
-        self._layout.addWidget(self.sleep_label)
-
-        self.setLayout(self._layout)
-
-        # Shortcuts
-        # Shortcuts (omettiamo setContext per evitare warning statici dei type-stub)
-        self.pause_shortcut = QShortcut(QKeySequence("Space"), self)
-        self.pause_shortcut.activated.connect(self.pause_resume)
-        # Shortcut Stop (S)
-        self.stop_shortcut = QShortcut(QKeySequence("S"), self)
-        # omit setContext to avoid type-checker warnings
-        self.stop_shortcut.activated.connect(self.stop_stream)
-        # Shortcut Mute (M)
-        self.mute_shortcut = QShortcut(QKeySequence("M"), self)
-        # omit setContext to avoid type-checker warnings
-        self.mute_shortcut.activated.connect(self.toggle_mute_shortcut)
-
-        # Signals/UI connections
-        self.play_button.clicked.connect(self._tray_toggle_play_pause)
-        self.pause_button.clicked.connect(self.pause_resume)
-        self.stop_button.clicked.connect(self.stop_stream)
+        # Emergency "FORCE STOP" button (kept as requested)
+        self.force_stop_button = QPushButton("FORCE STOP")
         self.force_stop_button.clicked.connect(self.force_stop_all)
-        self.volume_slider.valueChanged.connect(self.volume_changed)
-        self.mute_button.toggled.connect(self.mute_toggled)
-        self.status_changed.connect(self.status_label.setText)
-        self.now_playing_changed.connect(self.now_playing_label.setText)
-        # Reconnect buffering and cross-thread UI signals
+        self._layout.addWidget(self.force_stop_button)
+
+    def _init_progress_section(self):
+        """
+        Initializes the buffering progress bar and connects visual feedback signals
+        from the playback system to UI updates.
+        """
+        self.buffer_bar = QProgressBar()
+        self.buffer_bar.setRange(0, 100)
+        self.buffer_bar.setVisible(False)
+        self._layout.addWidget(self.buffer_bar)
+        
         try:
             self.buffering_progress.connect(self.buffer_bar.setValue)
             self.buffering_visible.connect(self.buffer_bar.setVisible)
             self.buffering_indeterminate.connect(self._set_buffer_bar_indeterminate)
-            self.label_refresh.connect(self.update_now_playing_label)
-            self.tray_icon_refresh.connect(self.update_tray_icon)
-            self.backend_status_refresh.connect(self.update_vlc_status_label)
-            self.notify_tray.connect(self._notify_tray)
         except Exception:
             pass
 
-        # Initialize logger
-        self.log = get_logger('KikuMoe')
-        # Session timer runtime
-        self._session_seconds: int = 0
-        self._session_timer: Optional[QTimer] = QTimer(self)
+    def _init_sleep_timer_section(self):
+        """Restore Sleep Timer UI controls."""
+        sleep_group_layout = QVBoxLayout()
+        sleep_group_layout.setSpacing(4)
+        
+        title_row = QHBoxLayout()
+        self.sleep_title = QLabel(self.i18n.t('sleep_timer'))
+        self.sleep_title.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        title_row.addWidget(self.sleep_title)
+        title_row.addStretch(1)
+        sleep_group_layout.addLayout(title_row)
+        
+        controls_row = QHBoxLayout()
+        self.sleep_minutes_label = QLabel(self.i18n.t('sleep_minutes'))
+        self.spin_sleep = QSpinBox()
+        self.spin_sleep.setRange(1, 480)
         try:
-            self._session_timer.setInterval(1000)
-            self._session_timer.timeout.connect(self._on_session_tick)
-            enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
-            # Do not auto-start timer here; it starts when playback begins
-            if self._session_timer.isActive():
-                self._session_timer.stop()
-            if hasattr(self, 'session_label'):
-                self.session_label.setVisible(bool(enabled))
+            self.spin_sleep.setValue(int(self.settings.value(KEY_SLEEP_MINUTES, 30)))
         except Exception:
-            pass
-        self._update_session_label()
-        # Initialize Dev Console helper
-        try:
-            self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
-            try:
-                self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
-            except Exception:
-                pass
-        except Exception:
-            self.dev_console = None
+            self.spin_sleep.setValue(30)
+        
+        self.btn_sleep_start = QPushButton(self.i18n.t('sleep_start'))
+        self.btn_sleep_start.clicked.connect(self.sleep_start_clicked)
+        
+        self.btn_sleep_cancel = QPushButton(self.i18n.t('sleep_cancel'))
+        self.btn_sleep_cancel.clicked.connect(self.sleep_cancel_clicked)
+        
+        controls_row.addWidget(self.sleep_minutes_label)
+        controls_row.addWidget(self.spin_sleep)
+        controls_row.addWidget(self.btn_sleep_start)
+        controls_row.addWidget(self.btn_sleep_cancel)
+        
+        # Ensure consistent heights for sleeper controls
+        for w in (self.spin_sleep, self.btn_sleep_start, self.btn_sleep_cancel):
+            w.setFixedHeight(30)
+            
+        sleep_group_layout.addLayout(controls_row)
+        
+        self._layout.addLayout(sleep_group_layout)
 
-        # Ensure DevConsole logging is active if enabled in settings
-        try:
-            if self._get_bool(KEY_DEV_CONSOLE_ENABLED, False) and self.dev_console:
-                self.dev_console.activate_logging()
-        except Exception:
-            pass
-
-        # Sleep timer runtime
-        self._sleep_timer: Optional[QTimer] = QTimer(self)
-        try:
-            self._sleep_timer.setInterval(1000)
-            self._sleep_timer.timeout.connect(self._sleep_tick)
-        except Exception:
-            pass
-        self._sleep_remaining_sec: int = 0
-        self._sleep_fadeout_sec: int = 15
-        self._sleep_saved_volume: Optional[int] = None
-
-        # Initialize audio backend
+    def _init_audio_backend(self):
+        """
+        Identifies and initializes the available audio backend.
+        Prioritizes FFmpeg (PyAudio) and falls back to VLC if FFmpeg is unavailable.
+        Also synchronizes initial volume and mute states.
+        """
         libvlc_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
         try:
             network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
         except Exception:
             network_caching = 1000
-        try:
-            # PlayerFFmpeg non accetta network_caching_ms nel costruttore
-            self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
-        except Exception:
-            self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=libvlc_path, network_caching_ms=network_caching)
-        
+            
+        # Try FFmpeg first
+        self.player = PlayerFFmpeg(on_event=self._on_player_event)
         if not self.player.is_ready():
-            # Show a clear message explaining what to do
-            self.status_changed.emit(self.i18n.t('libvlc_not_ready'))
-        self.player.set_volume(self.volume_slider.value())
-        self.player.set_mute(self.mute_button.isChecked())
-        # Aggiorna indicatore stato VLC all'avvio
-        self.update_vlc_status_label()
-        
-        # Track cache for i18n rerender
-        self._current_title = None
-        self._current_artist = None
-        self._current_duration_seconds: Optional[int] = None
-        self._current_start_epoch: Optional[float] = None
-        # Create progress timer in UI thread and keep it available
-        self._progress_timer: Optional[QTimer] = QTimer(self)
+            self.log.info("[BACKEND] FFmpeg failed or not found, using VLC fallback.")
+            self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
+
+        # Set initial audio state
         try:
-            self._progress_timer.setInterval(1000)
-            self._progress_timer.timeout.connect(self.update_now_playing_label)
-            self._progress_timer.start()
+            self.player.set_volume(self.volume_slider.value())
+            is_muted = self._get_bool(KEY_MUTE, False)
+            self.mute_button.setChecked(is_muted)
+            self.player.set_mute(is_muted)
+            self.mute_button.setText(self.i18n.t('unmute') if is_muted else self.i18n.t('mute'))
         except Exception:
             pass
-        # Stato UI di pausa per sincronizzare la tray in modo affidabile
-        self._ui_paused: bool = False
 
-        # WebSocket wrapper
+    def _init_timers_and_console(self):
+        """
+        Initializes background timers for session tracking, sleep mode, and UI refresh.
+        Also sets up the developer console for real-time logging.
+        """
+        self._session_seconds = 0
+        self._session_timer = QTimer(self)
+        self._session_timer.setInterval(1000)
+        self._session_timer.timeout.connect(self._on_session_tick)
+        
+        # Song Progress Ticker
+        self.song_tick_timer = QTimer(self)
+        self.song_tick_timer.setInterval(1000)
+        self.song_tick_timer.timeout.connect(self._on_song_tick)
+        self.song_tick_timer.start()
+        
+        # Sleep Timer
+        self._sleep_timer = QTimer(self)
+        self._sleep_timer.setInterval(1000)
+        self._sleep_timer.timeout.connect(self._sleep_tick)
+        
+        # UI Refresh Timer for "Now Playing" and Seek/Progress
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(1000)
+        self._progress_timer.timeout.connect(self.update_now_playing_label)
+        self._progress_timer.start()
+
+        # Connections for UI signals
+        try:
+            self.schedule_play.connect(self._schedule_play_stream)
+            self.notify_tray.connect(self._notify_tray)
+        except Exception:
+            pass
+
+        # Dev Console
+        try:
+            self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
+            if self._get_bool(KEY_DEV_CONSOLE_ENABLED, False):
+                self.dev_console.activate_logging()
+        except Exception:
+            self.dev_console = None
+
+    def _init_websocket(self):
+        """Configura la connessione WebSocket."""
         init_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
         self.ws = NowPlayingWS(
             on_now_playing=self._on_now_playing,
@@ -397,13 +460,12 @@ class ListenMoePlayer(QWidget):
         )
         self.ws.start()
 
-        # System Tray Icon e menu
+    def _init_tray(self):
+        """Initialize system tray manager."""
         try:
             self._tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
-            # crea tray manager e applica stato iniziale
             self.tray_mgr = TrayManager(
-                self,
-                self.i18n,
+                self, self.i18n,
                 on_show_window=self.showNormal,
                 on_open_settings=self.open_settings,
                 on_change_channel=self._tray_change_channel,
@@ -412,53 +474,36 @@ class ListenMoePlayer(QWidget):
                 on_stop_stream=self.stop_stream,
                 on_toggle_mute=self.toggle_mute_shortcut,
             )
-            # inizializza icona/tooltip coerenti
-            tooltip = None
-            try:
-                header = self.i18n.t('header').format(channel=self.settings.value(KEY_CHANNEL, 'J-POP'), format=self.settings.value(KEY_FORMAT, 'Vorbis'))
-                now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-                tooltip = f"{header}\n{now}" if now else header
-            except Exception:
-                pass
-            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
-            # Applica tema iniziale
-            try:
-                self.apply_theme()
-            except Exception:
-                pass
-            # Aggiorna i testi delle azioni della tray in base allo stato corrente (con override UI pausa)
-            try:
-                has_player = hasattr(self, 'player') and self.player is not None
-                real_playing = bool(self.player.is_playing()) if has_player else False
-                real_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
-                ui_paused = bool(getattr(self, '_ui_paused', False))
-                eff_paused = bool(ui_paused or real_paused)
-                eff_playing = bool(real_playing and not eff_paused)
-                is_muted = bool(getattr(self.player, 'get_mute', lambda: self._get_bool(KEY_MUTE, False))()) if has_player else bool(self._get_bool(KEY_MUTE, False))
-                if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                    self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
-            except Exception:
-                pass
-        except Exception:
-            pass
-        
-        # Autoplay: se abilitato, avvia la riproduzione automatica dopo 500ms
-        try:
-            if self._get_bool(KEY_AUTOPLAY, False):
-                QTimer.singleShot(500, self.play_stream)
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon())
+            self.tray_icon_refresh.connect(self.update_tray_icon)
         except Exception:
             pass
 
-        # Shortcuts Volume: Frecce Su/Giù e +/- per step del 5%
+    def _init_extra_logic(self):
+        """Final UI polish and logic hooks (Theme, Autoplay, Global Shortcuts)."""
         try:
+            self.apply_theme()
+            self.backend_status_refresh.connect(self.update_vlc_status_label)
+            
+            # Autoplay
+            if self._get_bool(KEY_AUTOPLAY, False):
+                QTimer.singleShot(1000, self.play_stream)
+                
+            # Global Keyboard Shortcuts (Class scope)
             QShortcut(QKeySequence(Qt.Key_Up), self, self._vol_up)
             QShortcut(QKeySequence(Qt.Key_Down), self, self._vol_down)
             QShortcut(QKeySequence(Qt.Key_Plus), self, self._vol_up)
             QShortcut(QKeySequence(Qt.Key_Minus), self, self._vol_down)
-            # Shortcut '=' for layouts where '+' needs Shift
             QShortcut(QKeySequence("="), self, self._vol_up)
+            
+            # Legacy/Specific Shortcuts
+            QShortcut(QKeySequence("Space"), self, self.pause_resume)
+            QShortcut(QKeySequence("S"), self, self.stop_stream)
+            QShortcut(QKeySequence("M"), self, self.toggle_mute_shortcut)
         except Exception:
             pass
+
+    # ------------------- Volume Helpers -------------------
 
     def _vol_up(self) -> None:
         """Aumenta il volume di 5%."""
@@ -478,26 +523,267 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    # ------------------- Event & Signal Handlers -------------------
+
+    # 1. Qt Window & Lifecycle Events
+    def closeEvent(self, event) -> None:
+        """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
+        try:
+            self.settings.setValue(KEY_WINDOW_GEOMETRY, self.saveGeometry())
+        except Exception:
+            pass
+
+        tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+        if not tray_enabled:
+            self._cleanup_before_close()
+            event.accept()
+            return
+
+        dont_ask = self._get_bool(KEY_DONT_ASK_ON_CLOSE, False)
+        close_to_tray = self._get_bool(KEY_CLOSE_TO_TRAY, False)
+
+        if dont_ask:
+            if close_to_tray:
+                self.hide()
+                event.ignore()
+            else:
+                self._cleanup_before_close()
+                event.accept()
+            return
+
+        try:
+            msg = QMessageBox(self)
+            msg.setWindowTitle(self.i18n.t('close_dialog_title'))
+            msg.setText(self.i18n.t('close_dialog_text'))
+            msg.setIcon(QMessageBox.Question)
+            
+            tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.AcceptRole)
+            quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.DestructiveRole)
+            
+            cb = QCheckBox(self.i18n.t('close_remember'))
+            msg.setCheckBox(cb)
+            
+            try:
+                if self._get_bool(KEY_DARK_MODE, False):
+                    hwnd = int(msg.winId())
+                    val = ctypes.c_int(1)
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+            except Exception: pass
+
+            msg.exec_()
+            remember = cb.isChecked()
+            choice_tray = (msg.clickedButton() == tray_btn)
+            
+            if remember:
+                self.settings.setValue(KEY_DONT_ASK_ON_CLOSE, True)
+                self.settings.setValue(KEY_CLOSE_TO_TRAY, choice_tray)
+            
+            if choice_tray:
+                self.hide()
+                event.ignore()
+            else:
+                self._cleanup_before_close()
+                event.accept()
+        except Exception:
+            self._cleanup_before_close()
+            event.accept()
+
+    def _cleanup_before_close(self) -> None:
+        """Operazioni di pulizia prima dell'uscita definitiva."""
+        try:
+            if hasattr(self, 'dev_console') and self.dev_console:
+                self.dev_console.deactivate_logging()
+                self.dev_console.close()
+            if hasattr(self, '_session_timer') and self._session_timer:
+                self._session_timer.stop()
+            if hasattr(self, 'player') and self.player:
+                self.player.stop()
+            if hasattr(self, 'ws') and self.ws:
+                self.ws.stop()
+        except Exception: pass
+
+    def showEvent(self, event) -> None:
+        try:
+            super().showEvent(event)
+            self._apply_windows_titlebar_dark_mode(self._get_bool(KEY_DARK_MODE, False))
+        except Exception: pass
+
+    def changeEvent(self, event) -> None:
+        try:
+            if event.type() == QEvent.WindowStateChange:
+                if self.isMinimized() and self._get_bool(KEY_TRAY_ENABLED, True) and self._get_bool(KEY_TRAY_HIDE_ON_MINIMIZE, True):
+                    self.hide()
+                    event.accept()
+                    return
+            super().changeEvent(event)
+        except Exception: pass
+
+    # 2. Player Backend & Audio Events
+    def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
+        """Gestisce gli eventi del backend (FFmpeg/VLC) aggiornando lo stato UI."""
+        try:
+            c = (str(code).lower() if code is not None else '')
+            if c == 'opening':
+                self.status_changed.emit(self.t('status_opening'))
+                self.buffering_visible.emit(True)
+                self.buffering_indeterminate.emit(True)
+                self.backend_status_refresh.emit()
+            elif c == 'buffering':
+                self.status_changed.emit(self.t('status_buffering'))
+                self.buffering_visible.emit(True)
+                if isinstance(value, int) and 0 <= value <= 100:
+                    self.buffering_indeterminate.emit(False)
+                    self.buffering_progress.emit(int(value))
+                else:
+                    self.buffering_indeterminate.emit(True)
+            elif c == 'playing':
+                self.status_changed.emit(self.t('status_playing'))
+                self.buffering_visible.emit(False)
+                self.buffering_indeterminate.emit(False)
+                if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                    if self._session_timer and not self._session_timer.isActive():
+                        self._session_timer.start()
+                self.tray_icon_refresh.emit()
+                self._update_tray_controls()
+            elif c == 'paused':
+                self.status_changed.emit(self.t('status_paused'))
+                if self._session_timer and self._session_timer.isActive():
+                    self._session_timer.stop()
+                self._ui_paused = True
+                self._update_tray_controls()
+            elif c in ('stopped', 'ended'):
+                self.status_changed.emit(self.t('status_stopped'))
+                self.buffering_visible.emit(False)
+                if c == 'ended':
+                    self._skip_session_reset_once = True
+                    self.schedule_play.emit(1000)
+                    self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
+                else:
+                    # Reset on explicit stop (unless skip flag is set)
+                    if not getattr(self, '_skip_session_reset_once', False):
+                        if self._session_timer: self._session_timer.stop()
+                        self._session_seconds = 0
+                        self.log.info("[UI] session_timer reset due to explicit stop")
+                    # Clear the skip flag after use (regardless of whether it was used)
+                    self._skip_session_reset_once = False
+                self._update_session_label()
+                self._ui_paused = False
+                self._update_tray_controls()
+                self.tray_icon_refresh.emit()
+            elif c in ('error', 'libvlc_init_failed'):
+                self.status_changed.emit(self.t('status_error'))
+                self.buffering_visible.emit(False)
+                self._skip_session_reset_once = True
+                self.schedule_play.emit(1200)
+                self.notify_tray.emit("Listen.moe", "Errore audio: tentativo di riavvio...")
+        except Exception: pass
+
+    def _schedule_play_stream(self, delay_ms: int) -> None:
+        """Slot per avviare lo stream dopo un delay (thread-safe UI call)."""
+        try: QTimer.singleShot(int(delay_ms), self.play_stream)
+        except Exception: self.play_stream()
+
+    # 3. WebSocket & Metadata Events
+    def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
+        try:
+            self._current_title = title or self.t('unknown')
+            self._current_artist = artist or ''
+            self._current_duration_seconds = int(duration) if duration is not None and int(duration) > 0 else None
+            self._current_start_epoch = float(start_ts) if start_ts is not None else None
+            
+            # --- Update Song Progress Bar ---
+            if hasattr(self, 'song_progress'):
+                if self._current_duration_seconds and self._current_duration_seconds > 0:
+                    self.song_progress.setMaximum(self._current_duration_seconds)
+                    self.song_progress.setValue(0)
+                    self.song_progress.show()
+                else:
+                    self.song_progress.hide()
+            
+            self.label_refresh.emit()
+            if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                msg_title = self.i18n.t('now_playing_prefix')
+                body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
+                self.notify_tray.emit(msg_title, body)
+            self.backend_status_refresh.emit()
+        except Exception: pass
+
+    def _on_ws_error_text(self, text: str) -> None:
+        try: self.status_changed.emit(str(text))
+        except Exception: pass
+
+    def _on_ws_closed_text(self, text: str) -> None:
+        try: self.status_changed.emit(str(text))
+        except Exception: pass
+
+    # 4. Timer & Tray Action Events
+    def _on_session_tick(self) -> None:
+        try:
+            self._session_seconds += 1
+            self._update_session_label()
+            self.update_tray_texts()
+        except Exception: pass
+
+    def _update_session_label(self) -> None:
+        try:
+            t = self._format_hhmmss(self._session_seconds)
+            if hasattr(self, 'session_label'):
+                self.session_label.setText(self.i18n.t('session_timer', time=t))
+        except Exception: pass
+
+    def _on_song_tick(self) -> None:
+        """Updates the song progress bar every second based on start timestamp."""
+        try:
+            if not hasattr(self, 'song_progress') or not self.song_progress.isVisible():
+                return
+            if not self._current_start_epoch or not self._current_duration_seconds:
+                return
+            
+            import time
+            elapsed = int(time.time() - self._current_start_epoch)
+            if 0 <= elapsed <= self._current_duration_seconds:
+                self.song_progress.setValue(elapsed)
+        except Exception:
+            pass
+
+    def _sleep_tick(self) -> None:
+        try:
+            if self._sleep_remaining_sec <= 0:
+                if self._sleep_timer: self._sleep_timer.stop()
+                if hasattr(self, 'sleep_label'): self.sleep_label.setText("")
+                if self._get_bool(KEY_SLEEP_STOP_ON_END, True): self.stop_stream()
+                return
+            self._sleep_remaining_sec -= 1
+            if self._sleep_saved_volume is not None and self._sleep_remaining_sec <= self._sleep_fadeout_sec:
+                new_vol = max(0, int(self._sleep_saved_volume * self._sleep_remaining_sec / max(1, self._sleep_fadeout_sec)))
+                if hasattr(self, 'volume_slider'): self.volume_slider.setValue(new_vol)
+            if hasattr(self, 'sleep_label'):
+                self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+        except Exception: pass
+
     def _tray_toggle_play_pause(self) -> None:
+        """Handler for tray icon play/pause command."""
         try:
             has_player = hasattr(self, 'player') and self.player is not None
-            is_playing = False
-            is_paused = False
-            if has_player:
-                try:
-                    is_playing = bool(self.player.is_playing())
-                except Exception:
-                    is_playing = False
-                try:
-                    is_paused = bool(getattr(self.player, 'is_paused', lambda: False)())
-                except Exception:
-                    is_paused = False
+            is_playing = bool(self.player.is_playing()) if has_player else False
+            is_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
+            
             if has_player and (is_playing or is_paused):
                 self.pause_resume()
             else:
                 self.play_stream()
         except Exception:
             pass
+
+    def _update_tray_controls(self) -> None:
+        """Utility per aggiornare i controlli della tray in base allo stato del player."""
+        try:
+            if hasattr(self, 'tray_mgr') and self.tray_mgr:
+                is_playing = bool(self.player.is_playing())
+                is_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) or self._ui_paused
+                is_muted = bool(self.player.get_mute()) if hasattr(self.player, 'get_mute') else False
+                self.tray_mgr.update_controls_state(is_playing and not is_paused, is_paused, is_muted)
+        except Exception: pass
 
     def apply_translations(self):
         # Mantieni o aggiorna titolo finestra in base al Now Playing
@@ -543,6 +829,8 @@ class ListenMoePlayer(QWidget):
             pass
         self._update_session_label()
         self.update_tray_texts()
+        if hasattr(self, 'autoplay_checkbox'):
+            self.autoplay_checkbox.setText(self.i18n.t('settings_autoplay'))
         # Update dev console dialog texts if open
         try:
             if hasattr(self, 'dev_console') and self.dev_console and self.dev_console.is_open():
@@ -557,25 +845,29 @@ class ListenMoePlayer(QWidget):
     def apply_theme(self) -> None:
         try:
             dark = self._get_bool(KEY_DARK_MODE, False)
+            accent = getattr(self, 'COLOR_ACCENT', '#c2185b')
             app = QApplication.instance()
             if not app:
                 return
             if dark:
                 app.setStyleSheet(
-                    """
-                    QWidget { background-color: #121212; color: #e0e0e0; }
-                    QLabel#headerLabel { font-size: 16px; font-weight: 600; color: #ffffff; }
-                    QLabel#nowPlayingLabel { font-size: 14px; font-weight: 500; color: #e0e0e0; }
-                    QPushButton { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }
-                    QPushButton:hover { background-color: #2a2a2a; }
-                    QPushButton:disabled { background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }
-                    QLineEdit, QSpinBox, QComboBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }
-                    QMenu { background-color: #121212; color: #e0e0e0; border: 1px solid #333; }
-                    QToolTip { background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }
-                    QProgressBar { background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; border-radius: 4px; text-align: center; }
-                    QProgressBar::chunk { background-color: #3a86ff; border-radius: 4px; }
-                    QSlider::groove:horizontal { height: 6px; background: #333; border-radius: 3px; }
-                    QSlider::handle:horizontal { background: #e0e0e0; width: 12px; margin: -4px 0; border-radius: 6px; }
+                    f"""
+                    QWidget {{ background-color: #121212; color: #e0e0e0; }}
+                    QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
+                    QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
+                    QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
+                    QPushButton:hover {{ background-color: #2a2a2a; }}
+                    QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 0; padding: 4px 6px; color: #e0e0e0; font-size: 13px; }}
+                    QPushButton#menuButton:hover {{ background-color: {accent}; color: #ffffff; }}
+                    QPushButton:disabled {{ background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }}
+                    QLineEdit, QSpinBox, QComboBox {{ background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }}
+                    QMenu {{ background-color: #121212; color: #e0e0e0; border: 1px solid #333; }}
+                    QToolTip {{ background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }}
+                    QProgressBar {{ background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; border-radius: 4px; text-align: center; }}
+                    QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}
+                    QProgressBar#songProgressBar {{ background-color: #222; border: none; height: 4px; border-radius: 2px; }}
+                    QSlider::groove:horizontal {{ height: 6px; background: #333; border-radius: 3px; }}
+                    QSlider::handle:horizontal {{ background: {accent}; width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; }}
                     """
                 )
             else:
@@ -601,7 +893,6 @@ class ListenMoePlayer(QWidget):
             hwnd = int(self.winId()) if hasattr(self, 'winId') else None
             if not hwnd:
                 return
-            import ctypes
             value = ctypes.c_int(1 if enable else 0)
             # Windows 10 1903+ (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
             try:
@@ -689,27 +980,9 @@ class ListenMoePlayer(QWidget):
                         new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
                         if new_audio_idx != getattr(self, '_apply_prev_audio_idx', ''):
                             if was_playing:
-                                try:
-                                    self._skip_session_reset_once = True
-                                except Exception:
-                                    pass
-                                try:
-                                    self.stop_stream(reset_session=False)
-                                except Exception:
-                                    pass
-                                try:
-                                    time.sleep(0.2)
-                                except Exception:
-                                    pass
-                                try:
-                                    self.play_stream()
-                                except Exception:
-                                    pass
-                                try:
-                                    if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
-                                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
-                                except Exception:
-                                    pass
+                                self._restart_playback_with_session_persistence(
+                                    notification_body="Audio riavviato: il timer di sessione continua"
+                                )
                             self._apply_prev_audio_idx = new_audio_idx
                     except Exception:
                         pass
@@ -767,27 +1040,9 @@ class ListenMoePlayer(QWidget):
                     new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
                     if new_audio_idx != prev_audio_idx:
                         if was_playing:
-                            try:
-                                self._skip_session_reset_once = True
-                            except Exception:
-                                pass
-                            try:
-                                self.stop_stream(reset_session=False)
-                            except Exception:
-                                pass
-                            try:
-                                time.sleep(0.2)
-                            except Exception:
-                                pass
-                            try:
-                                self.play_stream()
-                            except Exception:
-                                pass
-                            try:
-                                if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
-                                    self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
-                            except Exception:
-                                pass
+                            self._restart_playback_with_session_persistence(
+                                notification_body="Audio riavviato: il timer di sessione continua"
+                            )
                 except Exception:
                     pass
                 # Percorso VLC
@@ -814,6 +1069,8 @@ class ListenMoePlayer(QWidget):
                         pass
                     try:
                         self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
+                        if not self.player.is_ready():
+                            self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
                     except Exception:
                         self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
                     self.player.set_volume(self.volume_slider.value())
@@ -971,44 +1228,6 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def _sleep_tick(self) -> None:
-        try:
-            if self._sleep_remaining_sec <= 0:
-                # Finalize
-                if self._sleep_timer and self._sleep_timer.isActive():
-                    self._sleep_timer.stop()
-                if hasattr(self, 'sleep_label'):
-                    self.sleep_label.setText("")
-                self._sleep_saved_volume = None
-                try:
-                    # Stop opzionale a fine Sleep Timer
-                    should_stop = self._get_bool(KEY_SLEEP_STOP_ON_END, True)
-                    if should_stop:
-                        try:
-                            self.log.info("[SLEEP] time up -> stopping stream")
-                        except Exception:
-                            pass
-                        self.stop_stream()
-                except Exception:
-                    pass
-                return
-            # Decrement
-            self._sleep_remaining_sec -= 1
-            # Fade-out near the end
-            if self._sleep_saved_volume is not None and self._sleep_remaining_sec <= self._sleep_fadeout_sec:
-                try:
-                    new_vol = max(0, int(self._sleep_saved_volume * self._sleep_remaining_sec / max(1, self._sleep_fadeout_sec)))
-                    if hasattr(self, 'volume_slider'):
-                        self.volume_slider.setValue(new_vol)
-                except Exception:
-                    pass
-            if hasattr(self, 'sleep_label'):
-                try:
-                    self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
-                except Exception:
-                    pass
-        except Exception:
-            pass
 
     def _get_ws_url_for_channel(self, channel: str):
         """Restituisce l'URL del gateway WebSocket corretto in base al canale."""
@@ -1104,30 +1323,12 @@ class ListenMoePlayer(QWidget):
         except Exception:
             return "0:00"
 
-    def _update_session_label(self) -> None:
-        try:
-            t = self._format_hhmmss(getattr(self, '_session_seconds', 0))
-            if hasattr(self, 'i18n') and hasattr(self, 'session_label'):
-                self.session_label.setText(self.i18n.t('session_timer', time=t))
-        except Exception:
-            pass
-
-    def _on_session_tick(self) -> None:
-        try:
-            self._session_seconds = getattr(self, '_session_seconds', 0) + 1
-            self._update_session_label()
-            try:
-                self.update_tray_texts()
-            except Exception:
-                pass
-        except Exception:
-            pass
 
     def update_now_playing_label(self):
         title = self._current_title or self.t('unknown')
         artist = self._current_artist or ''
         prefix = self.t('now_playing_prefix')
-        text = f"{prefix} {title}" + (f" — {artist}" if artist and title != '–' else "")
+        text = f"{prefix} <b>{title}</b>" + (f" — {artist}" if artist and title != '–' else "")
         # Append remaining or total duration
         try:
             if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
@@ -1165,290 +1366,66 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
-        """Gestisce gli eventi del backend (FFmpeg/VLC) aggiornando lo stato UI."""
+    def _restart_playback_with_session_persistence(self, notification_body: Optional[str] = None) -> None:
+        """Helper to restart playback while preserving session timer and showing an optional notification."""
         try:
-            c = (str(code).lower() if code is not None else '')
+            self._skip_session_reset_once = True
+            self.stop_stream(reset_session=False)
+            # Small delay to ensure backend has released resources
+            QTimer.singleShot(200, self.play_stream)
+            
+            if notification_body and self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
+                self.notify_tray.emit("Listen.moe", notification_body)
         except Exception:
-            c = ''
-        try:
-            if c == 'opening':
-                # Mostra buffering indeterminato in fase di apertura
-                try:
-                    self.status_changed.emit(self.t('status_opening'))
-                except Exception:
-                    pass
-                try:
-                    self.buffering_visible.emit(True)
-                    self.buffering_indeterminate.emit(True)
-                except Exception:
-                    pass
-                try:
-                    self.backend_status_refresh.emit()
-                except Exception:
-                    pass
-                return
+            # Fallback if async timer fails
+            try: self.play_stream()
+            except Exception: pass
 
-            if c == 'buffering':
-                # Mostra buffering (determinato se percentuale disponibile)
-                try:
-                    self.status_changed.emit(self.t('status_buffering'))
-                except Exception:
-                    pass
-                try:
-                    self.buffering_visible.emit(True)
-                    if isinstance(value, int) and 0 <= value <= 100:
-                        self.buffering_indeterminate.emit(False)
-                        self.buffering_progress.emit(int(value))
-                    else:
-                        self.buffering_indeterminate.emit(True)
-                except Exception:
-                    pass
-                return
-
-            if c == 'playing':
-                try:
-                    self.status_changed.emit(self.t('status_playing'))
-                except Exception:
-                    pass
-                try:
-                    self.buffering_visible.emit(False)
-                    self.buffering_indeterminate.emit(False)
-                except Exception:
-                    pass
-                # Ensure session timer is running when playback starts
-                try:
-                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if self._session_timer and not self._session_timer.isActive():
-                            self._session_timer.start()
-                        if hasattr(self, 'session_label'):
-                            self.session_label.show()
-                        self._update_session_label()
-                        self.update_tray_texts()
-                except Exception:
-                    pass
-                try:
-                    self.tray_icon_refresh.emit()
-                except Exception:
-                    pass
-                # Aggiorna lo stato dei controlli tray (rispetta override pausa UI)
-                try:
-                    has_player = hasattr(self, 'player') and self.player is not None
-                    real_playing = bool(self.player.is_playing()) if has_player else False
-                    real_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
-                    ui_paused = bool(getattr(self, '_ui_paused', False))
-                    eff_paused = bool(ui_paused or real_paused)
-                    eff_playing = bool(real_playing and not eff_paused)
-                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
-                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                        self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
-                except Exception:
-                    pass
-                return
-
-            if c == 'paused':
-                try:
-                    self.status_changed.emit(self.t('status_paused'))
-                except Exception:
-                    pass
-                # Stop timer on pause (without reset)
-                try:
-                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if self._session_timer and self._session_timer.isActive():
-                            self._session_timer.stop()
-                        if hasattr(self, 'session_label'):
-                            self.session_label.show()
-                        self._update_session_label()
-                        self.update_tray_texts()
-                except Exception:
-                    pass
-                # Aggiorna lo stato dei controlli tray
-                try:
-                    self._ui_paused = True
-                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
-                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                        self.tray_mgr.update_controls_state(False, True, is_muted)
-                except Exception:
-                    pass
-                return
-
-            if c in ('stopped', 'ended'):
-                # Se il flusso è terminato naturalmente, prepara un riavvio interno preservando il timer
-                if c == 'ended':
-                    try:
-                        self._skip_session_reset_once = True
-                    except Exception:
-                        pass
-                try:
-                    self.status_changed.emit(self.t('status_stopped'))
-                except Exception:
-                    pass
-                try:
-                    self.buffering_visible.emit(False)
-                    self.buffering_indeterminate.emit(False)
-                except Exception:
-                    pass
-                # Stop e reset del timer di sessione (salvo riavvii interni)
-                try:
-                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if bool(getattr(self, '_skip_session_reset_once', False)):
-                            # Riavvio interno: preserva il timer e non azzerare i secondi
-                            try:
-                                self._skip_session_reset_once = False
-                            except Exception:
-                                pass
-                            if hasattr(self, 'session_label'):
-                                self.session_label.show()
-                            self._update_session_label()
-                            self.update_tray_texts()
-                        else:
-                            if self._session_timer and self._session_timer.isActive():
-                                self._session_timer.stop()
-                            self._session_seconds = 0
-                            if hasattr(self, 'session_label'):
-                                self.session_label.show()
-                            self._update_session_label()
-                            self.update_tray_texts()
-                except Exception:
-                    pass
-                try:
-                    self.tray_icon_refresh.emit()
-                except Exception:
-                    pass
-                # Aggiorna lo stato dei controlli tray
-                try:
-                    self._ui_paused = False
-                    is_muted = bool(getattr(self.player, 'get_mute', lambda: False)())
-                    if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                        self.tray_mgr.update_controls_state(False, False, is_muted)
-                except Exception:
-                    pass
-                # Auto-riconnessione solo su 'ended' (non su 'stopped')
-                try:
-                    if c == 'ended':
-                        self.schedule_play.emit(1000)
-                except Exception:
-                    pass
-                # Notifica tray del riavvio automatico (timer di sessione preservato)
-                try:
-                    if c == 'ended':
-                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
-                except Exception:
-                    pass
-                return
-
-            if c in ('error', 'libvlc_init_failed'):
-                try:
-                    self.status_changed.emit(self.t('status_error'))
-                except Exception:
-                    pass
-                try:
-                    self.buffering_visible.emit(False)
-                    self.buffering_indeterminate.emit(False)
-                except Exception:
-                    pass
-                try:
-                    self.backend_status_refresh.emit()
-                except Exception:
-                    pass
-                # Auto-riconnessione in caso di errore (evita reset sessione)
-                try:
-                    self._skip_session_reset_once = True
-                except Exception:
-                    pass
-                try:
-                    self.schedule_play.emit(1200)
-                except Exception:
-                    pass
-                # Notifica tray del riavvio automatico dopo errore (timer di sessione preservato)
-                try:
-                    self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
-                except Exception:
-                    pass
-                return
-        except Exception:
-            try:
-                self.status_changed.emit(self.t('status_error'))
-            except Exception:
-                pass
-
-    def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
-        try:
-            self.log.info(f"[WS] now_playing: title={title!r}, artist={artist!r}, duration={duration}, start_ts={start_ts}")
-        except Exception:
-            pass
-        self._current_title = title or self.t('unknown')
-        self._current_artist = artist or ''
-        try:
-            self._current_duration_seconds = int(duration) if duration is not None else None
-            if self._current_duration_seconds is not None and self._current_duration_seconds <= 0:
-                self._current_duration_seconds = None
-        except Exception:
-            self._current_duration_seconds = None
-        # store start time
-        try:
-            self._current_start_epoch = float(start_ts) if start_ts is not None else None
-        except Exception:
-            self._current_start_epoch = None
-        # Ask UI to update label safely
-        try:
-            self.label_refresh.emit()
-        except Exception:
-            pass
-        # Tray notification unchanged (static) but invoked on UI thread via signal
-        try:
-            notify_enabled = (self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True))
-            if notify_enabled:
-                msg_title = self.i18n.t('now_playing_prefix')
-                body = f"{self._current_title}" + (f" — {self._current_artist}" if self._current_artist else "")
-                try:
-                    mmss, _ = compute_display_mmss(self._current_duration_seconds, self._current_start_epoch)
-                    if mmss and mmss != "--:--":
-                        body += f" [{mmss}]"
-                except Exception:
-                    pass
-                self.notify_tray.emit(msg_title, body)
-        except Exception:
-            pass
-        # Update backend status indicator opportunistically
-        try:
-            self.backend_status_refresh.emit()
-        except Exception:
-            pass
-
-    # ------------------- WebSocket text handlers -------------------
-    def _on_ws_error_text(self, text: str) -> None:
-        try:
-            self.status_changed.emit(str(text))
-        except Exception:
-            pass
-
-    def _on_ws_closed_text(self, text: str) -> None:
-        try:
-            self.status_changed.emit(str(text))
-        except Exception:
-            pass
 
     # ------------------- Tray helpers (static) -------------------
     def update_tray_texts(self) -> None:
         try:
             if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
                 return
-            header = self.label.text() if hasattr(self, 'label') else APP_TITLE
-            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
-            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
-            if now and session:
-                tooltip = f"{header}\n{now}\n{session}"
-            elif now:
-                tooltip = f"{header}\n{now}"
-            elif session:
-                tooltip = f"{header}\n{session}"
-            else:
-                tooltip = header
-            self.tray_mgr.update_tooltip(tooltip)
+            self.tray_mgr.update_tooltip(self._get_tray_tooltip())
         except Exception:
             pass
+
+    def _get_tray_tooltip(self) -> str:
+        """Centralized logic to compose the tray tooltip from current state."""
+        try:
+            # Header
+            try:
+                header = self.i18n.t('header').format(
+                    channel=self.settings.value(KEY_CHANNEL, 'J-POP'),
+                    format=self.settings.value(KEY_FORMAT, 'Vorbis')
+                )
+            except Exception:
+                if hasattr(self, 'label'):
+                    header = self.label.text()
+                else:
+                    header = APP_TITLE
+
+            # Now Playing
+            now = ""
+            if hasattr(self, 'now_playing_label'):
+                text = self.now_playing_label.text()
+                # Remove HTML tags for tooltip if present (simplified check)
+                now = re.sub(r'<[^>]+>', '', text)
+
+            # Session
+            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+            session = ""
+            if session_enabled and hasattr(self, 'session_label'):
+                session = self.session_label.text()
+
+            # Join parts
+            parts = [header]
+            if now: parts.append(now)
+            if session: parts.append(session)
+            return "\n".join(parts)
+        except Exception:
+            return APP_TITLE
 
     def _notify_tray(self, title: str, body: str) -> None:
         try:
@@ -1488,28 +1465,9 @@ class ListenMoePlayer(QWidget):
                     )
                 except Exception:
                     return
-            # Compose tooltip from current UI state
-            try:
-                header = self.i18n.t('header').format(
-                    channel=self.settings.value(KEY_CHANNEL, 'J-POP'),
-                    format=self.settings.value(KEY_FORMAT, 'Vorbis')
-                )
-            except Exception:
-                header = APP_TITLE
-            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
-            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
-            if now and session:
-                tooltip = f"{header}\n{now}\n{session}"
-            elif now:
-                tooltip = f"{header}\n{now}"
-            elif session:
-                tooltip = f"{header}\n{session}"
-            else:
-                tooltip = header
             # Apply visibility/icon/tooltip
             try:
-                self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+                self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=self._get_tray_tooltip())
             except Exception:
                 pass
             # Aggiorna stato dei controlli in base allo stato corrente (con override UI pausa)
@@ -1533,22 +1491,7 @@ class ListenMoePlayer(QWidget):
             if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
                 return
             # Update tray visibility/icon/tooltip based on current state
-            try:
-                header = self.label.text() if hasattr(self, 'label') else APP_TITLE
-            except Exception:
-                header = APP_TITLE
-            now = self.now_playing_label.text() if hasattr(self, 'now_playing_label') else ''
-            session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
-            session = self.session_label.text() if session_enabled and hasattr(self, 'session_label') else ''
-            if now and session:
-                tooltip = f"{header}\n{now}\n{session}"
-            elif now:
-                tooltip = f"{header}\n{now}"
-            elif session:
-                tooltip = f"{header}\n{session}"
-            else:
-                tooltip = header
-            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=tooltip)
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=self._get_tray_tooltip())
         except Exception:
             pass
 
@@ -1607,25 +1550,9 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 was_playing = False
             if was_playing:
-                try:
-                    self._skip_session_reset_once = True
-                except Exception:
-                    pass
-                try:
-                    self.stop_stream(reset_session=False)
-                except Exception:
-                    pass
-                # Piccolo delay per lasciare tempo al backend di fermarsi
-                try:
-                    self.schedule_play.emit(200)
-                except Exception:
-                    # Fallback sincrono
-                    self.play_stream()
-                try:
-                    if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(KEY_TRAY_ENABLED, True):
-                        self.notify_tray.emit("Listen.moe", "Audio riavviato: il timer di sessione continua")
-                except Exception:
-                    pass
+                self._restart_playback_with_session_persistence(
+                    notification_body="Audio riavviato: il timer di sessione continua"
+                )
             else:
                 # Se non stava riproducendo, aggiorna comunque icona/tooltip
                 try:
@@ -1636,15 +1563,6 @@ class ListenMoePlayer(QWidget):
             pass
 
     # ------------------- Backend status -------------------
-    def _schedule_play_stream(self, delay_ms: int) -> None:
-        """UI-thread slot to (re)start the stream after a delay."""
-        try:
-            QTimer.singleShot(int(delay_ms), self.play_stream)
-        except Exception:
-            try:
-                self.play_stream()
-            except Exception:
-                pass
 
     def update_vlc_status_label(self) -> None:
         try:
@@ -1703,6 +1621,12 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     safe_url = url
                 self.status_changed.emit(self.t('status_opening') if hasattr(self, 't') else 'Opening...')
+                # Preserva il timer se stiamo già riproducendo (es. cambio URL o click Riproduci mentre attivo)
+                try:
+                    if self.player.is_playing() or getattr(self.player, 'is_paused', lambda: False)():
+                        self._skip_session_reset_once = True
+                except Exception:
+                    pass
                 ok = self.player.play_url(safe_url)
                 if not ok:
                     # Fallback: prova formato alternativo per lo stesso canale
@@ -1777,10 +1701,14 @@ class ListenMoePlayer(QWidget):
                 # Gestisci il session timer e aggiorna solo il tooltip
                 try:
                     if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if self._session_timer and self._session_timer.isActive():
-                            self._session_timer.stop()
+                        if new_paused:
+                            if self._session_timer and self._session_timer.isActive():
+                                self._session_timer.stop()
+                        else:
+                            if self._session_timer and not self._session_timer.isActive():
+                                self._session_timer.start()
                         if hasattr(self, 'session_label'):
-                            self.session_label.show()  # keep visible, showing frozen time
+                            self.session_label.show()  # keep visible
                         self._update_session_label()
                         self.update_tray_texts()  # aggiorna tooltip
                 except Exception:
@@ -1866,7 +1794,7 @@ class ListenMoePlayer(QWidget):
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
-    def volume_changed(self, value: int) -> None:
+    def change_volume(self, value: int) -> None:
         try:
             self.player.set_volume(int(value))
             self.settings.setValue(KEY_VOLUME, int(value))
@@ -1885,7 +1813,7 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def mute_toggled(self, checked: bool) -> None:
+    def toggle_mute(self, checked: bool) -> None:
         try:
             self.settings.setValue(KEY_MUTE, 'true' if checked else 'false')
         except Exception:
@@ -1978,6 +1906,13 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _on_autoplay_toggled(self, checked: bool) -> None:
+        try:
+            self.settings.setValue(KEY_AUTOPLAY, 'true' if checked else 'false')
+            self.log.info(f"[UI] autoplay toggled -> {checked}")
+        except Exception:
+            pass
+
     def force_stop_all(self) -> None:
         try:
             self.log.info("[UI] FORCE STOP clicked")
@@ -2001,140 +1936,4 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def closeEvent(self, event) -> None:
-        """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
-        # Salva la geometria della finestra prima di ogni altra cosa
-        try:
-            self.settings.setValue(KEY_WINDOW_GEOMETRY, self.saveGeometry())
-        except Exception:
-            pass
-
-        # Se la tray non è abilitata, chiudi normalmente
-        tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
-        if not tray_enabled:
-            self._cleanup_before_close()
-            event.accept()
-            return
-
-        # Controlla se l'utente ha chiesto di non chiedere più
-        dont_ask = self._get_bool(KEY_DONT_ASK_ON_CLOSE, False)
-        close_to_tray = self._get_bool(KEY_CLOSE_TO_TRAY, False)
-
-        if dont_ask:
-            if close_to_tray:
-                self.hide()
-                event.ignore()
-            else:
-                self._cleanup_before_close()
-                event.accept()
-            return
-
-        # Mostra il dialogo di scelta
-        try:
-            from PyQt5.QtWidgets import QDialogButtonBox, QVBoxLayout, QLabel, QCheckBox, QMessageBox, QPushButton
-            
-            msg = QMessageBox(self)
-            msg.setWindowTitle(self.i18n.t('close_dialog_title'))
-            msg.setText(self.i18n.t('close_dialog_text'))
-            msg.setIcon(QMessageBox.Question)
-            
-            tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.AcceptRole)
-            quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.DestructiveRole)
-            
-            # Checkbox per ricordare la scelta
-            cb = QCheckBox(self.i18n.t('close_remember'))
-            msg.setCheckBox(cb)
-            
-            # Applica tema scuro se necessario (per coerenza con UI)
-            try:
-                if self._get_bool(KEY_DARK_MODE, False):
-                    # MessageBox di Qt su Windows non segue sempre il tema scuro, proviamo l'hook dwmapi
-                    import ctypes
-                    hwnd = int(msg.winId())
-                    val = ctypes.c_int(1)
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
-            except Exception:
-                pass
-
-            msg.exec_()
-            
-            remember = cb.isChecked()
-            choice_tray = (msg.clickedButton() == tray_btn)
-            
-            if remember:
-                self.settings.setValue(KEY_DONT_ASK_ON_CLOSE, True)
-                self.settings.setValue(KEY_CLOSE_TO_TRAY, choice_tray)
-            
-            if choice_tray:
-                self.hide()
-                event.ignore()
-            else:
-                self._cleanup_before_close()
-                event.accept()
-                
-        except Exception:
-            # Fallback in caso di errori: chiudi normalmente
-            self._cleanup_before_close()
-            event.accept()
-
-    def _cleanup_before_close(self) -> None:
-        """Operazioni di pulizia prima dell'uscita definitiva."""
-        try:
-            if hasattr(self, 'dev_console') and self.dev_console:
-                try:
-                    self.dev_console.deactivate_logging()
-                except Exception:
-                    pass
-                self.dev_console.close()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, '_session_timer') and self._session_timer:
-                self._session_timer.stop()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'player') and self.player:
-                self.player.stop()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'ws') and self.ws:
-                self.ws.stop()
-        except Exception:
-            pass
-
-    def showEvent(self, event) -> None:
-        try:
-            super().showEvent(event)
-        except Exception:
-            pass
-        try:
-            dark = self._get_bool(KEY_DARK_MODE, False)
-            self._apply_windows_titlebar_dark_mode(dark)
-        except Exception:
-            pass
-
-    def changeEvent(self, event) -> None:
-        try:
-            if event.type() == QEvent.WindowStateChange:
-                if self.isMinimized() and self._get_bool(KEY_TRAY_ENABLED, True) and self._get_bool(KEY_TRAY_HIDE_ON_MINIMIZE, True):
-                    try:
-                        self.hide()
-                    except Exception:
-                        pass
-                    try:
-                        event.accept()
-                    except Exception:
-                        pass
-                    return
-        except Exception:
-            pass
-        try:
-            super().changeEvent(event)
-        except Exception:
-            pass
 
