@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, List
 import os
 import threading
 import time
@@ -748,99 +748,6 @@ class PlayerFFmpeg:
                 try:
                     if 'forced_error_ref' in locals() and forced_error_ref.get('v'):
                         forced_error = True
-                except Exception:
-                    pass
-
-                        
-                    if proc.stdout is None:
-                        self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
-                        forced_error = True
-                        break
-
-                    try:
-                        chunk = proc.stdout.read(chunk_size)
-                    except Exception as e:
-                        self.log.debug("[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e)
-                        forced_error = True
-                        break
-
-                    if not chunk:
-                        empty_reads += 1
-                        # If ffmpeg is still running, wait a bit and retry instead of breaking immediately
-                        if proc.poll() is None:
-                            if empty_reads % 20 == 0:
-                                self.log.debug("[DEBUG] _stream_worker: empty chunk (x%d), waiting for data...", empty_reads)
-                            time.sleep(0.05)
-                            continue
-                        else:
-                            self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk after process ended")
-                            break
-
-                    # got data
-                    empty_reads = 0
-                    last_data_ts = time.time()
-                    if not started_streaming:
-                        started_streaming = True
-                        self._emit('playing', None)
-
-                    n_bytes = (len(chunk) // 2) * 2
-                    if n_bytes == 0:
-                        time.sleep(0.01)
-                        continue
-                    data = chunk[:n_bytes]
-
-                    # Avoid writing to PyAudio when paused/stream inactive to prevent [Errno -9988] spam
-                    stream_active = False
-                    if self._audio_stream is not None:
-                        try:
-                            stream_active = getattr(self._audio_stream, "is_active", lambda: False)()
-                        except Exception:
-                            stream_active = False
-
-                    if not self._muted:
-                        try:
-                            samples = struct.unpack(f'<{n_bytes // 2}h', data)
-                            volume_samples = [int(sample * self._volume) for sample in samples]
-                            volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
-                            volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
-                            if self._audio_stream is not None and stream_active:
-                                self._audio_stream.write(volume_chunk)
-                            else:
-                                # Paused or no audio stream: skip writing to avoid errors
-                                time.sleep(0.02)
-                                continue
-                        except Exception as e:
-                            # Log errors only if stream is active; otherwise likely paused/closed
-                            if stream_active:
-                                self.log.debug("[DEBUG] _stream_worker: error in audio processing: %s", e)
-                                try:
-                                    if self._audio_stream is not None and stream_active:
-                                        self._audio_stream.write(b'\x00' * n_bytes)
-                                except Exception as e2:
-                                    self.log.debug("[DEBUG] _stream_worker: error writing silence: %s", e2)
-                            else:
-                                time.sleep(0.02)
-                                continue
-                    else:
-                        try:
-                            if self._audio_stream is not None and stream_active:
-                                self._audio_stream.write(b'\x00' * n_bytes)
-                            else:
-                                # Paused or no audio stream: skip writing to avoid errors
-                                time.sleep(0.02)
-                                continue
-                        except Exception as e:
-                            if stream_active:
-                                self.log.debug("[DEBUG] _stream_worker: error writing silence (muted): %s", e)
-                            else:
-                                # Suppress spam when paused/closed
-                                pass
-
-                # prova a spegnere il watchdog
-                try:
-                    watchdog_stop.set()
-                    if 'watchdog_thread' in locals() and watchdog_thread.is_alive():
-                        watchdog_thread.join(timeout=1.0)
                 except Exception:
                     pass
 

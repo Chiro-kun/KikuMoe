@@ -337,10 +337,7 @@ class TrayManager(QObject):
                     effective_playing = bool(is_playing and not effective_paused)
                     txt = 'Pause' if effective_playing else 'Play'
                 self._act_play_pause.setText(txt)
-                try:
-                    print(f"[TRAY] update_controls_state: playing={is_playing}, paused={is_paused}, ui_paused={ui_paused} -> effective_playing={effective_playing}, effective_paused={effective_paused} -> set Play/Pause text='{txt}'")
-                except Exception:
-                    pass
+
         except Exception:
             pass
         try:
@@ -350,10 +347,7 @@ class TrayManager(QObject):
                 except Exception:
                     txtm = 'Unmute' if is_muted else 'Mute'
                 self._act_mute.setText(txtm)
-                try:
-                    print(f"[TRAY] update_controls_state: muted={is_muted} -> set Mute text='{txtm}'")
-                except Exception:
-                    pass
+
         except Exception:
             pass
 
