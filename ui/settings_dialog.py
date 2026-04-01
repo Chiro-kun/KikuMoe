@@ -1,9 +1,13 @@
+import os
+import sys
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox,
     QPushButton, QLineEdit, QFileDialog, QSpinBox
 )
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal
 from core.i18n import I18n
+
+_IS_WIN32 = sys.platform == "win32"
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 from core.constants import (
     ORG_NAME,
@@ -239,7 +243,9 @@ class SettingsDialog(QDialog):
         self.setLayout(layout)
 
     def _browse_vlc_path(self):
-        start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None) or 'C:/'
+        start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
+        if not start_dir:
+            start_dir = 'C:/' if _IS_WIN32 else os.path.expanduser('~')
         chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
         if chosen:
             self.txt_vlc_path.setText(chosen)

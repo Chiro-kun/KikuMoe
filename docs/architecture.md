@@ -9,7 +9,7 @@
 | Audio | FFmpeg (subprocess) + PyAudio, or python-vlc |
 | Metadata | WebSocket (`websocket-client`) → `wss://listen.moe/gateway_v2` |
 | Settings persistence | `QSettings` (Windows registry, INI file on other OS) |
-| Build / packaging | PyInstaller (onefile) |
+| Build / packaging | PyInstaller (onefile) — Windows and Linux |
 
 ---
 
@@ -20,7 +20,8 @@ KikuMoe/                     # Repository root
 ├── KikuMoe.py               # Application entry point
 ├── requirements.txt         # Runtime Python dependencies
 ├── build.ps1                # Windows build script (PowerShell)
-├── kikumoe.spec             # PyInstaller configuration
+├── build.sh                 # Linux build script (Bash)
+├── kikumoe.spec             # PyInstaller configuration (cross-platform)
 ├── pyi_rthook_vlc.py        # VLC runtime hook for PyInstaller
 ├── FFMPEG.bat               # FFmpeg installer script for Windows
 ├── version.yml              # Current application version

@@ -4,10 +4,16 @@ import traceback
 from PyQt5.QtWidgets import QApplication
 from ui.main_window import ListenMoePlayer
 
+_IS_WIN32 = sys.platform == "win32"
+
 
 def _write_crash_log(exc: BaseException) -> str:
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
-    base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
+    if _IS_WIN32:
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
+    else:
+        xdg_data = os.environ.get("XDG_DATA_HOME", "")
+        base_dir = os.path.join(xdg_data, "KikuMoe") if xdg_data else os.path.join(os.path.expanduser("~"), ".local", "share", "KikuMoe")
     try:
         os.makedirs(base_dir, exist_ok=True)
     except Exception:

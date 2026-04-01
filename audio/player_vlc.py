@@ -1,8 +1,11 @@
 from __future__ import annotations
 from typing import Optional, Callable
 import os
+import sys
 
 from core.constants import APP_NAME, APP_VERSION
+
+_IS_WIN32 = sys.platform == "win32"
 
 try:
     import vlc
@@ -34,7 +37,12 @@ class PlayerVLC:
         # Setup plugin path if provided
         if self._vlc_path and os.path.isdir(self._vlc_path):
             try:
-                os.add_dll_directory(self._vlc_path)
+                if _IS_WIN32:
+                    os.add_dll_directory(self._vlc_path)
+                else:
+                    plugins_path = os.path.join(self._vlc_path, "plugins")
+                    if os.path.isdir(plugins_path):
+                        os.environ["VLC_PLUGIN_PATH"] = plugins_path
             except Exception:
                 pass
         try:
@@ -244,22 +252,16 @@ class PlayerVLC:
         """Force kill all VLC processes as last resort."""
         try:
             import subprocess
-            import platform
-            
-            if platform.system() == "Windows":
-                # Kill VLC processes on Windows
+            if _IS_WIN32:
                 subprocess.run(["taskkill", "/f", "/im", "vlc.exe"],
                                capture_output=True, check=False,
-                               **({"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}))
+                               creationflags=subprocess.CREATE_NO_WINDOW)
                 subprocess.run(["taskkill", "/f", "/im", "libvlc.dll"],
                                capture_output=True, check=False,
-                               **({"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}))
+                               creationflags=subprocess.CREATE_NO_WINDOW)
             else:
-                # Kill VLC processes on Unix-like systems
-                subprocess.run(["pkill", "-f", "vlc"], 
-                             capture_output=True, check=False)
-                subprocess.run(["pkill", "-f", "libvlc"], 
-                             capture_output=True, check=False)
+                subprocess.run(["pkill", "-f", "vlc"], capture_output=True, check=False)
+                subprocess.run(["pkill", "-f", "libvlc"], capture_output=True, check=False)
         except Exception:
             pass
 

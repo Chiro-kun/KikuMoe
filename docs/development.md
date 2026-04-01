@@ -77,7 +77,7 @@ To release a new version:
 
 1. Update `version.yml`.
 2. Update `packaging/windows/version_info.txt` (`filevers` and `FileVersion` fields).
-3. Update the output name in `kikumoe.spec` (`name='KikuMoe-X.Y.Z'`) and in `build.ps1`.
+3. Update the output name in `kikumoe.spec` (`name='KikuMoe-X.Y.Z'`), `build.ps1`, and `build.sh`.
 4. Create the tag: `git tag vX.Y.Z`.
 
 ---
