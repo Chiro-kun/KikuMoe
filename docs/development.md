@@ -2,28 +2,20 @@
 
 ## Environment setup
 
+Dependencies are managed with [Poetry](https://python-poetry.org/).
+
 ```bash
 # Clone the repository
 git clone https://git.alsogamer.com/chiro/KikuMoe.git
 cd KikuMoe
 
-# Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate      # Linux/macOS
-.venv\Scripts\activate         # Windows PowerShell
-
-# Install runtime dependencies
-pip install -r requirements.txt
+# Install all dependencies (runtime + dev: pyinstaller, mypy, ruff)
+poetry install --with dev
 
 # Run the application
-python KikuMoe.py
+poetry run python KikuMoe.py
 ```
 
-**Build-time dependencies** (not in `requirements.txt`):
-
-```bash
-pip install pyinstaller pyinstaller-hooks-contrib
-```
 
 ---
 
@@ -82,9 +74,31 @@ To release a new version:
 
 ---
 
+## Static analysis and formatting
+
+Run these before committing:
+
+```bash
+# Linting and import sorting
+poetry run ruff check .
+
+# Auto-fix safe issues (including import order)
+poetry run ruff check --fix .
+
+# Code formatting
+poetry run ruff format .
+
+# Type checking
+poetry run mypy .
+```
+
+Configuration for both tools lives in `pyproject.toml` under `[tool.ruff]` and `[tool.mypy]`.
+
+---
+
 ## Code conventions
 
-- **Style:** PEP 8, 4-space indentation. No formatter is enforced.
+- **Style:** PEP 8, 4-space indentation. Enforced by `ruff format`.
 - **Imports:** absolute from the root (`from core.constants import ...`), not relative.
 - **Logging:** use `get_logger(__name__)` instead of `print()` for debug output.
 - **UI thread safety:** any UI update from a non-main thread must go through a Qt signal. Never call Qt methods directly from secondary threads.

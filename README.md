@@ -82,7 +82,7 @@ brew install ffmpeg
 ### 3. Installa le dipendenze Python
 
 ```bash
-pip install -r requirements.txt
+poetry install
 ```
 
 ---

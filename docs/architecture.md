@@ -18,7 +18,6 @@
 ```
 KikuMoe/                     # Repository root
 ├── KikuMoe.py               # Application entry point
-├── requirements.txt         # Runtime Python dependencies
 ├── build.ps1                # Windows build script (PowerShell)
 ├── build.sh                 # Linux build script (Bash)
 ├── kikumoe.spec             # PyInstaller configuration (cross-platform)

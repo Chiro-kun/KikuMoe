@@ -15,11 +15,9 @@ Produces a single-file executable (`onefile`) via PyInstaller. Both Windows and 
 
 The script runs in order:
 
-1. Upgrades `pyinstaller` and `pyinstaller-hooks-contrib`
-2. Installs dependencies from `requirements.txt`
-3. Validates the environment (`import PyQt5, websocket`)
-4. Runs `pyinstaller --noconfirm --clean kikumoe.spec`
-5. Produces `dist\KikuMoe-<version>.exe`
+1. Runs `poetry install --with dev` (installs runtime + dev dependencies)
+2. Runs `pyinstaller --noconfirm --clean kikumoe.spec` via `poetry run`
+3. Produces `dist\KikuMoe-<version>.exe`
 
 ### VLC bundling
 
@@ -38,7 +36,7 @@ If `VLC_DIR` is not set and VLC is not at the default path, VLC binaries are sim
 ### Manual build
 
 ```powershell
-python -m PyInstaller --noconfirm --clean kikumoe.spec
+poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 ```
 
 ### Output
@@ -60,18 +58,16 @@ dist\KikuMoe-<version>.exe
 
 The script runs in order:
 
-1. Upgrades `pyinstaller` and `pyinstaller-hooks-contrib`
-2. Installs dependencies from `requirements.txt`
-3. Validates the environment (`import PyQt5, websocket`)
-4. Runs `pyinstaller --noconfirm --clean kikumoe.spec`
-5. Produces `dist/KikuMoe-<version>`
+1. Runs `poetry install --with dev` (installs runtime + dev dependencies)
+2. Runs `pyinstaller --noconfirm --clean kikumoe.spec` via `poetry run`
+3. Produces `dist/KikuMoe-<version>`
 
 VLC is not bundled on Linux; it must be installed system-wide (`python-vlc` will find it automatically). The FFmpeg backend is used by default and requires `ffmpeg` to be in `PATH`.
 
 ### Manual build
 
 ```bash
-python3 -m PyInstaller --noconfirm --clean kikumoe.spec
+poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 ```
 
 ### Output
