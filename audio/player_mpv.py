@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Callable, Any
+import locale
 import sys
 
 from core.logger import get_logger
@@ -31,6 +32,12 @@ class PlayerMPV:
         self._ready = False
         if mpv is None:
             return
+        try:
+            # libmpv requires LC_NUMERIC="C"; set it before creating the instance
+            # to avoid the "Non-C locale detected" warning and segfault.
+            locale.setlocale(locale.LC_NUMERIC, 'C')
+        except Exception:
+            pass
         try:
             self._player = mpv.MPV(
                 vid='no',
