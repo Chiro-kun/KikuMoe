@@ -4,9 +4,11 @@ import traceback
 from PyQt5.QtWidgets import QApplication
 from ui.main_window import ListenMoePlayer
 
+_IS_WIN32 = sys.platform == "win32"
+
 
 def _write_crash_log(exc: BaseException) -> str:
-    if sys.platform == "win32":
+    if _IS_WIN32:
         local_app_data = os.environ.get("LOCALAPPDATA", "")
         base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
     else:

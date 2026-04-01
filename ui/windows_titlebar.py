@@ -1,13 +1,14 @@
 from __future__ import annotations
-
+import sys
 from typing import Any, Optional
+
+_IS_WIN32 = sys.platform == "win32"
 
 
 def apply_windows_titlebar_dark_mode(target: Any, enable: bool) -> None:
     """Enable/disable immersive dark mode on a window title bar (Windows only)."""
     try:
-        import sys
-        if sys.platform != "win32":
+        if not _IS_WIN32:
             return
 
         hwnd: Optional[int] = None

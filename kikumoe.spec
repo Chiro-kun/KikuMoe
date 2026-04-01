@@ -1,54 +1,54 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import sys
 from pathlib import Path
 
-# Project layout (resolve from this spec file location)
-spec_dir = Path(globals().get("SPECPATH", os.path.abspath("."))).resolve()
-project_root = spec_dir.parent
-src_dir = project_root / "KikuMoe"
-icon_dir = src_dir / "icons"
+_IS_WIN32 = sys.platform == "win32"
 
-# Collect icons folder preserving structure under the app root (icons/...)
+# Spec lives at the repo root — all paths resolve from here
+repo_root = Path(globals().get("SPECPATH", os.path.abspath("."))).resolve()
+
+# Collect icons folder
 datas = []
+icon_dir = repo_root / "icons"
 if icon_dir.is_dir():
     for root, _, files in os.walk(icon_dir):
         for f in files:
             full = Path(root) / f
-            dest = str(Path(root).relative_to(src_dir))  # e.g. "icons" or "icons/subdir"
+            dest = str(Path(root).relative_to(repo_root))
             datas.append((str(full), dest))
-# Include version.yml so the app can read version at runtime in onefile
-datas.append((str(project_root / 'version.yml'), '.'))
 
-# Force ONEFILE build
-onefile = True
+# Include version.yml if present so the app can read it at runtime in onefile
+version_yml = repo_root / "version.yml"
+if version_yml.exists():
+    datas.append((str(version_yml), "."))
 
-# Zero-config VLC bundling (optional if VLC not found)
+# VLC bundling (Windows: bundle DLLs; Linux: system-installed VLC is used directly)
 vlc_binaries = []
-vlc_dir = os.environ.get('VLC_DIR') or r'C:\\Program Files\\VideoLAN\\VLC'
-libvlc = Path(vlc_dir) / 'libvlc.dll'
-libvlccore = Path(vlc_dir) / 'libvlccore.dll'
-plugins_dir = Path(vlc_dir) / 'plugins'
-if libvlc.exists():
-    vlc_binaries.append((str(libvlc), '.'))
-    if libvlccore.exists():
-        vlc_binaries.append((str(libvlccore), '.'))
-    if plugins_dir.is_dir():
-        # In onefile, include plugins via datas so they extract under _MEIPASS/plugins
-        datas.append((str(plugins_dir), 'plugins'))
+if _IS_WIN32:
+    vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files\VideoLAN\VLC")
+    libvlc = vlc_dir / "libvlc.dll"
+    libvlccore = vlc_dir / "libvlccore.dll"
+    plugins_dir = vlc_dir / "plugins"
+    if libvlc.exists():
+        vlc_binaries.append((str(libvlc), "."))
+        if libvlccore.exists():
+            vlc_binaries.append((str(libvlccore), "."))
+        if plugins_dir.is_dir():
+            datas.append((str(plugins_dir), "plugins"))
 
 block_cipher = None
 
-
 a = Analysis(
-    [str(src_dir / "KikuMoe.py")],
-    pathex=[str(src_dir)],
+    [str(repo_root / "KikuMoe.py")],
+    pathex=[str(repo_root)],
     binaries=vlc_binaries,
     datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[str(src_dir / "pyi_rthook_vlc.py")],
+    runtime_hooks=[str(repo_root / "pyi_rthook_vlc.py")],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -56,14 +56,27 @@ a = Analysis(
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# Build ONEFILE: embed binaries/zipfiles/datas directly into EXE, no COLLECT
+# Windows-only EXE metadata (icon, version resource, manifest)
+exe_kwargs = {}
+if _IS_WIN32:
+    packaging_win = repo_root / "packaging" / "windows"
+    ico = packaging_win / "KikuMoe.ico"
+    ver = packaging_win / "version_info.txt"
+    mfst = packaging_win / "KikuMoe.manifest"
+    if ico.exists():
+        exe_kwargs["icon"] = str(ico)
+    if ver.exists():
+        exe_kwargs["version"] = str(ver)
+    if mfst.exists():
+        exe_kwargs["manifest"] = str(mfst)
+
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.zipfiles,
     a.datas,
-    name='KikuMoe-1.9.0',
+    name="KikuMoe-1.9.0",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -73,8 +86,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(project_root / 'packaging' / 'windows' / 'KikuMoe.ico'),
-    version=str(project_root / 'packaging' / 'windows' / 'version_info.txt'),
     argv_emulation=False,
-    manifest=str(project_root / 'packaging' / 'windows' / 'KikuMoe.manifest'),
+    **exe_kwargs,
 )
