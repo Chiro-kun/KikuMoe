@@ -14,6 +14,7 @@ import urllib.parse
 from core.i18n import I18n
 from network.ws_client import NowPlayingWS
 from audio.player_ffmpeg import PlayerFFmpeg
+from audio.player_mpv import PlayerMPV
 from audio.player_vlc import PlayerVLC
 from core.config import STREAMS
 from ui.settings_dialog import SettingsDialog
@@ -585,10 +586,13 @@ class ListenMoePlayer(QWidget):
         except Exception:
             network_caching = 1000
             
-        # Try FFmpeg first
+        # Try FFmpeg first, then MPV, then VLC
         self.player = PlayerFFmpeg(on_event=self._on_player_event)
         if not self.player.is_ready():
-            self.log.info("[BACKEND] FFmpeg failed or not found, using VLC fallback.")
+            self.log.info("[BACKEND] FFmpeg not available, trying MPV.")
+            self.player = PlayerMPV(on_event=self._on_player_event)
+        if not self.player.is_ready():
+            self.log.info("[BACKEND] MPV not available, using VLC fallback.")
             self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
 
         # Set initial audio state
@@ -1825,6 +1829,8 @@ class ListenMoePlayer(QWidget):
                         pass
                     try:
                         self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
+                        if not self.player.is_ready():
+                            self.player = PlayerMPV(on_event=getattr(self, '_on_player_event', None))
                         if not self.player.is_ready():
                             self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
                     except Exception:

@@ -106,7 +106,7 @@ Time formatting utilities:
 
 ## audio/
 
-Both backends expose the same callback interface, letting the main window treat them interchangeably.
+All backends expose the same callback interface, letting the main window treat them interchangeably.
 
 ### Common interface
 
@@ -143,9 +143,21 @@ Primary backend. Launches FFmpeg as a subprocess and writes PCM output to a PyAu
 
 ---
 
+### `player_mpv.py`
+
+Second fallback backend via `python-mpv` bindings (wraps libmpv).
+
+- No video output (`--vid=no`), audio-only mode.
+- `User-Agent` set via MPV option at initialization.
+- Events via `@player.event_callback`: `start-file` → `opening`, `file-loaded` → `playing`, `end-file` → `ended`/`error`.
+- Cache buffering progress via `@player.property_observer('cache-buffering-state')`.
+- If libmpv is not found at startup, `is_ready()` returns `False` and the main window falls through to VLC.
+
+---
+
 ### `player_vlc.py`
 
-Fallback backend via `python-vlc` bindings.
+Last fallback backend via `python-vlc` bindings.
 
 - VLC instance options: `--network-caching`, `--http-reconnect`, `--quiet`.
 - Custom VLC library path via `KEY_LIBVLC_PATH`: on Windows, adds the directory via `os.add_dll_directory`; on Linux, sets `VLC_PLUGIN_PATH` to the `plugins/` subdirectory.
