@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut, QSpinBox,
-    QDialog, QMessageBox, QSizePolicy, QCheckBox, QStyle
+    QDialog, QMessageBox, QSizePolicy, QCheckBox, QStyle, QStackedLayout
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent, QThread
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
@@ -222,7 +222,8 @@ class ListenMoePlayer(QWidget):
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        self.setWindowTitle(APP_TITLE)
+        fixed_w, fixed_h = 500, 580
+        self._apply_window_title("")
         try:
             if hasattr(self, '_icon_app') and not self._icon_app.isNull():
                 self.setWindowIcon(self._icon_app)
@@ -233,40 +234,54 @@ class ListenMoePlayer(QWidget):
             if geom:
                 self.restoreGeometry(geom)
             else:
-                self.resize(480, 430)
-                self.setMinimumSize(500, 400)
+                self.resize(fixed_w, fixed_h)
             
             # --- Branding Colors ---
             self.COLOR_ACCENT = "#c2185b" # Magenta from KikuMoe Logo
         except Exception:
-            self.resize(480, 430)
-            self.setMinimumSize(500, 400)
+            self.resize(fixed_w, fixed_h)
 
-        self._layout = QVBoxLayout()
-        # Minimal margins for a tight, modern top-aligned look
-        self._layout.setContentsMargins(8, 2, 8, 16)
+        # Lock the main window size (disable resizing)
+        self.setFixedSize(fixed_w, fixed_h)
+
+        # Root layout: no margins so top header can be edge-to-edge and attached to title bar
+        self._root_layout = QVBoxLayout()
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(0)
+        self.setLayout(self._root_layout)
+
+        # Content layout: regular inner spacing for the rest of the UI
+        self._content_widget = QWidget()
+        self._layout = QVBoxLayout(self._content_widget)
+        self._layout.setContentsMargins(8, 8, 8, 16)
         self._layout.setSpacing(8)
-        self.setLayout(self._layout)
+        self._root_layout.addWidget(self._content_widget)
 
     def _init_header_section(self):
         """
         Creates and adds the header section components to the UI, including
         the channel logo, source indicators, and current broadcast information.
         """
-        self.menu_bar_layout = QHBoxLayout()
-        self.menu_bar_layout.setContentsMargins(0, 0, 0, 0)
-        self.menu_bar_layout.setSpacing(0)
+        self.settings_header_bar = QWidget()
+        self.settings_header_bar.setObjectName("settingsHeaderBar")
+        self.settings_header_bar.setFixedHeight(30)
+        self.menu_bar_layout = QHBoxLayout(self.settings_header_bar)
+        self.menu_bar_layout.setContentsMargins(3, 2, 10, 2)
+        self.menu_bar_layout.setSpacing(6)
         
         # Settings button in menu style at the very top (under the app bar)
         self.settings_button = QPushButton(self.i18n.t('settings_button'))
         self.settings_button.setObjectName('menuButton')
-        self.settings_button.setFixedHeight(30)
+        self.settings_button.setFixedHeight(24)
         self.settings_button.clicked.connect(self.open_settings)
         
         self.menu_bar_layout.addWidget(self.settings_button)
         self.menu_bar_layout.addStretch(1)
-        # 1. Settings button at the very top (under the Windows title bar)
-        self._layout.addLayout(self.menu_bar_layout)
+        # 1. Settings header at the very top (under the Windows title bar)
+        if hasattr(self, '_root_layout'):
+            self._root_layout.insertWidget(0, self.settings_header_bar)
+        else:
+            self._layout.addWidget(self.settings_header_bar)
 
         # 2. Header Label (Title)
         self.label = QLabel(self.i18n.t('header').format(channel='J-POP', format='Vorbis'))
@@ -288,9 +303,28 @@ class ListenMoePlayer(QWidget):
         self.sleep_label.setVisible(False)
         self._layout.addWidget(self.sleep_label)
 
+        self.media_ambient_block = QWidget()
+        self.media_ambient_block.setObjectName("mediaAmbientBlock")
+        self.media_stack = QStackedLayout(self.media_ambient_block)
+        self.media_stack.setStackingMode(QStackedLayout.StackAll)
+        self.media_stack.setContentsMargins(0, 0, 0, 0)
+
+        self.media_ambient_bg = QLabel("")
+        self.media_ambient_bg.setObjectName("mediaAmbientBackground")
+        self.media_ambient_bg.setScaledContents(True)
+        self.media_stack.addWidget(self.media_ambient_bg)
+
+        self.media_foreground = QWidget()
+        self.media_foreground.setObjectName("mediaForeground")
+        media_block = QVBoxLayout(self.media_foreground)
+        media_block.setContentsMargins(8, 8, 8, 8)
+        media_block.setSpacing(2)
+        self.media_stack.addWidget(self.media_foreground)
+        self.media_stack.setCurrentWidget(self.media_foreground)
+
         self._album_cover_size = 190
         cover_row = QHBoxLayout()
-        cover_row.setContentsMargins(0, 2, 0, 2)
+        cover_row.setContentsMargins(0, 0, 0, 0)
         cover_row.addStretch(1)
         self.album_cover_label = QLabel("")
         self.album_cover_label.setObjectName("albumCoverLabel")
@@ -298,13 +332,14 @@ class ListenMoePlayer(QWidget):
         self.album_cover_label.setFixedSize(self._album_cover_size, self._album_cover_size)
         cover_row.addWidget(self.album_cover_label)
         cover_row.addStretch(1)
-        self._layout.addLayout(cover_row)
+        media_block.addLayout(cover_row)
         
         song_info_row = QHBoxLayout()
         song_info_row.setContentsMargins(0, 0, 0, 0)
         song_info_row.setSpacing(6)
         self.song_time_left_spacer = QLabel("")
         self.song_time_left_spacer.setFixedWidth(68)
+        self.song_time_left_spacer.setStyleSheet("background: transparent;")
         self.song_time_label = QLabel("--:--")
         self.song_time_label.setObjectName("songTimeLabel")
         self.song_time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
@@ -318,7 +353,8 @@ class ListenMoePlayer(QWidget):
         song_info_row.addWidget(self.song_time_left_spacer)
         song_info_row.addWidget(self.now_playing_label, 1)
         song_info_row.addWidget(self.song_time_label)
-        self._layout.addLayout(song_info_row)
+        media_block.addLayout(song_info_row)
+        self._layout.addWidget(self.media_ambient_block)
         
         # Song Progress Bar (Dynamic custom widget for smoothness)
         self.song_progress = SmoothProgressBar()
@@ -668,6 +704,18 @@ class ListenMoePlayer(QWidget):
 
     # ------------------- Volume Helpers -------------------
 
+    def _build_window_title(self, song_title: Optional[str] = None) -> str:
+        """Compose the window title."""
+        base = APP_TITLE
+        song = (song_title or "").strip()
+        return f"{base} — {song}" if song else base
+
+    def _apply_window_title(self, song_title: Optional[str] = None) -> None:
+        try:
+            self.setWindowTitle(self._build_window_title(song_title))
+        except Exception:
+            pass
+
     def _vol_up(self) -> None:
         """Aumenta il volume di 5%."""
         try:
@@ -778,6 +826,12 @@ class ListenMoePlayer(QWidget):
         try:
             super().showEvent(event)
             self._apply_windows_titlebar_dark_mode(True)
+            self._apply_window_title(getattr(self, '_current_title', '') or '')
+            try:
+                current_pm = self.album_cover_label.pixmap() if hasattr(self, 'album_cover_label') else None
+                self._update_media_ambient_background(current_pm if isinstance(current_pm, QPixmap) else None)
+            except Exception:
+                pass
         except Exception: pass
 
     def changeEvent(self, a0) -> None:
@@ -1077,7 +1131,7 @@ class ListenMoePlayer(QWidget):
         # Mantieni o aggiorna titolo finestra in base al Now Playing
         try:
             title = getattr(self, '_current_title', '') or ''
-            self.setWindowTitle(f"{APP_TITLE} — {title}" if title else APP_TITLE)
+            self._apply_window_title(title)
         except Exception:
             pass
         self.channel_label.setText(self.i18n.t('channel_label'))
@@ -1135,14 +1189,18 @@ class ListenMoePlayer(QWidget):
                 f"""
                 QWidget {{ background-color: #121212; color: #e0e0e0; }}
                 QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
-                QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
-                QLabel#songTimeLabel {{ font-size: 12px; font-weight: 600; color: #cfcfcf; }}
+                QWidget#mediaAmbientBlock {{ background-color: #151515; border: 1px solid #232323; border-radius: 10px; }}
+                QLabel#mediaAmbientBackground {{ background-color: #151515; border-radius: 10px; }}
+                QWidget#mediaForeground {{ background: transparent; border: none; }}
+                QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; background: transparent; }}
+                QLabel#songTimeLabel {{ font-size: 12px; font-weight: 600; color: #cfcfcf; background: transparent; }}
                 QLabel#albumCoverLabel {{ background-color: #101010; border: 1px solid #2a2a2a; border-radius: 10px; }}
+                QWidget#settingsHeaderBar {{ background-color: #2a2a2a; border: none; border-bottom: 1px solid #3a3a3a; border-radius: 0px; }}
                 QWidget#footerBar {{ background-color: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; }}
                 QLabel#sessionLabel {{ color: #f0f0f0; font-weight: 600; background: transparent; }}
                 QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
                 QPushButton:hover {{ background-color: #2a2a2a; }}
-                QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
+                QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px 4px 2px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
                 QPushButton#menuButton:hover {{ background-color: #444444; color: #ffffff; }}
                 QPushButton:disabled {{ background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }}
                 QLineEdit, QSpinBox, QComboBox {{ background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }}
@@ -1376,6 +1434,59 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _update_media_ambient_background(self, pixmap: Optional[QPixmap]) -> None:
+        """Build a subtle blurred background behind cover/title based on current album art."""
+        try:
+            if not hasattr(self, "media_ambient_bg"):
+                return
+
+            block = getattr(self, "media_ambient_block", None)
+            target_w = int(block.width()) if block is not None else 0
+            target_h = int(block.height()) if block is not None else 0
+            if target_w <= 0:
+                target_w = max(320, int(self.width()) - 16)
+            if target_h <= 0:
+                target_h = max(220, int(getattr(self, "_album_cover_size", 190)) + 56)
+
+            if pixmap is None or pixmap.isNull():
+                fallback = QPixmap(target_w, target_h)
+                fallback.fill(QColor("#151515"))
+                self.media_ambient_bg.setPixmap(fallback)
+                return
+
+            # Fast soft blur: shrink aggressively then upscale back.
+            source = pixmap.scaled(
+                max(96, target_w // 2),
+                max(96, target_h // 2),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            tiny = source.scaled(
+                max(24, target_w // 20),
+                max(24, target_h // 20),
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            blurred = tiny.scaled(
+                target_w,
+                target_h,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+
+            canvas = QPixmap(target_w, target_h)
+            canvas.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(canvas)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.drawPixmap(0, 0, blurred)
+            # Dark overlay keeps controls/text readable.
+            painter.fillRect(canvas.rect(), QColor(12, 12, 12, 190))
+            painter.end()
+
+            self.media_ambient_bg.setPixmap(canvas)
+        except Exception:
+            pass
+
     def _set_album_cover_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         try:
             if not hasattr(self, "album_cover_label"):
@@ -1403,6 +1514,7 @@ class ListenMoePlayer(QWidget):
                     painter.drawPixmap(x, y, fallback_pm)
                     painter.end()
                 self.album_cover_label.setPixmap(canvas)
+                self._update_media_ambient_background(None)
                 return
 
             fitted = pixmap.scaled(
@@ -1419,6 +1531,7 @@ class ListenMoePlayer(QWidget):
                 fitted = fitted.copy(x, y, side, side)
 
             self.album_cover_label.setPixmap(fitted)
+            self._update_media_ambient_background(fitted)
         except Exception:
             pass
 
@@ -1597,7 +1710,7 @@ class ListenMoePlayer(QWidget):
             # Mantieni o aggiorna titolo finestra in base al Now Playing
             try:
                 title = getattr(self, '_current_title', '') or ''
-                self.setWindowTitle(f"{APP_TITLE} — {title}" if title else APP_TITLE)
+                self._apply_window_title(title)
             except Exception:
                 pass
         except Exception:
@@ -2021,8 +2134,7 @@ class ListenMoePlayer(QWidget):
         self.now_playing_changed.emit(text)
         # Update window title too
         try:
-            base = APP_TITLE
-            self.setWindowTitle(f"{base} — {title}")
+            self._apply_window_title(title)
         except Exception:
             pass
 
@@ -2421,18 +2533,14 @@ class ListenMoePlayer(QWidget):
                 try:
                     # Aggiorna titolo finestra: preserva il Now Playing durante riavvii interni
                     if reset_session:
-                        base = APP_TITLE
-                        self.setWindowTitle(base)
+                        self._apply_window_title("")
                     else:
                         # Mantieni il titolo corrente se disponibile, altrimenti fallback a base
                         try:
                             title = getattr(self, '_current_title', '') or ''
                         except Exception:
                             title = ''
-                        if title:
-                            self.setWindowTitle(f"{APP_TITLE} — {title}")
-                        else:
-                            self.setWindowTitle(APP_TITLE)
+                        self._apply_window_title(title)
                 except Exception:
                     pass
                 self._refresh_play_button_text(False)
