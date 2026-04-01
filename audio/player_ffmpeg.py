@@ -240,8 +240,6 @@ class PlayerFFmpeg:
 
             # Keep PyAudio instance alive for performance
             self._current_stream = None
-
-            self._current_stream = None
             # Evita doppio emit: se c'era un worker attivo, sarà il worker ad emettere 'stopped'
             if not had_worker_running:
                 self._emit('stopped', None)

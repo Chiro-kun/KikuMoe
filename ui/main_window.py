@@ -10,6 +10,7 @@ import os
 import time
 import re
 import urllib.request
+import urllib.parse
 from core.i18n import I18n
 from network.ws_client import NowPlayingWS
 from audio.player_ffmpeg import PlayerFFmpeg
@@ -139,6 +140,7 @@ class ListenMoePlayer(QWidget):
         self._init_controls_section()
         self._init_progress_section()
         self._init_sleep_timer_section()
+        self._init_footer_section()
         self._init_audio_backend()
         self._init_timers_and_console()
         self._init_websocket()
@@ -270,18 +272,20 @@ class ListenMoePlayer(QWidget):
         self.label = QLabel(self.i18n.t('header').format(channel='J-POP', format='Vorbis'))
         self.label.setObjectName('headerLabel')
         self.label.setStyleSheet('font-size: 16px; font-weight: 600;')
-        self._layout.addWidget(self.label)
+        # Hidden in main UI: channel/format are already shown in the metadata row below.
+        self.label.setVisible(False)
         
         self.status_label = QLabel("")
         self.status_label.setObjectName('status_label_val')
-        self._layout.addWidget(self.status_label)
+        self.status_label.setVisible(False)
         
         self.session_label = QLabel("")
         self.session_label.setObjectName('sessionLabel')
-        self._layout.addWidget(self.session_label)
+        self.session_label.setVisible(False)
         
         self.sleep_label = QLabel("")
         self.sleep_label.setObjectName('sleepLabel')
+        self.sleep_label.setVisible(False)
         self._layout.addWidget(self.sleep_label)
 
         self._album_cover_size = 190
@@ -296,11 +300,25 @@ class ListenMoePlayer(QWidget):
         cover_row.addStretch(1)
         self._layout.addLayout(cover_row)
         
-        self.now_playing_label = QLabel(f"{self.i18n.t('now_playing_prefix')} –")
+        song_info_row = QHBoxLayout()
+        song_info_row.setContentsMargins(0, 0, 0, 0)
+        song_info_row.setSpacing(6)
+        self.song_time_left_spacer = QLabel("")
+        self.song_time_left_spacer.setFixedWidth(68)
+        self.song_time_label = QLabel("--:--")
+        self.song_time_label.setObjectName("songTimeLabel")
+        self.song_time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        self.song_time_label.setContentsMargins(0, 8, 0, 0)
+        self.song_time_label.setFixedWidth(68)
+        self.now_playing_label = QLabel("–")
         self.now_playing_label.setObjectName('nowPlayingLabel')
         self.now_playing_label.setStyleSheet('font-size: 14px; font-weight: 500;')
         self.now_playing_label.setWordWrap(True)
-        self._layout.addWidget(self.now_playing_label)
+        self.now_playing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        song_info_row.addWidget(self.song_time_left_spacer)
+        song_info_row.addWidget(self.now_playing_label, 1)
+        song_info_row.addWidget(self.song_time_label)
+        self._layout.addLayout(song_info_row)
         
         # Song Progress Bar (Dynamic custom widget for smoothness)
         self.song_progress = SmoothProgressBar()
@@ -311,7 +329,7 @@ class ListenMoePlayer(QWidget):
         # Connections for signals that update these labels
         try:
             self.now_playing_changed.connect(self.now_playing_label.setText)
-            self.status_changed.connect(self.status_label.setText)
+            self.status_changed.connect(self._set_status_text)
             self.label_refresh.connect(self.update_now_playing_label)
             self.cover_data_ready.connect(self._on_album_cover_data_ready)
             self.now_playing_event.connect(self._on_now_playing)
@@ -398,6 +416,16 @@ class ListenMoePlayer(QWidget):
         secondary_controls_layout.addWidget(self.stop_button)
         self._layout.addLayout(secondary_controls_layout)
 
+        # Emergency "FORCE STOP" button under Pause/Stop row
+        self.force_stop_button = QPushButton("FORCE STOP")
+        if hasattr(self, '_icon_force_stop'):
+            self.force_stop_button.setIcon(self._icon_force_stop)
+            self.force_stop_button.setIconSize(QSize(16, 16))
+            # Spacing between icon and text (at least 2px)
+            self.force_stop_button.setStyleSheet("QPushButton { text-align: center; padding-left: 4px; }")
+        self.force_stop_button.clicked.connect(self.force_stop_all)
+        self._layout.addWidget(self.force_stop_button)
+
         # Volume Controls
         vol_row = QHBoxLayout()
         self.volume_label = QLabel(self.i18n.t('volume'))
@@ -432,16 +460,6 @@ class ListenMoePlayer(QWidget):
         vol_row.addWidget(self.mute_button)
         vol_row.addWidget(self.autoplay_checkbox)
         self._layout.addLayout(vol_row)
-
-        # Emergency "FORCE STOP" button (kept as requested)
-        self.force_stop_button = QPushButton("FORCE STOP")
-        if hasattr(self, '_icon_force_stop'):
-            self.force_stop_button.setIcon(self._icon_force_stop)
-            self.force_stop_button.setIconSize(QSize(16, 16))
-            # Spacing between icon and text (at least 2px)
-            self.force_stop_button.setStyleSheet("QPushButton { text-align: center; padding-left: 4px; }")
-        self.force_stop_button.clicked.connect(self.force_stop_all)
-        self._layout.addWidget(self.force_stop_button)
 
     def _init_progress_section(self):
         """
@@ -499,6 +517,25 @@ class ListenMoePlayer(QWidget):
         sleep_group_layout.addLayout(controls_row)
         
         self._layout.addLayout(sleep_group_layout)
+
+    def _init_footer_section(self):
+        """Add a bottom footer bar with the session timer."""
+        self.footer_bar = QWidget()
+        self.footer_bar.setObjectName("footerBar")
+        self.footer_bar.setFixedHeight(30)
+
+        footer_layout = QHBoxLayout(self.footer_bar)
+        footer_layout.setContentsMargins(10, 2, 10, 2)
+        footer_layout.setSpacing(6)
+        footer_layout.addStretch(1)
+        if hasattr(self, 'session_label'):
+            self.session_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.session_label.setText(self.i18n.t('session_timer', time="00:00"))
+            self.session_label.setVisible(True)
+            footer_layout.addWidget(self.session_label)
+        footer_layout.addStretch(1)
+
+        self._layout.addWidget(self.footer_bar)
 
     def _init_audio_backend(self):
         """
@@ -686,6 +723,8 @@ class ListenMoePlayer(QWidget):
             
             tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.AcceptRole)
             quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.DestructiveRole)
+            cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
+            msg.setEscapeButton(cancel_btn)
             
             cb = QCheckBox(self.i18n.t('close_remember'))
             msg.setCheckBox(cb)
@@ -695,8 +734,14 @@ class ListenMoePlayer(QWidget):
             except Exception: pass
 
             msg.exec_()
+            clicked = msg.clickedButton()
+            if clicked is None or clicked == cancel_btn:
+                # User cancelled close action (Cancel button, Esc, or window X on the dialog)
+                event.ignore()
+                return
+
             remember = cb.isChecked()
-            choice_tray = (msg.clickedButton() == tray_btn)
+            choice_tray = (clicked == tray_btn)
             
             if remember:
                 self.settings.setValue(KEY_DONT_ASK_ON_CLOSE, True)
@@ -768,6 +813,7 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(self.t('status_playing'))
                 self.buffering_visible.emit(False)
                 self.buffering_indeterminate.emit(False)
+                self._ui_paused = False
                 if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
                     if self._session_timer and not self._session_timer.isActive():
                         self._session_timer.start()
@@ -804,6 +850,7 @@ class ListenMoePlayer(QWidget):
                 self._skip_session_reset_once = True
                 self.schedule_play.emit(1200)
                 self.notify_tray.emit("Listen.moe", "Errore audio: tentativo di riavvio...")
+            self._refresh_play_button_text()
         except Exception: pass
 
     def _schedule_play_stream(self, delay_ms: int) -> None:
@@ -895,9 +942,12 @@ class ListenMoePlayer(QWidget):
 
     def _update_session_label(self) -> None:
         try:
-            t = self._format_hhmmss(self._session_seconds)
             if hasattr(self, 'session_label'):
+                enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
+                display_seconds = self._session_seconds if enabled else 0
+                t = "00:00" if int(display_seconds) <= 0 else self._format_hhmmss(display_seconds)
                 self.session_label.setText(self.i18n.t('session_timer', time=t))
+                self.session_label.setVisible(True)
         except Exception: pass
 
     def _apply_session_timer_running_state(self, running: bool) -> None:
@@ -910,10 +960,13 @@ class ListenMoePlayer(QWidget):
                 else:
                     if self._session_timer and self._session_timer.isActive():
                         self._session_timer.stop()
-                if hasattr(self, 'session_label'):
-                    self.session_label.show()
-                self._update_session_label()
-                self.update_tray_texts()
+            else:
+                if self._session_timer and self._session_timer.isActive():
+                    self._session_timer.stop()
+            if hasattr(self, 'session_label'):
+                self.session_label.show()
+            self._update_session_label()
+            self.update_tray_texts()
         except Exception:
             pass
 
@@ -963,7 +1016,9 @@ class ListenMoePlayer(QWidget):
         try:
             if self._sleep_remaining_sec <= 0:
                 if self._sleep_timer: self._sleep_timer.stop()
-                if hasattr(self, 'sleep_label'): self.sleep_label.setText("")
+                if hasattr(self, 'sleep_label'):
+                    self.sleep_label.setText("")
+                    self.sleep_label.setVisible(False)
                 if self._get_bool(KEY_SLEEP_STOP_ON_END, True): self.stop_stream()
                 return
             self._sleep_remaining_sec -= 1
@@ -972,6 +1027,7 @@ class ListenMoePlayer(QWidget):
                 if hasattr(self, 'volume_slider'): self.volume_slider.setValue(new_vol)
             if hasattr(self, 'sleep_label'):
                 self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+                self.sleep_label.setVisible(True)
         except Exception: pass
 
     def _tray_toggle_play_pause(self) -> None:
@@ -998,6 +1054,25 @@ class ListenMoePlayer(QWidget):
                 self.tray_mgr.update_controls_state(is_playing and not is_paused, is_paused, is_muted)
         except Exception: pass
 
+    def _refresh_play_button_text(self, force_playing: Optional[bool] = None) -> None:
+        """Set the Play button text from playback state or an explicit override."""
+        try:
+            if not hasattr(self, 'play_button'):
+                return
+            if force_playing is None:
+                is_playing = False
+                is_paused = bool(getattr(self, '_ui_paused', False))
+                try:
+                    if hasattr(self, 'player') and self.player is not None:
+                        is_playing = bool(self.player.is_playing())
+                        is_paused = is_paused or bool(getattr(self.player, 'is_paused', lambda: False)())
+                except Exception:
+                    pass
+                force_playing = is_playing and not is_paused
+            self.play_button.setText(self.i18n.t('play_active') if force_playing else self.i18n.t('play'))
+        except Exception:
+            pass
+
     def apply_translations(self):
         # Mantieni o aggiorna titolo finestra in base al Now Playing
         try:
@@ -1007,7 +1082,7 @@ class ListenMoePlayer(QWidget):
             pass
         self.channel_label.setText(self.i18n.t('channel_label'))
         self.format_label.setText(self.i18n.t('format_label'))
-        self.play_button.setText(self.i18n.t('play'))
+        self._refresh_play_button_text()
         self.pause_button.setText(self.i18n.t('pause'))
         self.stop_button.setText(self.i18n.t('stop'))
         self.volume_label.setText(self.i18n.t('volume'))
@@ -1034,12 +1109,6 @@ class ListenMoePlayer(QWidget):
         self.update_header_label()
         self.update_now_playing_label()
         self.update_vlc_status_label()
-        try:
-            enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
-            if hasattr(self, 'session_label'):
-                self.session_label.setVisible(bool(enabled))
-        except Exception:
-            pass
         self._update_session_label()
         self.update_tray_texts()
         if hasattr(self, 'autoplay_checkbox'):
@@ -1067,7 +1136,10 @@ class ListenMoePlayer(QWidget):
                 QWidget {{ background-color: #121212; color: #e0e0e0; }}
                 QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
                 QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
+                QLabel#songTimeLabel {{ font-size: 12px; font-weight: 600; color: #cfcfcf; }}
                 QLabel#albumCoverLabel {{ background-color: #101010; border: 1px solid #2a2a2a; border-radius: 10px; }}
+                QWidget#footerBar {{ background-color: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px; }}
+                QLabel#sessionLabel {{ color: #f0f0f0; font-weight: 600; background: transparent; }}
                 QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
                 QPushButton:hover {{ background-color: #2a2a2a; }}
                 QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
@@ -1211,10 +1283,19 @@ class ListenMoePlayer(QWidget):
             value = cover_ref.strip()
             if not value:
                 return None
+
+            raw_url = value
             low = value.lower()
-            if low.startswith("http://") or low.startswith("https://"):
-                return value
-            return f"https://cdn.listen.moe/covers/{value.lstrip('/')}"
+            if not (low.startswith("http://") or low.startswith("https://")):
+                raw_url = f"https://cdn.listen.moe/covers/{value.lstrip('/')}"
+
+            parts = urllib.parse.urlsplit(raw_url)
+            if not parts.scheme or not parts.netloc:
+                return None
+
+            # Encode non-ASCII and unsafe chars in path (preserve '/' and already-encoded '%xx')
+            safe_path = urllib.parse.quote(parts.path, safe="/%")
+            return urllib.parse.urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
         except Exception:
             return None
 
@@ -1656,13 +1737,11 @@ class ListenMoePlayer(QWidget):
                                     self._session_timer.start()
                         except Exception:
                             pass
-                        if hasattr(self, 'session_label'):
-                            self.session_label.show()
                     else:
                         if self._session_timer and self._session_timer.isActive():
                             self._session_timer.stop()
-                        if hasattr(self, 'session_label'):
-                            self.session_label.hide()
+                    if hasattr(self, 'session_label'):
+                        self.session_label.show()
                     self._update_session_label()
                     self.update_tray_texts()
                 except Exception:
@@ -1766,6 +1845,7 @@ class ListenMoePlayer(QWidget):
                 pass
             if hasattr(self, 'sleep_label'):
                 self.sleep_label.setText(self.t('sleep_remaining', time=self._format_mmss(self._sleep_remaining_sec)))
+                self.sleep_label.setVisible(True)
         except Exception:
             pass
 
@@ -1783,6 +1863,7 @@ class ListenMoePlayer(QWidget):
             self._sleep_saved_volume = None
             if hasattr(self, 'sleep_label'):
                 self.sleep_label.setText("")
+                self.sleep_label.setVisible(False)
         except Exception:
             pass
 
@@ -1881,6 +1962,16 @@ class ListenMoePlayer(QWidget):
         except Exception:
             return "0:00"
 
+    def _set_status_text(self, text: str) -> None:
+        try:
+            value = str(text or "").strip()
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(value)
+                # Keep status text available internally but never show it above the album cover.
+                self.status_label.setVisible(False)
+        except Exception:
+            pass
+
 
     def update_now_playing_label(self):
         try:
@@ -1889,9 +1980,9 @@ class ListenMoePlayer(QWidget):
             pass
         title = self._current_title or self.t('unknown')
         artist = self._current_artist or ''
-        prefix = self.t('now_playing_prefix')
-        text = f"{prefix} <b>{title}</b>" + (f" — {artist}" if artist and title != '–' else "")
+        text = f"<b>{title}</b>" + (f" — {artist}" if artist and title != '–' else "")
         # Append remaining or total duration
+        time_text = "--:--"
         try:
             if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
                 # Prefer remaining time only if start timestamp is plausible; otherwise show total duration
@@ -1919,7 +2010,12 @@ class ListenMoePlayer(QWidget):
                 elif dur:
                     mmss = self._format_mmss(dur)
                 if mmss:
-                    text += f" [{mmss}]"
+                    time_text = mmss
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'song_time_label'):
+                self.song_time_label.setText(time_text)
         except Exception:
             pass
         self.now_playing_changed.emit(text)
@@ -2214,12 +2310,14 @@ class ListenMoePlayer(QWidget):
                         self.log.info("[UI] play_stream failed")
                     except Exception:
                         pass
+                    self._refresh_play_button_text(False)
                 else:
                     try:
                         if hasattr(self, '_icon_app') and not self._icon_app.isNull():
                             self.setWindowIcon(self._icon_app)
                     except Exception:
                         pass
+                    self._refresh_play_button_text(True)
                     self.tray_icon_refresh.emit()
                     try:
                         self.log.info("[UI] play_stream started")
@@ -2258,6 +2356,7 @@ class ListenMoePlayer(QWidget):
                     self._apply_session_timer_running_state(not new_paused)
                 except Exception:
                     pass
+                self._refresh_play_button_text(not new_paused)
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
@@ -2336,6 +2435,7 @@ class ListenMoePlayer(QWidget):
                             self.setWindowTitle(APP_TITLE)
                 except Exception:
                     pass
+                self._refresh_play_button_text(False)
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
