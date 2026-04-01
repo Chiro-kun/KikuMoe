@@ -6,6 +6,9 @@ from ui.main_window import ListenMoePlayer
 
 _IS_WIN32 = sys.platform == "win32"
 
+if not _IS_WIN32 and "QT_QPA_PLATFORM" not in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
+
 
 def _write_crash_log(exc: BaseException) -> str:
     if _IS_WIN32:

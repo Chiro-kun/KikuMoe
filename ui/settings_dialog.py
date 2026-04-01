@@ -349,9 +349,20 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
+    # PortAudio host API type → display tag (same constants as player_ffmpeg.py)
+    _PA_API_TAGS = {
+        8:  "ALSA",
+        18: "PipeWire/Pulse",  # paPulseAudio — also used by pipewire-pulse
+        12: "JACK",
+        2:  "MME",
+        13: "WASAPI",
+        1:  "DirectSound",
+    }
+
     def _populate_audio_devices(self):
         """Enumerate PortAudio devices via PyAudio and fill combo box.
-        Keeps first entry as 'System default'; lists output-capable devices with index.
+        Keeps first entry as 'System default'; on Linux annotates each device
+        with its host API (PipeWire/Pulse, ALSA, JACK …).
         """
         try:
             import pyaudio
@@ -359,7 +370,6 @@ class SettingsDialog(QDialog):
             pyaudio = None
         # Keep 'System default' as index 0
         try:
-            # Clear all except first
             for i in range(self.cmb_audio_device.count() - 1, 0, -1):
                 self.cmb_audio_device.removeItem(i)
         except Exception:
@@ -369,10 +379,17 @@ class SettingsDialog(QDialog):
         pa = None
         try:
             pa = pyaudio.PyAudio()
-            host_info = pa.get_host_api_info_by_index(0) if hasattr(pa, 'get_host_api_info_by_index') else None
-            device_count = host_info.get('deviceCount', 0) if isinstance(host_info, dict) else (
-                pa.get_device_count() if hasattr(pa, 'get_device_count') else 0
-            )
+            # Build host API index → type map for annotation
+            api_type_map: dict = {}
+            try:
+                for api_idx in range(pa.get_host_api_count()):
+                    ai = pa.get_host_api_info_by_index(api_idx)
+                    if isinstance(ai, dict):
+                        api_type_map[api_idx] = ai.get("type", -1)
+            except Exception:
+                pass
+
+            device_count = pa.get_device_count() if hasattr(pa, 'get_device_count') else 0
             for i in range(device_count):
                 try:
                     info = pa.get_device_info_by_index(i)
@@ -382,10 +399,14 @@ class SettingsDialog(QDialog):
                     continue
                 max_output = int(info.get('maxOutputChannels', 0))
                 name = str(info.get('name', f'Device {i}'))
-                # Include only devices that can output
                 if max_output > 0:
-                    # Show name and index in label
-                    label = f"{name} (#{i})"
+                    if not _IS_WIN32:
+                        api_idx = info.get('hostApi', -1)
+                        api_type = api_type_map.get(api_idx, -1)
+                        tag = self._PA_API_TAGS.get(api_type, "")
+                        label = f"[{tag}] {name} (#{i})" if tag else f"{name} (#{i})"
+                    else:
+                        label = f"{name} (#{i})"
                     self.cmb_audio_device.addItem(label, i)
             # Restore persisted selection if available
             persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')

@@ -308,7 +308,7 @@ class ListenMoePlayer(QWidget):
         self.media_ambient_block = QWidget()
         self.media_ambient_block.setObjectName("mediaAmbientBlock")
         self.media_stack = QStackedLayout(self.media_ambient_block)
-        self.media_stack.setStackingMode(QStackedLayout.StackAll)
+        self.media_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         self.media_stack.setContentsMargins(0, 0, 0, 0)
 
         self.media_ambient_bg = QLabel("")
@@ -795,11 +795,11 @@ class ListenMoePlayer(QWidget):
             msg = QMessageBox(self)
             msg.setWindowTitle(self.i18n.t('close_dialog_title'))
             msg.setText(self.i18n.t('close_dialog_text'))
-            msg.setIcon(QMessageBox.Question)
+            msg.setIcon(QMessageBox.Icon.Question)
             
-            tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.AcceptRole)
-            quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.DestructiveRole)
-            cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
+            tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.ButtonRole.AcceptRole)
+            quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.ButtonRole.RejectRole)
             msg.setEscapeButton(cancel_btn)
             
             cb = QCheckBox(self.i18n.t('close_remember'))
@@ -2633,9 +2633,9 @@ class ListenMoePlayer(QWidget):
                         msg = QMessageBox(self)
                         msg.setWindowTitle(self.i18n.t('volume_zero_title'))
                         msg.setText(self.i18n.t('volume_zero_text'))
-                        restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.AcceptRole)
-                        cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.RejectRole)
-                        msg.setIcon(QMessageBox.Question)
+                        restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.ButtonRole.AcceptRole)
+                        cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.ButtonRole.RejectRole)
+                        msg.setIcon(QMessageBox.Icon.Question)
                         # Forza titlebar scura su Windows per il QMessageBox
                         try:
                             apply_windows_titlebar_dark_mode(msg, True)
