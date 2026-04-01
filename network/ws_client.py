@@ -36,7 +36,6 @@ class NowPlayingWS:
             return
 
         def on_open(ws):
-            # Try to request an immediate TRACK_UPDATE right after opening
             try:
                 ws.send(json.dumps({"op": 2}))
             except Exception:
@@ -54,7 +53,6 @@ class NowPlayingWS:
                 if isinstance(hb, int):
                     self.ws_heartbeat_interval_ms = hb
                     self._schedule_heartbeat()
-                # After welcome, request current track info immediately
                 try:
                     ws.send(json.dumps({"op": 2}))
                 except Exception:
@@ -63,18 +61,15 @@ class NowPlayingWS:
                 d = data.get("d", {})
                 t = data.get("t")
                 if t in ("TRACK_UPDATE", "TRACK_UPDATE_REQUEST"):
-                    # Filtra per canale se richiesto
                     try:
                         if self.channel_filter is not None and not self.channel_filter(d):
                             return
                     except Exception:
-                        # In caso di errore nel filtro, non bloccare l'aggiornamento
                         pass
                     song = d.get("song") or {}
                     title = song.get("title") or "Unknown"
                     artists = song.get("artists") or []
                     artist_name = artists[0].get("name") if artists else ""
-                    # Durata (secondi) se presente nel payload
                     duration = song.get("duration")
                     try:
                         duration = int(duration) if duration is not None else None
@@ -93,10 +88,6 @@ class NowPlayingWS:
                     try:
                         start_time_iso = d.get("startTime")
                         if isinstance(start_time_iso, str):
-                            # Debug raw value to terminal
-                            print(f"[WS DEBUG] startTime from server: {start_time_iso}")
-                            # Listen.moe API v2: "2026-03-31T17:28:46.000Z"
-                            # Handle "Z" as UTC
                             iso = start_time_iso.replace("Z", "+00:00")
                             try:
                                 dt = datetime.fromisoformat(iso)
@@ -104,9 +95,7 @@ class NowPlayingWS:
                                     dt = dt.replace(tzinfo=timezone.utc)
                                 start_ts = dt.timestamp()
                             except ValueError:
-                                # Fallback for older Python or weird formats
                                 try:
-                                    # Try without milliseconds if fromisoformat fails
                                     if "." in iso:
                                         iso_no_ms = iso.split(".")[0] + "+00:00"
                                         dt = datetime.fromisoformat(iso_no_ms)
