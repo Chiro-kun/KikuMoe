@@ -11,6 +11,8 @@ from core.logger import get_logger
 from PyQt5.QtCore import QSettings
 from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
 
+_IS_WIN32 = sys.platform == "win32"
+
 try:
     import pyaudio
 except Exception:
@@ -71,7 +73,7 @@ class PlayerFFmpeg:
         """Check if ffmpeg is available."""
         try:
             result = subprocess.run(['ffmpeg', '-version'],
-                                    capture_output=True, check=False, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
+                                    capture_output=True, check=False, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if _IS_WIN32 else {}))
             return result.returncode == 0
         except Exception:
             return False
@@ -302,7 +304,7 @@ class PlayerFFmpeg:
         """Return ffmpeg version string if available."""
         try:
             result = subprocess.run(['ffmpeg', '-version'],
-                                    capture_output=True, text=True, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}))
+                                    capture_output=True, text=True, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if _IS_WIN32 else {}))
             if result.returncode == 0:
                 return result.stdout.split('\n')[0]
         except Exception:
@@ -531,7 +533,7 @@ class PlayerFFmpeg:
                         stderr=subprocess.PIPE,
                         stdin=subprocess.DEVNULL,
                         bufsize=0,
-                        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {})
+                        **({"creationflags": subprocess.CREATE_NO_WINDOW} if _IS_WIN32 else {})
                     )
                     self.log.debug("[DEBUG] _stream_worker: ffmpeg process started, pid: %s", self._ffmpeg_process.pid)
                 except Exception as e:
