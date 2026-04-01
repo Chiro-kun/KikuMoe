@@ -75,6 +75,12 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_ok': 'OK',
         'settings_cancel': 'Annulla',
         'settings_apply': 'Applica',
+        # Audio backend selection
+        'settings_audio_backend': 'Backend audio',
+        'settings_audio_backend_auto': 'Automatico (FFmpeg → MPV → VLC)',
+        'settings_audio_backend_ffmpeg': 'FFmpeg',
+        'settings_audio_backend_mpv': 'MPV',
+        'settings_audio_backend_vlc': 'VLC',
         # Audio device selection
         'settings_audio_output': 'Uscita audio',
         'settings_audio_default': 'Sistema (predefinito di Windows)',
@@ -191,6 +197,12 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_ok': 'OK',
         'settings_cancel': 'Cancel',
         'settings_apply': 'Apply',
+        # Audio backend selection
+        'settings_audio_backend': 'Audio backend',
+        'settings_audio_backend_auto': 'Auto (FFmpeg → MPV → VLC)',
+        'settings_audio_backend_ffmpeg': 'FFmpeg',
+        'settings_audio_backend_mpv': 'MPV',
+        'settings_audio_backend_vlc': 'VLC',
         # Audio device selection
         'settings_audio_output': 'Audio output',
         'settings_audio_default': 'System (Windows default device)',

@@ -1,7 +1,7 @@
 # KikuMoe
 
 Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt5.  
-Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito) e VLC (fallback).
+Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).
 
 ---
 
@@ -27,8 +27,9 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 | Componente | Versione minima | Note |
 |---|---|---|
 | Python | 3.8+ | Consigliato 3.10+ |
-| FFmpeg | qualsiasi | Deve essere nel PATH. Alternativa: VLC |
-| VLC Desktop | 3.x | Solo come fallback se FFmpeg non è disponibile |
+| FFmpeg | qualsiasi | Deve essere nel PATH. Alternativa: MPV o VLC |
+| MPV | qualsiasi | Secondo fallback; richiede `libmpv` installato nel sistema |
+| VLC Desktop | 3.x | Ultimo fallback se FFmpeg e MPV non sono disponibili |
 
 **Dipendenze Python** (installate automaticamente con `pip`):
 
@@ -36,9 +37,11 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 PyQt5 >= 5.15.4
 websocket-client >= 1.6.0
 python-vlc >= 3.0.0
+python-mpv >= 1.0.0
 pyaudio >= 0.2.11
 ```
 
+> **Nota su MPV:** `python-mpv` richiede `libmpv` installato nel sistema (`sudo apt install libmpv-dev` su Debian/Ubuntu, `sudo pacman -S mpv` su Arch).  
 > **Nota su VLC:** Se usi il backend VLC, l'architettura di VLC deve corrispondere a quella di Python (entrambi x64 o entrambi x86).
 
 ---
@@ -74,12 +77,12 @@ sudo dnf install ffmpeg        # Fedora
 brew install ffmpeg
 ```
 
-> Se non puoi installare FFmpeg, configura il backend VLC nelle [Impostazioni](#impostazioni).
+> Se non puoi installare FFmpeg, usa il backend MPV (consigliato su Linux) o VLC, configurabile nelle [Impostazioni](#impostazioni).
 
 ### 3. Installa le dipendenze Python
 
 ```bash
-pip install -r requirements.txt
+poetry install
 ```
 
 ---
@@ -123,7 +126,9 @@ Cambiare canale o formato riavvia automaticamente lo stream.
 
 **FFmpeg (predefinito):** avvia un sottoprocesso FFmpeg che decodifica lo stream e ne passa l'audio a PyAudio. Permette la selezione del dispositivo di uscita.
 
-**VLC (fallback):** usa le binding `python-vlc`. Si attiva automaticamente se FFmpeg non è disponibile, oppure può essere selezionato manualmente dalle Impostazioni.
+**MPV (secondo fallback):** usa le binding `python-mpv` (libmpv). Si attiva automaticamente se FFmpeg non è disponibile. Consigliato su Linux dove MPV è tipicamente installato nel sistema.
+
+**VLC (ultimo fallback):** usa le binding `python-vlc`. Si attiva automaticamente se né FFmpeg né MPV sono disponibili.
 
 ### Metadati in tempo reale
 
@@ -145,6 +150,7 @@ Apri le Impostazioni dal menu del tray o dal pulsante nella finestra principale.
 | Canale predefinito | J-POP o K-POP |
 | Formato predefinito | Vorbis o MP3 |
 | Riproduzione automatica | Avvia lo stream all'apertura dell'app |
+| Backend audio | `Automatico` (FFmpeg → MPV → VLC), `FFmpeg`, `MPV` o `VLC` |
 | Uscita audio | Dispositivo di output (enumerato da PyAudio) |
 | Percorso libVLC | Cartella contenente `libvlc.dll` (es. `C:/Program Files/VideoLAN/VLC`) |
 | Network caching | Buffer di rete in millisecondi (100–5000 ms, default 1000) |
@@ -224,6 +230,11 @@ ffmpeg -version
 **Nessun suono / dispositivo audio non trovato**
 
 Apri le Impostazioni e seleziona il dispositivo di uscita corretto dall'elenco.
+
+**Backend MPV: errore di inizializzazione**
+
+- Installa `libmpv` nel sistema (`sudo apt install libmpv-dev` su Debian/Ubuntu, `sudo pacman -S mpv` su Arch, `sudo dnf install mpv-libs` su Fedora).
+- Verifica che `python-mpv` sia installato: `pip install python-mpv`.
 
 **Backend VLC: errore di inizializzazione**
 

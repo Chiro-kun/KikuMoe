@@ -1,0 +1,54 @@
+[tool.poetry]
+name = "kikumoe"
+version = "1.9.0"
+description = "LISTEN.moe desktop radio player"
+authors = []
+license = "MIT"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.8"
+PyQt5 = ">=5.15.4"
+websocket-client = ">=1.6.0"
+python-vlc = ">=3.0.0"
+python-mpv = ">=1.0.0"
+pyaudio = ">=0.2.11"
+
+[tool.poetry.group.dev.dependencies]
+pyinstaller = {version = ">=5.0", python = ">=3.8,<3.15"}
+pyinstaller-hooks-contrib = {version = ">=2023.0", python = ">=3.8,<3.15"}
+mypy = ">=1.0"
+ruff = ">=0.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["venv/", "\\.venv/", "dist/", "build/", "kikumoe\\.spec"]
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py38"
+line-length = 100
+exclude = ["venv", ".venv", "dist", "build", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "audio", "network", "ui"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
