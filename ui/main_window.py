@@ -3,12 +3,13 @@ from PyQt5.QtWidgets import (
     QSlider, QProgressBar, QShortcut, QSpinBox,
     QDialog, QMessageBox, QSizePolicy, QCheckBox, QStyle
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent
+from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent, QThread
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
-from typing import Optional
+from typing import Dict, Optional, Set
 import os
 import time
 import re
+import urllib.request
 from core.i18n import I18n
 from network.ws_client import NowPlayingWS
 from audio.player_ffmpeg import PlayerFFmpeg
@@ -105,6 +106,10 @@ class ListenMoePlayer(QWidget):
     buffering_indeterminate = pyqtSignal(bool)
     # Delayed play signal to ensure timers are created from UI thread
     schedule_play = pyqtSignal(int)
+    # Album cover bytes downloaded by background thread
+    cover_data_ready = pyqtSignal(str, bytes)
+    # Marshal websocket metadata updates to the UI thread
+    now_playing_event = pyqtSignal(str, str, object, object, object)
 
     def __init__(self):
         super().__init__()
@@ -115,6 +120,11 @@ class ListenMoePlayer(QWidget):
         self._current_artist = None
         self._current_duration_seconds = None
         self._current_start_epoch = None
+        self._current_cover_ref: Optional[str] = None
+        self._current_cover_url: Optional[str] = None
+        self._cover_cache: Dict[str, QPixmap] = {}
+        self._cover_download_lock = threading.Lock()
+        self._cover_download_inflight: Set[str] = set()
         self._session_seconds = 0
         self._sleep_remaining_sec = 0
         self._sleep_fadeout_sec = 15
@@ -273,6 +283,18 @@ class ListenMoePlayer(QWidget):
         self.sleep_label = QLabel("")
         self.sleep_label.setObjectName('sleepLabel')
         self._layout.addWidget(self.sleep_label)
+
+        self._album_cover_size = 190
+        cover_row = QHBoxLayout()
+        cover_row.setContentsMargins(0, 2, 0, 2)
+        cover_row.addStretch(1)
+        self.album_cover_label = QLabel("")
+        self.album_cover_label.setObjectName("albumCoverLabel")
+        self.album_cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.album_cover_label.setFixedSize(self._album_cover_size, self._album_cover_size)
+        cover_row.addWidget(self.album_cover_label)
+        cover_row.addStretch(1)
+        self._layout.addLayout(cover_row)
         
         self.now_playing_label = QLabel(f"{self.i18n.t('now_playing_prefix')} –")
         self.now_playing_label.setObjectName('nowPlayingLabel')
@@ -291,8 +313,11 @@ class ListenMoePlayer(QWidget):
             self.now_playing_changed.connect(self.now_playing_label.setText)
             self.status_changed.connect(self.status_label.setText)
             self.label_refresh.connect(self.update_now_playing_label)
+            self.cover_data_ready.connect(self._on_album_cover_data_ready)
+            self.now_playing_event.connect(self._on_now_playing)
         except Exception:
             pass
+        self._set_album_cover_pixmap(None)
 
     def _init_meta_section(self):
         """Restore Channel and Format information row."""
@@ -787,10 +812,26 @@ class ListenMoePlayer(QWidget):
         except Exception: self.play_stream()
 
     # 3. WebSocket & Metadata Events
-    def _on_now_playing(self, title: str, artist: str, duration: Optional[int] = None, start_ts: Optional[float] = None):
+    def _on_now_playing(
+        self,
+        title: str,
+        artist: str,
+        duration: Optional[int] = None,
+        start_ts: Optional[float] = None,
+        album_cover: Optional[str] = None
+    ):
+        # WebSocket callback arrives from a worker thread: marshal to UI thread first.
+        try:
+            if QThread.currentThread() != self.thread():
+                self.now_playing_event.emit(title, artist, duration, start_ts, album_cover)
+                return
+        except Exception:
+            pass
         try:
             try:
-                self.log.debug(f"[DEV] Metadata received: title={title}, dur={duration}, start_ts={start_ts}")
+                self.log.debug(
+                    f"[DEV] Metadata received: title={title}, dur={duration}, start_ts={start_ts}, cover={album_cover}"
+                )
             except Exception: pass
             
             self._current_title = title or self.i18n.t('unknown')
@@ -798,6 +839,7 @@ class ListenMoePlayer(QWidget):
             # Support dur=0 as a valid state (Live/Unknown) instead of resetting to None
             self._current_duration_seconds = int(duration) if duration is not None and int(duration) >= 0 else None
             self._current_start_epoch = float(start_ts) if start_ts is not None else None
+            self._current_cover_ref = album_cover if isinstance(album_cover, str) and album_cover.strip() else None
             
             # --- Automatic Skew Compensation ---
             try:
@@ -1025,6 +1067,7 @@ class ListenMoePlayer(QWidget):
                 QWidget {{ background-color: #121212; color: #e0e0e0; }}
                 QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
                 QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
+                QLabel#albumCoverLabel {{ background-color: #101010; border: 1px solid #2a2a2a; border-radius: 10px; }}
                 QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
                 QPushButton:hover {{ background-color: #2a2a2a; }}
                 QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
@@ -1115,6 +1158,11 @@ class ListenMoePlayer(QWidget):
             # Synchronize custom progress bar color
             if hasattr(self, 'song_progress'):
                 self.song_progress.setAccentColor(accent)
+
+            try:
+                self._set_album_cover_pixmap(self._cover_cache.get(self._current_cover_url or ""))
+            except Exception:
+                self._set_album_cover_pixmap(None)
             
             # Apply dark titlebar on Windows
             try:
@@ -1155,6 +1203,143 @@ class ListenMoePlayer(QWidget):
             return QIcon(dst)
         except Exception:
             return icon
+
+    def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
+        try:
+            if not isinstance(cover_ref, str):
+                return None
+            value = cover_ref.strip()
+            if not value:
+                return None
+            low = value.lower()
+            if low.startswith("http://") or low.startswith("https://"):
+                return value
+            return f"https://cdn.listen.moe/covers/{value.lstrip('/')}"
+        except Exception:
+            return None
+
+    def _request_album_cover(self, cover_ref: Optional[str]) -> None:
+        try:
+            cover_url = self._normalize_album_cover_url(cover_ref)
+            if cover_url == self._current_cover_url:
+                return
+            self._current_cover_url = cover_url
+
+            if not cover_url:
+                self._set_album_cover_pixmap(None)
+                return
+
+            cached = self._cover_cache.get(cover_url)
+            if cached is not None and not cached.isNull():
+                self._set_album_cover_pixmap(cached)
+                return
+
+            self._set_album_cover_pixmap(None)
+            with self._cover_download_lock:
+                if cover_url in self._cover_download_inflight:
+                    return
+                self._cover_download_inflight.add(cover_url)
+
+            worker = threading.Thread(
+                target=self._download_album_cover_worker,
+                args=(cover_url,),
+                daemon=True
+            )
+            worker.start()
+        except Exception:
+            pass
+
+    def _download_album_cover_worker(self, cover_url: str) -> None:
+        raw = b""
+        try:
+            req = urllib.request.Request(
+                cover_url,
+                headers={"User-Agent": "KikuMoe/1.9.0"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as res:
+                chunk = res.read((4 * 1024 * 1024) + 1)
+                if isinstance(chunk, (bytes, bytearray)) and 0 < len(chunk) <= (4 * 1024 * 1024):
+                    raw = bytes(chunk)
+        except Exception:
+            pass
+        finally:
+            try:
+                with self._cover_download_lock:
+                    self._cover_download_inflight.discard(cover_url)
+            except Exception:
+                pass
+        try:
+            self.cover_data_ready.emit(cover_url, raw)
+        except Exception:
+            pass
+
+    def _on_album_cover_data_ready(self, cover_url: str, raw: bytes) -> None:
+        try:
+            if not raw:
+                if cover_url and cover_url == self._current_cover_url:
+                    self._set_album_cover_pixmap(None)
+                return
+
+            pixmap = QPixmap()
+            if not pixmap.loadFromData(raw):
+                return
+
+            self._cover_cache[cover_url] = pixmap
+            if len(self._cover_cache) > 64:
+                oldest_key = next(iter(self._cover_cache))
+                if oldest_key != cover_url:
+                    self._cover_cache.pop(oldest_key, None)
+
+            if cover_url and cover_url == self._current_cover_url:
+                self._set_album_cover_pixmap(pixmap)
+        except Exception:
+            pass
+
+    def _set_album_cover_pixmap(self, pixmap: Optional[QPixmap]) -> None:
+        try:
+            if not hasattr(self, "album_cover_label"):
+                return
+
+            side = max(96, int(getattr(self, "_album_cover_size", 190)))
+            target_size = QSize(side, side)
+
+            if pixmap is None or pixmap.isNull():
+                canvas = QPixmap(target_size)
+                canvas.fill(QColor("#101010"))
+
+                fallback_pm = None
+                try:
+                    if hasattr(self, "_icon_app") and self._icon_app is not None and not self._icon_app.isNull():
+                        fallback_pm = self._icon_app.pixmap(int(side * 0.68), int(side * 0.68))
+                except Exception:
+                    fallback_pm = None
+
+                if fallback_pm is not None and not fallback_pm.isNull():
+                    painter = QPainter(canvas)
+                    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                    x = (side - fallback_pm.width()) // 2
+                    y = (side - fallback_pm.height()) // 2
+                    painter.drawPixmap(x, y, fallback_pm)
+                    painter.end()
+                self.album_cover_label.setPixmap(canvas)
+                return
+
+            fitted = pixmap.scaled(
+                target_size,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            if fitted.isNull():
+                return
+
+            if fitted.width() != side or fitted.height() != side:
+                x = max(0, (fitted.width() - side) // 2)
+                y = max(0, (fitted.height() - side) // 2)
+                fitted = fitted.copy(x, y, side, side)
+
+            self.album_cover_label.setPixmap(fitted)
+        except Exception:
+            pass
 
     def _make_tray_icon(self, icon: QIcon) -> QIcon:
         """Build a tray-friendly square icon that stays large without cropping."""
@@ -1698,6 +1883,10 @@ class ListenMoePlayer(QWidget):
 
 
     def update_now_playing_label(self):
+        try:
+            self._request_album_cover(self._current_cover_ref)
+        except Exception:
+            pass
         title = self._current_title or self.t('unknown')
         artist = self._current_artist or ''
         prefix = self.t('now_playing_prefix')

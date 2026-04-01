@@ -1,14 +1,17 @@
 import json
 import threading
 from typing import Callable, Optional
-from websocket import WebSocketApp
+try:
+    from websocket import WebSocketApp
+except Exception:
+    WebSocketApp = None  # type: ignore[assignment]
 from datetime import datetime, timezone
 
 WS_URL = "wss://listen.moe/gateway_v2"
 
 class NowPlayingWS:
     def __init__(self,
-                 on_now_playing: Callable[[str, str, Optional[int], Optional[float]], None],
+                 on_now_playing: Callable[[str, str, Optional[int], Optional[float], Optional[str]], None],
                  on_error_text: Callable[[str], None],
                  on_closed_text: Callable[[str], None],
                  channel_filter: Optional[Callable[[dict], bool]] = None,
@@ -25,6 +28,13 @@ class NowPlayingWS:
         self.ws_url = ws_url or WS_URL
 
     def start(self):
+        if WebSocketApp is None:
+            try:
+                self.on_error_text("websocket-client non installato: impossibile avviare il websocket.")
+            except Exception:
+                pass
+            return
+
         def on_open(ws):
             # Try to request an immediate TRACK_UPDATE right after opening
             try:
@@ -70,6 +80,15 @@ class NowPlayingWS:
                         duration = int(duration) if duration is not None else None
                     except Exception:
                         duration = None
+                    album_cover = None
+                    try:
+                        albums = song.get("albums") or []
+                        if isinstance(albums, list) and len(albums) > 0:
+                            first_album = albums[0] or {}
+                            if isinstance(first_album, dict):
+                                album_cover = first_album.get("image")
+                    except Exception:
+                        album_cover = None
                     start_ts = None
                     try:
                         start_time_iso = d.get("startTime")
@@ -96,7 +115,7 @@ class NowPlayingWS:
                                     start_ts = None
                     except Exception:
                         start_ts = None
-                    self.on_now_playing(title, artist_name, duration, start_ts)
+                    self.on_now_playing(title, artist_name, duration, start_ts, album_cover)
 
         def on_error(ws, error):
             self.on_error_text(str(error))
