@@ -148,8 +148,8 @@ Primary backend. Launches FFmpeg as a subprocess and writes PCM output to a PyAu
 Fallback backend via `python-vlc` bindings.
 
 - VLC instance options: `--network-caching`, `--http-reconnect`, `--quiet`.
-- Custom `libvlc.dll` path via `KEY_LIBVLC_PATH`.
-- If `libvlc.dll` is not found at startup, raises an exception caught by the main window.
+- Custom VLC library path via `KEY_LIBVLC_PATH`: on Windows, adds the directory via `os.add_dll_directory`; on Linux, sets `VLC_PLUGIN_PATH` to the `plugins/` subdirectory.
+- If libVLC is not found at startup, the error is caught by the main window and the backend is marked unavailable.
 
 ---
 
