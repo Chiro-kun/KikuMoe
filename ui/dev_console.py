@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog, QSizePolicy
 from PyQt5.QtGui import QTextCursor, QTextOption
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
+from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 import builtins
 import logging
 
@@ -573,24 +574,7 @@ class DevConsole(QObject):
 
     def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
         try:
-            import sys
-            if sys.platform != 'win32':
-                return
             dlg = getattr(self, '_console_dialog', None)
-            hwnd = int(dlg.winId()) if dlg and hasattr(dlg, 'winId') else None
-            if not hwnd:
-                return
-            import ctypes
-            value = ctypes.c_int(1 if enable else 0)
-            # Windows 10 1903+ (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
-            except Exception:
-                pass
-            # Windows 10 1809 (DWMWA_USE_IMMERSIVE_DARK_MODE = 19)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
-            except Exception:
-                pass
+            apply_windows_titlebar_dark_mode(dlg, enable)
         except Exception:
             pass

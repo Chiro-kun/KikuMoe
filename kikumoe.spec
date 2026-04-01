@@ -3,8 +3,9 @@
 import os
 from pathlib import Path
 
-# Project layout (use current working directory as project root)
-project_root = Path(os.path.abspath('.'))
+# Project layout (resolve from this spec file location)
+spec_dir = Path(globals().get("SPECPATH", os.path.abspath("."))).resolve()
+project_root = spec_dir.parent
 src_dir = project_root / "KikuMoe"
 icon_dir = src_dir / "icons"
 
@@ -72,8 +73,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='KikuMoe.ico',
-    version=str(project_root / 'version_info.txt'),
+    icon=str(project_root / 'packaging' / 'windows' / 'KikuMoe.ico'),
+    version=str(project_root / 'packaging' / 'windows' / 'version_info.txt'),
     argv_emulation=False,
-    manifest='KikuMoe.manifest',
+    manifest=str(project_root / 'packaging' / 'windows' / 'KikuMoe.manifest'),
 )

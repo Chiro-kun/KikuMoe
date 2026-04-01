@@ -7,9 +7,9 @@ import subprocess
 import sys
 import struct
 import re
-from logger import get_logger
+from core.logger import get_logger
 from PyQt5.QtCore import QSettings
-from constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
+from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
 
 try:
     import pyaudio

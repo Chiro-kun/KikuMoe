@@ -29,6 +29,13 @@ Dalla root del repository:
 python KikuMoe/KikuMoe.py
 ```
 
+## Struttura progetto
+- `KikuMoe/core`: moduli condivisi (config, costanti, i18n, logger, utilità now-playing)
+- `KikuMoe/audio`: backend audio (`player_ffmpeg`, `player_vlc`)
+- `KikuMoe/network`: client WebSocket (`ws_client`)
+- `KikuMoe/ui`: interfaccia (main window, tray, settings, dev console)
+- `packaging/windows`: asset build Windows (`kikumoe.spec`, manifest, version info, icona)
+
 ## Funzionalità principali
 - Riproduzione stream J-POP/K-POP (Vorbis/MP3)
 - Controlli Play, Pausa, Stop, Volume, Muto
@@ -76,6 +83,9 @@ Usa solo lo script di build dalla root:
 
 Output:
 - `dist\KikuMoe-1.9.0.exe`
+
+Spec usato dal build:
+- `packaging/windows/kikumoe.spec`
 
 Se VLC non è nel path predefinito in fase di build, imposta prima:
 

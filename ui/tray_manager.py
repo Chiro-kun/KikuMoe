@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication, QActi
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import QObject, QPoint, QTimer
 from typing import Optional, Callable
-from constants import KEY_CHANNEL, KEY_FORMAT
+from core.constants import KEY_CHANNEL, KEY_FORMAT
 
 class TrayManager(QObject):
     """

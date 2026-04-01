@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Optional, Callable
 import os
 
-from constants import APP_NAME, APP_VERSION
+from core.constants import APP_NAME, APP_VERSION
 
 try:
     import vlc

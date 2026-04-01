@@ -2,7 +2,8 @@ $ErrorActionPreference = "Stop"
 Write-Host "Setting up PyInstaller..." -ForegroundColor Cyan
 python -m pip install --upgrade pyinstaller pyinstaller-hooks-contrib
 
-$specPath = Join-Path $PSScriptRoot 'kikumoe.spec'
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$specPath = Join-Path $projectRoot 'packaging\windows\kikumoe.spec'
 
 Write-Host "Running: pyinstaller --noconfirm --clean $specPath" -ForegroundColor Green
 pyinstaller --noconfirm --clean $specPath

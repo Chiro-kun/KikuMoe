@@ -3,8 +3,9 @@ from PyQt5.QtWidgets import (
     QPushButton, QLineEdit, QFileDialog, QSpinBox
 )
 from PyQt5.QtCore import Qt, QSettings, pyqtSignal
-from i18n import I18n
-from constants import (
+from core.i18n import I18n
+from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+from core.constants import (
     ORG_NAME,
     APP_SETTINGS,
     KEY_LANG,
@@ -313,22 +314,7 @@ class SettingsDialog(QDialog):
 
     def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
         try:
-            import sys
-            if sys.platform != 'win32':
-                return
-            hwnd = int(self.winId()) if hasattr(self, 'winId') else None
-            if not hwnd:
-                return
-            import ctypes
-            value = ctypes.c_int(1 if enable else 0)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
-            except Exception:
-                pass
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
-            except Exception:
-                pass
+            apply_windows_titlebar_dark_mode(self, enable)
         except Exception:
             pass
 

@@ -9,15 +9,13 @@ from typing import Optional
 import os
 import time
 import re
-import ctypes
-import sys
-from i18n import I18n
-from ws_client import NowPlayingWS
-from player_ffmpeg import PlayerFFmpeg
-from player_vlc import PlayerVLC
-from config import STREAMS
+from core.i18n import I18n
+from network.ws_client import NowPlayingWS
+from audio.player_ffmpeg import PlayerFFmpeg
+from audio.player_vlc import PlayerVLC
+from core.config import STREAMS
 from ui.settings_dialog import SettingsDialog
-from constants import (
+from core.constants import (
     APP_TITLE,
     ORG_NAME,
     APP_SETTINGS,
@@ -43,10 +41,11 @@ from constants import (
     KEY_CLOSE_TO_TRAY
 )
 import threading
-from logger import get_logger
-from now_playing import compute_display_mmss
+from core.logger import get_logger
+from core.now_playing import compute_display_mmss
 from ui.tray_manager import TrayManager
 from ui.dev_console import DevConsole
+from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 # Custom Progress Bar for Pixel-Perfect Fluidity
 class SmoothProgressBar(QWidget):
@@ -667,9 +666,7 @@ class ListenMoePlayer(QWidget):
             msg.setCheckBox(cb)
             
             try:
-                hwnd = int(msg.winId())
-                val = ctypes.c_int(1)
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+                apply_windows_titlebar_dark_mode(msg, True)
             except Exception: pass
 
             msg.exec_()
@@ -860,6 +857,23 @@ class ListenMoePlayer(QWidget):
             if hasattr(self, 'session_label'):
                 self.session_label.setText(self.i18n.t('session_timer', time=t))
         except Exception: pass
+
+    def _apply_session_timer_running_state(self, running: bool) -> None:
+        """Apply session timer state and refresh session/tray labels."""
+        try:
+            if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
+                if running:
+                    if self._session_timer and not self._session_timer.isActive():
+                        self._session_timer.start()
+                else:
+                    if self._session_timer and self._session_timer.isActive():
+                        self._session_timer.stop()
+                if hasattr(self, 'session_label'):
+                    self.session_label.show()
+                self._update_session_label()
+                self.update_tray_texts()
+        except Exception:
+            pass
 
     def _on_song_tick(self) -> None:
         """Updates the song progress bar every second based on start timestamp."""
@@ -1117,23 +1131,7 @@ class ListenMoePlayer(QWidget):
 
     def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
         try:
-            import sys
-            if sys.platform != 'win32':
-                return
-            hwnd = int(self.winId()) if hasattr(self, 'winId') else None
-            if not hwnd:
-                return
-            value = ctypes.c_int(1 if enable else 0)
-            # Windows 10 1903+ (DWMWA_USE_IMMERSIVE_DARK_MODE = 20)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
-            except Exception:
-                pass
-            # Windows 10 1809 (DWMWA_USE_IMMERSIVE_DARK_MODE = 19)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
-            except Exception:
-                pass
+            apply_windows_titlebar_dark_mode(self, enable)
         except Exception:
             pass
 
@@ -1865,15 +1863,7 @@ class ListenMoePlayer(QWidget):
                 pass
             # Aggiorna stato dei controlli in base allo stato corrente (con override UI pausa)
             try:
-                has_player = hasattr(self, 'player') and self.player is not None
-                is_playing = bool(self.player.is_playing()) if has_player else False
-                is_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
-                ui_paused = bool(getattr(self, '_ui_paused', False))
-                eff_paused = bool(ui_paused or is_paused)
-                eff_playing = bool(is_playing and not eff_paused)
-                is_muted = bool(getattr(self.player, 'get_mute', lambda: self._get_bool(KEY_MUTE, False))()) if has_player else bool(self._get_bool(KEY_MUTE, False))
-                if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                    self.tray_mgr.update_controls_state(eff_playing, eff_paused, is_muted)
+                self._update_tray_controls()
             except Exception:
                 pass
         except Exception:
@@ -1890,38 +1880,23 @@ class ListenMoePlayer(QWidget):
 
     def _tray_change_channel(self, channel: str) -> None:
         try:
-            # Aggiorna impostazione
-            try:
-                self.settings.setValue(KEY_CHANNEL, channel)
-            except Exception:
-                pass
-            # Aggiorna intestazione/tray
-            try:
-                self.update_header_label()
-            except Exception:
-                pass
-            try:
-                self.update_tray_texts()
-            except Exception:
-                pass
-            # Riavvia il WS per il nuovo canale
-            try:
-                self._restart_ws_for_channel(channel)
-            except Exception:
-                pass
-            # Riavvia stream se già in riproduzione
-            self._restart_stream_after_channel_format_change()
+            self._apply_tray_stream_setting_change(KEY_CHANNEL, channel, ws_channel=channel)
         except Exception:
             pass
 
     def _tray_change_format(self, fmt: str) -> None:
         try:
-            # Aggiorna impostazione
+            self._apply_tray_stream_setting_change(KEY_FORMAT, fmt)
+        except Exception:
+            pass
+
+    def _apply_tray_stream_setting_change(self, key: str, value: str, ws_channel: Optional[str] = None) -> None:
+        """Shared flow for tray changes that affect stream/channel/format."""
+        try:
             try:
-                self.settings.setValue(KEY_FORMAT, fmt)
+                self.settings.setValue(key, value)
             except Exception:
                 pass
-            # Aggiorna intestazione/tray
             try:
                 self.update_header_label()
             except Exception:
@@ -1930,7 +1905,11 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
             except Exception:
                 pass
-            # Riavvia stream se già in riproduzione
+            if ws_channel is not None:
+                try:
+                    self._restart_ws_for_channel(ws_channel)
+                except Exception:
+                    pass
             self._restart_stream_after_channel_format_change()
         except Exception:
             pass
@@ -2059,14 +2038,8 @@ class ListenMoePlayer(QWidget):
                         pass
                     # Start session timer on play if enabled
                     try:
-                        if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                            # Do not reset automatically; keep cumulative during session unless stopped
-                            if self._session_timer and not self._session_timer.isActive():
-                                self._session_timer.start()
-                            if hasattr(self, 'session_label'):
-                                self.session_label.show()
-                            self._update_session_label()
-                            self.update_tray_texts()
+                        # Do not reset automatically; keep cumulative during session unless stopped
+                        self._apply_session_timer_running_state(True)
                     except Exception:
                         pass
         except Exception as e:
@@ -2075,7 +2048,6 @@ class ListenMoePlayer(QWidget):
     def pause_resume(self) -> None:
         try:
             with self._playback_lock:
-                new_paused = bool(getattr(self, '_ui_paused', False))
                 try:
                     self.log.info("[UI] pause_resume clicked")
                 except Exception:
@@ -2094,17 +2066,7 @@ class ListenMoePlayer(QWidget):
                 self.player.pause_toggle()
                 # Gestisci il session timer e aggiorna solo il tooltip
                 try:
-                    if self._get_bool(KEY_SESSION_TIMER_ENABLED, True):
-                        if new_paused:
-                            if self._session_timer and self._session_timer.isActive():
-                                self._session_timer.stop()
-                        else:
-                            if self._session_timer and not self._session_timer.isActive():
-                                self._session_timer.start()
-                        if hasattr(self, 'session_label'):
-                            self.session_label.show()  # keep visible
-                        self._update_session_label()
-                        self.update_tray_texts()  # aggiorna tooltip
+                    self._apply_session_timer_running_state(not new_paused)
                 except Exception:
                     pass
         except Exception as e:
@@ -2229,14 +2191,7 @@ class ListenMoePlayer(QWidget):
             pass
         # Aggiorna testi azioni tray (Muto/Unmute e Play/Pausa) rispettando lo stato UI di pausa
         try:
-            has_player = hasattr(self, 'player') and self.player is not None
-            is_playing = bool(self.player.is_playing()) if has_player else False
-            is_paused = bool(getattr(self.player, 'is_paused', lambda: False)()) if has_player else False
-            ui_paused = bool(getattr(self, '_ui_paused', False))
-            eff_paused = bool(ui_paused or is_paused)
-            eff_playing = bool(is_playing and not eff_paused)
-            if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                self.tray_mgr.update_controls_state(eff_playing, eff_paused, bool(checked))
+            self._update_tray_controls()
         except Exception:
             pass
 
@@ -2257,19 +2212,7 @@ class ListenMoePlayer(QWidget):
                         msg.setIcon(QMessageBox.Question)
                         # Forza titlebar scura su Windows per il QMessageBox
                         try:
-                            import sys
-                            if sys.platform == 'win32' and hasattr(msg, 'winId'):
-                                import ctypes
-                                hwnd = int(msg.winId())
-                                value = ctypes.c_int(1)
-                                try:
-                                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
-                                except Exception:
-                                    pass
-                                try:
-                                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(value), ctypes.sizeof(value))
-                                except Exception:
-                                    pass
+                            apply_windows_titlebar_dark_mode(msg, True)
                         except Exception:
                             pass
                         msg.exec_()

@@ -8,7 +8,18 @@ APP_NAME = "KikuMoe"
 
 def _get_project_root() -> str:
     try:
-        return os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+        start = os.path.abspath(os.path.dirname(__file__))
+        cur = start
+        for _ in range(5):
+            if os.path.isfile(os.path.join(cur, "version.yml")):
+                return cur
+            if os.path.isfile(os.path.join(cur, "packaging", "windows", "version_info.txt")):
+                return cur
+            parent = os.path.abspath(os.path.join(cur, os.pardir))
+            if parent == cur:
+                break
+            cur = parent
+        return os.path.abspath(os.path.join(start, os.pardir, os.pardir))
     except Exception:
         return os.getcwd()
 
@@ -44,6 +55,7 @@ def _read_version_from_files() -> str:
         root = _get_project_root()
         candidate_paths = [
             os.path.join(root, "version_info.txt"),
+            os.path.join(root, "packaging", "windows", "version_info.txt"),
         ]
         try:
             if getattr(sys, "frozen", False):
