@@ -1,12 +1,12 @@
 # Build
 
-Produces a single-file Windows executable (`onefile`) via PyInstaller.
-
-> Building is **only supported on Windows**. To run the app from source on Linux or macOS, see the [README](../README.md).
+Produces a single-file executable (`onefile`) via PyInstaller. Both Windows and Linux are supported.
 
 ---
 
-## Build script
+## Windows
+
+### Build script
 
 ```powershell
 # From the repository root
@@ -21,9 +21,7 @@ The script runs in order:
 4. Runs `pyinstaller --noconfirm --clean kikumoe.spec`
 5. Produces `dist\KikuMoe-<version>.exe`
 
----
-
-## VLC bundling
+### VLC bundling
 
 To bundle VLC into the executable, set the environment variable before building:
 
@@ -37,20 +35,49 @@ $env:VLC_DIR = "C:\Program Files\VideoLAN\VLC"
 
 If `VLC_DIR` is not set and VLC is not at the default path, VLC binaries are simply omitted from the executable.
 
----
-
-## Manual build
+### Manual build
 
 ```powershell
 python -m PyInstaller --noconfirm --clean kikumoe.spec
 ```
 
----
-
-## Output
+### Output
 
 ```
-dist\KikuMoe-<version>.exe   # onefile executable
+dist\KikuMoe-<version>.exe
+```
+
+---
+
+## Linux
+
+### Build script
+
+```bash
+# From the repository root
+./build.sh
+```
+
+The script runs in order:
+
+1. Upgrades `pyinstaller` and `pyinstaller-hooks-contrib`
+2. Installs dependencies from `requirements.txt`
+3. Validates the environment (`import PyQt5, websocket`)
+4. Runs `pyinstaller --noconfirm --clean kikumoe.spec`
+5. Produces `dist/KikuMoe-<version>`
+
+VLC is not bundled on Linux; it must be installed system-wide (`python-vlc` will find it automatically). The FFmpeg backend is used by default and requires `ffmpeg` to be in `PATH`.
+
+### Manual build
+
+```bash
+python3 -m PyInstaller --noconfirm --clean kikumoe.spec
+```
+
+### Output
+
+```
+dist/KikuMoe-<version>
 ```
 
 ---
