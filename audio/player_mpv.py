@@ -8,6 +8,11 @@ from core.constants import APP_NAME, APP_VERSION
 
 _IS_WIN32 = sys.platform == "win32"
 
+# MPV end-file reason integers (MPV_END_FILE_REASON_*)
+_MPV_END_STOP = 2
+_MPV_END_QUIT = 3
+_MPV_END_ERROR = 4
+
 try:
     import mpv
 except Exception:
@@ -21,6 +26,9 @@ class PlayerMPV:
         self._volume: int = 100
         self._ready: bool = False
         self._player: Optional[Any] = None
+        # Set when stop()/force_cleanup() is called so the end-file callback
+        # doesn't mis-classify the resulting event as a natural 'ended'.
+        self._stopping: bool = False
         self.log = get_logger('PlayerMPV')
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -50,6 +58,7 @@ class PlayerMPV:
 
             @self._player.event_callback('start-file')
             def _on_start(event):
+                self._stopping = False
                 self._emit('opening', None)
 
             @self._player.event_callback('file-loaded')
@@ -58,14 +67,26 @@ class PlayerMPV:
 
             @self._player.event_callback('end-file')
             def _on_end(event):
-                # stop() handles 'stopped' explicitly; only emit for EOF and errors
+                # If stop()/force_cleanup() set the flag, absorb this event —
+                # 'stopped' was already emitted by the calling method.
+                if self._stopping:
+                    self._stopping = False
+                    return
+
+                # Determine reason: event.reason is an int in libmpv
+                # (MPV_END_FILE_REASON_STOP=2, QUIT=3, ERROR=4, EOF=0/1).
+                # Guard against string/enum forms in future python-mpv versions.
+                reason = getattr(event, 'reason', None)
                 try:
-                    reason = str(getattr(event, 'reason', '') or '').lower()
+                    reason_int = int(reason)
                 except Exception:
-                    reason = ''
-                if 'stop' in reason or 'quit' in reason:
-                    pass
-                elif 'error' in reason:
+                    reason_int = -1
+                reason_str = str(reason).lower()
+
+                if reason_int in (_MPV_END_STOP, _MPV_END_QUIT) or \
+                        'stop' in reason_str or 'quit' in reason_str:
+                    self._emit('stopped', None)
+                elif reason_int == _MPV_END_ERROR or 'error' in reason_str:
                     self._emit('error', None)
                 else:
                     self._emit('ended', None)
@@ -103,6 +124,7 @@ class PlayerMPV:
             return False
         try:
             assert self._player is not None
+            self._stopping = False
             self._player.play(url)
             return True
         except Exception:
@@ -112,11 +134,19 @@ class PlayerMPV:
     def stop(self) -> None:
         if not self.is_ready():
             return
+        assert self._player is not None
+        # Only set the flag when there's actually something playing/paused;
+        # if MPV is already idle no end-file event will fire and the flag
+        # would linger, suppressing the next natural 'ended'.
         try:
-            assert self._player is not None
+            idle = bool(getattr(self._player, 'idle_active', True))
+            self._stopping = not idle
+        except Exception:
+            self._stopping = False
+        try:
             self._player.stop()
         except Exception:
-            pass
+            self._stopping = False
         self._emit('stopped', None)
 
     def pause_toggle(self) -> None:
@@ -196,8 +226,13 @@ class PlayerMPV:
     def force_cleanup(self) -> None:
         if not self.is_ready():
             return
+        assert self._player is not None
         try:
-            assert self._player is not None
+            idle = bool(getattr(self._player, 'idle_active', True))
+            self._stopping = not idle
+        except Exception:
+            self._stopping = False
+        try:
             self._player.stop()
         except Exception:
-            pass
+            self._stopping = False
