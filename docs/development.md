@@ -24,7 +24,7 @@ poetry run python KikuMoe.py
 All settings persist via `QSettings`:
 
 ```python
-from PyQt5.QtCore import QSettings
+from PyQt6.QtCore import QSettings
 from core.constants import ORG_NAME, APP_SETTINGS, KEY_VOLUME
 
 settings = QSettings(ORG_NAME, APP_SETTINGS)
