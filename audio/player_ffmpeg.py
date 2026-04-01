@@ -8,7 +8,7 @@ import sys
 import struct
 import re
 from core.logger import get_logger
-from PyQt5.QtCore import QSettings
+from PyQt6.QtCore import QSettings
 from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
 
 _IS_WIN32 = sys.platform == "win32"

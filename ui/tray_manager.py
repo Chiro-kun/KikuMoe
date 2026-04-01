@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction, QApplication, QActionGroup
-from PyQt5.QtGui import QIcon, QFont
-from PyQt5.QtCore import QObject, QPoint, QTimer
+from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
+from PyQt6.QtGui import QIcon, QFont, QAction, QActionGroup
+from PyQt6.QtCore import QObject, QPoint, QTimer
 from typing import Optional, Callable
 from core.constants import KEY_CHANNEL, KEY_FORMAT
 

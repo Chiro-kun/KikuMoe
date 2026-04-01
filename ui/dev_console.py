@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog, QSizePolicy
-from PyQt5.QtGui import QTextCursor, QTextOption
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog, QSizePolicy
+from PyQt6.QtGui import QTextCursor, QTextOption
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 import builtins
 import logging
@@ -12,7 +12,7 @@ class _QtStream(QObject):
     def __init__(self, append_fn):
         super().__init__()
         try:
-            self.text_emitted.connect(append_fn, Qt.QueuedConnection)
+            self.text_emitted.connect(append_fn, Qt.ConnectionType.QueuedConnection)
         except Exception:
             pass
 
@@ -301,9 +301,9 @@ class DevConsole(QObject):
         v.setSpacing(8)
         self._console_text = QTextEdit()
         self._console_text.setReadOnly(True)
-        self._console_text.setLineWrapMode(QTextEdit.WidgetWidth)
+        self._console_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         try:
-            self._console_text.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+            self._console_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         except Exception:
             pass
         try:
@@ -311,7 +311,7 @@ class DevConsole(QObject):
         except Exception:
             pass
         try:
-            sp = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            sp = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self._console_text.setSizePolicy(sp)
         except Exception:
             pass
@@ -477,10 +477,10 @@ class DevConsole(QObject):
             # Gestione autoscroll: se disabilitato, preservo posizione scrollbar
             sb = self._console_text.verticalScrollBar() if hasattr(self._console_text, 'verticalScrollBar') else None
             prev_val = sb.value() if sb is not None else None
-            self._console_text.moveCursor(QTextCursor.End)
+            self._console_text.moveCursor(QTextCursor.MoveOperation.End)
             self._console_text.insertPlainText(filtered)
             if self._autoscroll_enabled:
-                self._console_text.moveCursor(QTextCursor.End)
+                self._console_text.moveCursor(QTextCursor.MoveOperation.End)
             else:
                 if sb is not None and prev_val is not None:
                     sb.setValue(prev_val)
@@ -518,13 +518,13 @@ class DevConsole(QObject):
             if not self._console_text:
                 return
             if checked:
-                self._console_text.setLineWrapMode(QTextEdit.WidgetWidth)
+                self._console_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
                 try:
-                    self._console_text.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+                    self._console_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
                 except Exception:
                     pass
             else:
-                self._console_text.setLineWrapMode(QTextEdit.NoWrap)
+                self._console_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         except Exception:
             pass
 

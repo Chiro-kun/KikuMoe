@@ -1,10 +1,10 @@
 import os
 import sys
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox,
     QPushButton, QLineEdit, QFileDialog, QSpinBox
 )
-from PyQt5.QtCore import Qt, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from core.i18n import I18n
 
 _IS_WIN32 = sys.platform == "win32"
@@ -147,10 +147,10 @@ class SettingsDialog(QDialog):
         lab_backend.setMinimumWidth(140)
         backend_row.addWidget(lab_backend)
         self.cmb_audio_backend = QComboBox()
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_auto'), userData='auto')
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_ffmpeg'), userData='ffmpeg')
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_mpv'), userData='mpv')
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_vlc'), userData='vlc')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_auto'), 'auto')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_ffmpeg'), 'ffmpeg')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_mpv'), 'mpv')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_vlc'), 'vlc')
         saved_backend = self.settings.value(KEY_AUDIO_BACKEND, 'auto')
         for i in range(self.cmb_audio_backend.count()):
             if self.cmb_audio_backend.itemData(i) == saved_backend:
@@ -172,7 +172,7 @@ class SettingsDialog(QDialog):
             pass
         # Prima voce: default di sistema
         try:
-            self.cmb_audio_device.addItem(self.i18n.t('settings_audio_default'), userData=None)
+            self.cmb_audio_device.addItem(self.i18n.t('settings_audio_default'), None)
         except Exception:
             pass
         audio_row.addWidget(self.cmb_audio_device, 1)
@@ -291,7 +291,7 @@ class SettingsDialog(QDialog):
             parent = self.parent()
             if parent and hasattr(parent, 'open_dev_console'):
                 # Apri la console con parent = finestra principale
-                from PyQt5.QtCore import QTimer
+                from PyQt6.QtCore import QTimer
                 QTimer.singleShot(0, lambda: parent.open_dev_console(parent))
         except Exception:
             pass
@@ -386,7 +386,7 @@ class SettingsDialog(QDialog):
                 if max_output > 0:
                     # Show name and index in label
                     label = f"{name} (#{i})"
-                    self.cmb_audio_device.addItem(label, userData=i)
+                    self.cmb_audio_device.addItem(label, i)
             # Restore persisted selection if available
             persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
             if persisted != '' and persisted is not None:

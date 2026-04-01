@@ -5,7 +5,7 @@
 | Component | Technology |
 |---|---|
 | Language | Python 3.8+ |
-| GUI | PyQt5 (Qt5) |
+| GUI | PyQt6 (Qt6) |
 | Audio | FFmpeg (subprocess) + PyAudio, or python-mpv, or python-vlc |
 | Metadata | WebSocket (`websocket-client`) → `wss://listen.moe/gateway_v2` |
 | Settings persistence | `QSettings` (Windows registry, INI file on other OS) |
@@ -43,7 +43,7 @@ KikuMoe/                     # Repository root
 ├── network/                 # Network client
 │   └── ws_client.py         # NowPlayingWS: LISTEN.moe Gateway v2 WebSocket
 │
-├── ui/                      # PyQt5 GUI
+├── ui/                      # PyQt6 GUI
 │   ├── main_window.py       # ListenMoePlayer (main window)
 │   ├── settings_dialog.py   # Settings window
 │   ├── tray_manager.py      # System tray icon and menu

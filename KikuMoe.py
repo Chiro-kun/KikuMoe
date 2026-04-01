@@ -1,7 +1,7 @@
 import sys
 import os
 import traceback
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 from ui.main_window import ListenMoePlayer
 
 _IS_WIN32 = sys.platform == "win32"
@@ -33,7 +33,7 @@ def main() -> int:
         app = QApplication(sys.argv)
         window = ListenMoePlayer()
         window.show()
-        return app.exec_()
+        return app.exec()
     except Exception as exc:
         log_path = _write_crash_log(exc)
         try:

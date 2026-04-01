@@ -1,10 +1,10 @@
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
-    QSlider, QProgressBar, QShortcut, QSpinBox,
+    QSlider, QProgressBar, QSpinBox,
     QDialog, QMessageBox, QSizePolicy, QCheckBox, QStyle, QStackedLayout
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent, QThread
-from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
+from PyQt6.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent, QThread
+from PyQt6.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor, QShortcut
 from typing import Dict, Optional, Set
 import os
 import time
@@ -59,7 +59,7 @@ class SmoothProgressBar(QWidget):
         self._max = 100
         self._accent_color = QColor("#c2185b") # Match app default accent color
         self.setFixedHeight(4)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def setAccentColor(self, color_str):
         self._accent_color = QColor(color_str)
@@ -80,7 +80,7 @@ class SmoothProgressBar(QWidget):
     def paintEvent(self, a0):
         event = a0
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         # Background track
         painter.setPen(Qt.PenStyle.NoPen)
@@ -717,16 +717,16 @@ class ListenMoePlayer(QWidget):
                 QTimer.singleShot(1000, self.play_stream)
                 
             # Global Keyboard Shortcuts (Class scope)
-            QShortcut(QKeySequence(Qt.Key.Key_Up), self, self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Down), self, self._vol_down)
-            QShortcut(QKeySequence(Qt.Key.Key_Plus), self, self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Minus), self, self._vol_down)
-            QShortcut(QKeySequence("="), self, self._vol_up)
-            
+            QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._vol_down)
+            QShortcut(QKeySequence(Qt.Key.Key_Plus), self).activated.connect(self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Minus), self).activated.connect(self._vol_down)
+            QShortcut(QKeySequence("="), self).activated.connect(self._vol_up)
+
             # Legacy/Specific Shortcuts
-            QShortcut(QKeySequence("Space"), self, self.pause_resume)
-            QShortcut(QKeySequence("S"), self, self.stop_stream)
-            QShortcut(QKeySequence("M"), self, self.toggle_mute_shortcut)
+            QShortcut(QKeySequence("Space"), self).activated.connect(self.pause_resume)
+            QShortcut(QKeySequence("S"), self).activated.connect(self.stop_stream)
+            QShortcut(QKeySequence("M"), self).activated.connect(self.toggle_mute_shortcut)
         except Exception:
             pass
 
@@ -809,7 +809,7 @@ class ListenMoePlayer(QWidget):
                 apply_windows_titlebar_dark_mode(msg, True)
             except Exception: pass
 
-            msg.exec_()
+            msg.exec()
             clicked = msg.clickedButton()
             if clicked is None or clicked == cancel_btn:
                 # User cancelled close action (Cancel button, Esc, or window X on the dialog)
@@ -1505,7 +1505,7 @@ class ListenMoePlayer(QWidget):
             canvas = QPixmap(target_w, target_h)
             canvas.fill(Qt.GlobalColor.transparent)
             painter = QPainter(canvas)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             painter.drawPixmap(0, 0, blurred)
             # Dark overlay keeps controls/text readable.
             painter.fillRect(canvas.rect(), QColor(12, 12, 12, 190))
@@ -1536,7 +1536,7 @@ class ListenMoePlayer(QWidget):
 
                 if fallback_pm is not None and not fallback_pm.isNull():
                     painter = QPainter(canvas)
-                    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                     x = (side - fallback_pm.width()) // 2
                     y = (side - fallback_pm.height()) // 2
                     painter.drawPixmap(x, y, fallback_pm)
@@ -1602,8 +1602,8 @@ class ListenMoePlayer(QWidget):
                 canvas = QPixmap(sz, sz)
                 canvas.fill(Qt.GlobalColor.transparent)
                 painter = QPainter(canvas)
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                 x = (sz - fitted.width()) // 2
                 y = (sz - fitted.height()) // 2
                 painter.drawPixmap(x, y, fitted)
@@ -1704,8 +1704,8 @@ class ListenMoePlayer(QWidget):
             
             # Center the original (now cropped) pixmap onto the square canvas
             painter = QPainter(square_pm)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             x = (max_side - w) // 2
             y = (max_side - h) // 2
             painter.drawPixmap(x, y, pixmap)
@@ -2641,7 +2641,7 @@ class ListenMoePlayer(QWidget):
                             apply_windows_titlebar_dark_mode(msg, True)
                         except Exception:
                             pass
-                        msg.exec_()
+                        msg.exec()
                         if msg.clickedButton() == restore_btn:
                             if hasattr(self, 'volume_slider'):
                                 self.volume_slider.setValue(60)
