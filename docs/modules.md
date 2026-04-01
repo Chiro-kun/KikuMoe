@@ -134,13 +134,14 @@ Emitted events: `"opening"`, `"buffering"`, `"playing"`, `"paused"`, `"stopped"`
 
 ### `player_ffmpeg.py`
 
-Primary backend. Launches FFmpeg as a subprocess and writes PCM output to a PyAudio device.
+Primary backend. Launches FFmpeg as a subprocess and writes PCM output to a PyAudio/PortAudio device.
 
 - `subprocess.Popen(stdout=PIPE)`; a reader thread consumes PCM chunks.
 - `_playback_lock` (RLock) protects shared state across threads.
 - `User-Agent` header: `KikuMoe/<version>`.
 - URL is sanitized before being passed to FFmpeg.
 - Device selection via `pa.open(output_device_index=...)`.
+- **Linux audio routing:** on startup, `_detect_linux_output_device()` probes PortAudio host APIs in priority order — PulseAudio/PipeWire (type 18, covers `pipewire-pulse`) → ALSA (type 8) — and selects the default output device of the best available API. An explicit user selection in Settings always takes precedence.
 
 ---
 

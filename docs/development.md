@@ -19,6 +19,39 @@ poetry run python KikuMoe.py
 
 ---
 
+## Linux platform notes
+
+### Display (Wayland / X11)
+
+`KikuMoe.py` sets `QT_QPA_PLATFORM=wayland;xcb` before creating `QApplication` when running on Linux and the variable is not already set. Qt will try Wayland first and fall back to XCB (X11) automatically. To force X11, run:
+
+```bash
+QT_QPA_PLATFORM=xcb poetry run python KikuMoe.py
+```
+
+### Audio (PipeWire / PulseAudio / ALSA)
+
+On Linux, `PlayerFFmpeg` probes PortAudio host APIs at startup and routes output through the first available backend in this order:
+
+| Priority | PortAudio host API | Typical provider |
+|---|---|---|
+| 1 | PulseAudio (type 18) | PipeWire-pulse **or** PulseAudio |
+| 2 | ALSA (type 8) | Direct ALSA |
+
+No configuration is required — the right backend is selected automatically. The **Audio output** selector in Settings lists each device with its host API tag (`[PipeWire/Pulse]`, `[ALSA]`, etc.) so the user can override it explicitly if needed.
+
+**System dependencies** (not installed by Poetry):
+
+```bash
+# Arch / CachyOS
+sudo pacman -S pipewire pipewire-pulse wireplumber ffmpeg
+
+# Debian / Ubuntu
+sudo apt install pipewire pipewire-pulse wireplumber ffmpeg libportaudio2
+```
+
+---
+
 ## Settings system
 
 All settings persist via `QSettings`:

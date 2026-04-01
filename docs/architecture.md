@@ -5,10 +5,10 @@
 | Component | Technology |
 |---|---|
 | Language | Python 3.8+ |
-| GUI | PyQt6 (Qt6) |
-| Audio | FFmpeg (subprocess) + PyAudio, or python-mpv, or python-vlc |
+| GUI | PyQt6 (Qt6) — Wayland-first on Linux, XCB (X11) fallback |
+| Audio | FFmpeg + PyAudio/PortAudio → PipeWire · PulseAudio · ALSA (Linux), WASAPI/MME (Windows); MPV and VLC as fallbacks |
 | Metadata | WebSocket (`websocket-client`) → `wss://listen.moe/gateway_v2` |
-| Settings persistence | `QSettings` (Windows registry, INI file on other OS) |
+| Settings persistence | `QSettings` (Windows registry, INI file on Linux) |
 | Build / packaging | PyInstaller (onefile) — Windows and Linux |
 
 ---
