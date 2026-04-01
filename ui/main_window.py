@@ -224,7 +224,9 @@ class ListenMoePlayer(QWidget):
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        fixed_w, fixed_h = 500, 580
+        fixed_w, fixed_h = 500, 620
+        self.setMinimumSize(fixed_w, fixed_h)
+        self.resize(fixed_w, fixed_h)
         self._apply_window_title("")
         try:
             if hasattr(self, '_icon_app') and not self._icon_app.isNull():
@@ -242,9 +244,6 @@ class ListenMoePlayer(QWidget):
             self.COLOR_ACCENT = "#c2185b" # Magenta from KikuMoe Logo
         except Exception:
             self.resize(fixed_w, fixed_h)
-
-        # Lock the main window size (disable resizing)
-        self.setFixedSize(fixed_w, fixed_h)
 
         # Root layout: no margins so top header can be edge-to-edge and attached to title bar
         self._root_layout = QVBoxLayout()
@@ -307,6 +306,7 @@ class ListenMoePlayer(QWidget):
 
         self.media_ambient_block = QWidget()
         self.media_ambient_block.setObjectName("mediaAmbientBlock")
+        self.media_ambient_block.setMinimumHeight(240)
         self.media_stack = QStackedLayout(self.media_ambient_block)
         self.media_stack.setStackingMode(QStackedLayout.StackAll)
         self.media_stack.setContentsMargins(0, 0, 0, 0)
@@ -574,6 +574,7 @@ class ListenMoePlayer(QWidget):
         footer_layout.addStretch(1)
 
         self._layout.addWidget(self.footer_bar)
+        self._layout.addStretch(1)
 
     def _create_player(self, on_event):
         """
