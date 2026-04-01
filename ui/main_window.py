@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel,
     QSlider, QProgressBar, QShortcut, QSpinBox,
-    QDialog, QMessageBox, QSizePolicy, QCheckBox
+    QDialog, QMessageBox, QSizePolicy, QCheckBox, QStyle
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QSettings, QTimer, QSize, QEvent
 from PyQt5.QtGui import QKeySequence, QIcon, QPixmap, QPainter, QColor
@@ -32,7 +32,6 @@ from constants import (
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
-    KEY_DARK_MODE,
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
     KEY_DEV_CONSOLE_ENABLED,
@@ -75,12 +74,13 @@ class SmoothProgressBar(QWidget):
     def value(self):
         return self._value
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
+        event = a0
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
         # Background track
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(200, 200, 200, 40)) # Translucent track
         painter.drawRoundedRect(self.rect(), 2, 2)
 
@@ -153,24 +153,27 @@ class ListenMoePlayer(QWidget):
         """Load and prepare application icons for window and tray."""
         try:
             icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'icons')
+            style = self.style() or QApplication.style()
+            sp = QStyle.StandardPixmap
             # Loader helper considering fallback to standard icons
             def get_icon(name, std_fallback):
                 path = os.path.join(icon_dir, name)
                 icon = QIcon(path)
                 if icon.isNull():
-                    return self.style().standardIcon(std_fallback)
+                    return style.standardIcon(std_fallback) if style is not None else QIcon()
                 return icon
 
-            self._icon_play_raw = get_icon('app_play.png', self.style().SP_MediaPlay)
-            self._icon_pause_raw = get_icon('app_pause.png', self.style().SP_MediaPause)
-            self._icon_stop_raw = get_icon('app_stop.png', self.style().SP_MediaStop)
-            self._icon_mute_raw = get_icon('app_mute.png', self.style().SP_MediaVolumeMuted)
-            self._icon_unmute_raw = get_icon('app_unmute.png', self.style().SP_MediaVolume)
-            self._icon_settings_raw = get_icon('app_settings.png', self.style().SP_FileDialogDetailedView)
-            self._icon_force_stop_raw = get_icon('app_force_stop.png', self.style().SP_BrowserStop)
-            self._icon_channel_raw = get_icon('app_channel.png', self.style().SP_DriveNetIcon)
-            self._icon_codec_raw = get_icon('app_codec.png', self.style().SP_FileIcon)
-            self._icon_quit_raw = get_icon('app_quit.png', self.style().SP_DialogCloseButton)
+            self._icon_play_raw = get_icon('app_play.png', sp.SP_MediaPlay)
+            self._icon_pause_raw = get_icon('app_pause.png', sp.SP_MediaPause)
+            self._icon_stop_raw = get_icon('app_stop.png', sp.SP_MediaStop)
+            self._icon_mute_raw = get_icon('app_mute.png', sp.SP_MediaVolumeMuted)
+            self._icon_unmute_raw = get_icon('app_unmute.png', sp.SP_MediaVolume)
+            self._icon_settings_raw = get_icon('app_settings.png', sp.SP_FileDialogDetailedView)
+            self._icon_force_stop_raw = get_icon('app_force_stop.png', sp.SP_BrowserStop)
+            self._icon_channel_raw = get_icon('app_channel.png', sp.SP_DriveNetIcon)
+            self._icon_codec_raw = get_icon('app_codec.png', sp.SP_FileIcon)
+            self._icon_quit_raw = get_icon('app_quit.png', sp.SP_DialogCloseButton)
+            self._icon_app_raw = get_icon('Kikumoe - no txt.png', sp.SP_ComputerIcon)
             
             # Initial assignment
             self._icon_play = self._icon_play_raw
@@ -183,19 +186,25 @@ class ListenMoePlayer(QWidget):
             self._icon_channel = self._icon_channel_raw
             self._icon_codec = self._icon_codec_raw
             self._icon_quit = self._icon_quit_raw
+            self._icon_app = self._icon_app_raw
+            self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
 
         except Exception as e:
             self.log.error(f"[UI] Error loading icons: {str(e)}")
-            self._icon_play = self.style().standardIcon(self.style().SP_MediaPlay)
-            self._icon_stop = self.style().standardIcon(self.style().SP_MediaStop)
-            self._icon_pause = self.style().standardIcon(self.style().SP_MediaPause)
-            self._icon_mute = self.style().standardIcon(self.style().SP_MediaVolumeMuted)
-            self._icon_unmute = self.style().standardIcon(self.style().SP_MediaVolume)
-            self._icon_settings = self.style().standardIcon(self.style().SP_FileDialogDetailedView)
-            self._icon_force_stop = self.style().standardIcon(self.style().SP_BrowserStop)
-            self._icon_channel = self.style().standardIcon(self.style().SP_DriveNetIcon)
-            self._icon_codec = self.style().standardIcon(self.style().SP_FileIcon)
-            self._icon_quit = self.style().standardIcon(self.style().SP_DialogCloseButton)
+            style = self.style() or QApplication.style()
+            sp = QStyle.StandardPixmap
+            self._icon_play = style.standardIcon(sp.SP_MediaPlay) if style is not None else QIcon()
+            self._icon_stop = style.standardIcon(sp.SP_MediaStop) if style is not None else QIcon()
+            self._icon_pause = style.standardIcon(sp.SP_MediaPause) if style is not None else QIcon()
+            self._icon_mute = style.standardIcon(sp.SP_MediaVolumeMuted) if style is not None else QIcon()
+            self._icon_unmute = style.standardIcon(sp.SP_MediaVolume) if style is not None else QIcon()
+            self._icon_settings = style.standardIcon(sp.SP_FileDialogDetailedView) if style is not None else QIcon()
+            self._icon_force_stop = style.standardIcon(sp.SP_BrowserStop) if style is not None else QIcon()
+            self._icon_channel = style.standardIcon(sp.SP_DriveNetIcon) if style is not None else QIcon()
+            self._icon_codec = style.standardIcon(sp.SP_FileIcon) if style is not None else QIcon()
+            self._icon_quit = style.standardIcon(sp.SP_DialogCloseButton) if style is not None else QIcon()
+            self._icon_app = style.standardIcon(sp.SP_ComputerIcon) if style is not None else QIcon()
+            self._icon_app_tray = self._icon_app
 
     def _init_ui_base(self):
         """
@@ -204,8 +213,8 @@ class ListenMoePlayer(QWidget):
         """
         self.setWindowTitle(APP_TITLE)
         try:
-            if hasattr(self, '_icon_stop') and not self._icon_stop.isNull():
-                self.setWindowIcon(self._icon_stop)
+            if hasattr(self, '_icon_app') and not self._icon_app.isNull():
+                self.setWindowIcon(self._icon_app)
         except Exception:
             pass
         try:
@@ -368,7 +377,7 @@ class ListenMoePlayer(QWidget):
         # Volume Controls
         vol_row = QHBoxLayout()
         self.volume_label = QLabel(self.i18n.t('volume'))
-        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         
         saved_vol = self.settings.value(KEY_VOLUME, 60)
@@ -507,7 +516,7 @@ class ListenMoePlayer(QWidget):
         
         # Song Progress Ticker (Smoother transitions with 50ms interval)
         self.song_tick_timer = QTimer(self)
-        self.song_tick_timer.setTimerType(Qt.PreciseTimer)
+        self.song_tick_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.song_tick_timer.setInterval(50)
         self.song_tick_timer.timeout.connect(self._on_song_tick)
         self.song_tick_timer.start()
@@ -567,7 +576,7 @@ class ListenMoePlayer(QWidget):
                 on_force_stop=self.force_stop_all,
                 on_toggle_mute=self.toggle_mute_shortcut,
             )
-            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon())
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon())
             self.tray_icon_refresh.connect(self.update_tray_icon)
         except Exception:
             pass
@@ -583,10 +592,10 @@ class ListenMoePlayer(QWidget):
                 QTimer.singleShot(1000, self.play_stream)
                 
             # Global Keyboard Shortcuts (Class scope)
-            QShortcut(QKeySequence(Qt.Key_Up), self, self._vol_up)
-            QShortcut(QKeySequence(Qt.Key_Down), self, self._vol_down)
-            QShortcut(QKeySequence(Qt.Key_Plus), self, self._vol_up)
-            QShortcut(QKeySequence(Qt.Key_Minus), self, self._vol_down)
+            QShortcut(QKeySequence(Qt.Key.Key_Up), self, self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Down), self, self._vol_down)
+            QShortcut(QKeySequence(Qt.Key.Key_Plus), self, self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Minus), self, self._vol_down)
             QShortcut(QKeySequence("="), self, self._vol_up)
             
             # Legacy/Specific Shortcuts
@@ -619,7 +628,8 @@ class ListenMoePlayer(QWidget):
     # ------------------- Event & Signal Handlers -------------------
 
     # 1. Qt Window & Lifecycle Events
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, a0) -> None:
+        event = a0
         """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
         try:
             self.settings.setValue(KEY_WINDOW_GEOMETRY, self.saveGeometry())
@@ -657,10 +667,9 @@ class ListenMoePlayer(QWidget):
             msg.setCheckBox(cb)
             
             try:
-                if self._get_bool(KEY_DARK_MODE, False):
-                    hwnd = int(msg.winId())
-                    val = ctypes.c_int(1)
-                    ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
+                hwnd = int(msg.winId())
+                val = ctypes.c_int(1)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(val), ctypes.sizeof(val))
             except Exception: pass
 
             msg.exec_()
@@ -692,18 +701,22 @@ class ListenMoePlayer(QWidget):
             if hasattr(self, 'player') and self.player:
                 self.player.stop()
             if hasattr(self, 'ws') and self.ws:
-                self.ws.stop()
+                ws_stop = getattr(self.ws, 'stop', None)
+                if callable(ws_stop):
+                    ws_stop()
         except Exception: pass
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, a0) -> None:
+        event = a0
         try:
             super().showEvent(event)
-            self._apply_windows_titlebar_dark_mode(self._get_bool(KEY_DARK_MODE, False))
+            self._apply_windows_titlebar_dark_mode(True)
         except Exception: pass
 
-    def changeEvent(self, event) -> None:
+    def changeEvent(self, a0) -> None:
+        event = a0
         try:
-            if event.type() == QEvent.WindowStateChange:
+            if event.type() == QEvent.Type.WindowStateChange:
                 if self.isMinimized() and self._get_bool(KEY_TRAY_ENABLED, True) and self._get_bool(KEY_TRAY_HIDE_ON_MINIMIZE, True):
                     self.hide()
                     event.accept()
@@ -988,34 +1001,31 @@ class ListenMoePlayer(QWidget):
 
     def apply_theme(self) -> None:
         try:
-            dark = self._get_bool(KEY_DARK_MODE, False)
+            dark = True
             accent = getattr(self, 'COLOR_ACCENT', '#c2185b')
             app = QApplication.instance()
-            if not app:
+            if not isinstance(app, QApplication):
                 return
-            if dark:
-                app.setStyleSheet(
-                    f"""
-                    QWidget {{ background-color: #121212; color: #e0e0e0; }}
-                    QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
-                    QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
-                    QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
-                    QPushButton:hover {{ background-color: #2a2a2a; }}
-                    QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
-                    QPushButton#menuButton:hover {{ background-color: #444444; color: #ffffff; }}
-                    QPushButton:disabled {{ background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }}
-                    QLineEdit, QSpinBox, QComboBox {{ background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }}
-                    QMenu {{ background-color: #121212; color: #e0e0e0; border: 1px solid #333; }}
-                    QToolTip {{ background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }}
-                    QProgressBar {{ background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; border-radius: 4px; text-align: center; }}
-                    QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}
-                    QProgressBar#songProgressBar {{ background-color: #222; border: none; height: 4px; border-radius: 2px; }}
-                    QSlider::groove:horizontal {{ height: 6px; background: #333; border-radius: 3px; }}
-                    QSlider::handle:horizontal {{ background: {accent}; width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; }}
-                    """
-                )
-            else:
-                app.setStyleSheet("")
+            app.setStyleSheet(
+                f"""
+                QWidget {{ background-color: #121212; color: #e0e0e0; }}
+                QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
+                QLabel#nowPlayingLabel {{ font-size: 14px; font-weight: 500; color: #e0e0e0; }}
+                QPushButton {{ background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }}
+                QPushButton:hover {{ background-color: #2a2a2a; }}
+                QPushButton#menuButton {{ background-color: transparent; border: none; border-radius: 4px; padding: 4px 4px; margin-left: 0px; color: #ffffff; font-size: 12px; text-align: left; }}
+                QPushButton#menuButton:hover {{ background-color: #444444; color: #ffffff; }}
+                QPushButton:disabled {{ background-color: #1a1a1a; color: #777; border-color: #2a2a2a; }}
+                QLineEdit, QSpinBox, QComboBox {{ background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 4px; }}
+                QMenu {{ background-color: #121212; color: #e0e0e0; border: 1px solid #333; }}
+                QToolTip {{ background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }}
+                QProgressBar {{ background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0; border-radius: 4px; text-align: center; }}
+                QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}
+                QProgressBar#songProgressBar {{ background-color: #222; border: none; height: 4px; border-radius: 2px; }}
+                QSlider::groove:horizontal {{ height: 6px; background: #333; border-radius: 3px; }}
+                QSlider::handle:horizontal {{ background: {accent}; width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; }}
+                """
+            )
             
             # --- Icon Dynamic Tinting ---
             # All icons now use the accent color (Magenta) for consistent branding
@@ -1034,6 +1044,10 @@ class ListenMoePlayer(QWidget):
             self._icon_channel = self._tint_icon(self._icon_channel_raw, icon_color, sz_small)
             self._icon_codec = self._tint_icon(self._icon_codec_raw, icon_color, sz_small)
             self._icon_quit = self._tint_icon(self._icon_quit_raw, icon_color, sz_std)
+            # Branding: Use original colors for the logo, ensured square to prevent stretching
+            self._icon_app = self._make_icon_square(self._icon_app_raw) 
+            # Tray-specific icon: fit the full logo in a square while maximizing visible area
+            self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
             # Skip settings icon as requested (text-only for cleaner alignment)
             # self._icon_settings = self._tint_icon(self._icon_settings_raw, icon_color, sz_small)
 
@@ -1055,7 +1069,7 @@ class ListenMoePlayer(QWidget):
                 self.mute_button.setIcon(self._icon_mute if is_muted else self._icon_unmute)
             
             try:
-                self.setWindowIcon(self._icon_stop)
+                self.setWindowIcon(self._icon_app)
             except Exception:
                 pass
 
@@ -1066,7 +1080,7 @@ class ListenMoePlayer(QWidget):
             
             # Synchronize icons with TrayManager
             if hasattr(self, 'tray_mgr') and self.tray_mgr:
-                self.tray_mgr.update_icon(self._icon_stop)
+                self.tray_mgr.update_icon(self._get_tray_icon())
                 self.tray_mgr.update_controls_icons({
                     'play': self._icon_play,
                     'pause': self._icon_pause,
@@ -1127,13 +1141,13 @@ class ListenMoePlayer(QWidget):
         try:
             if icon is None or icon.isNull():
                 return icon
-            if not size or size.isEmpty():
+            if size is None or size.isEmpty():
                 size = QSize(16, 16)
             src = icon.pixmap(size)
             if src.isNull():
                 return icon
             dst = QPixmap(src.size())
-            dst.fill(Qt.transparent)
+            dst.fill(Qt.GlobalColor.transparent)
             painter = QPainter(dst)
             painter.setCompositionMode(QPainter.CompositionMode_Source)
             painter.drawPixmap(0, 0, src)
@@ -1141,6 +1155,158 @@ class ListenMoePlayer(QWidget):
             painter.fillRect(dst.rect(), color)
             painter.end()
             return QIcon(dst)
+        except Exception:
+            return icon
+
+    def _make_tray_icon(self, icon: QIcon) -> QIcon:
+        """Build a tray-friendly square icon that stays large without cropping."""
+        try:
+            if icon is None or icon.isNull():
+                return icon
+
+            source_pm = None
+            try:
+                sizes = icon.availableSizes()
+                if sizes:
+                    best = max(sizes, key=lambda s: int(s.width()) * int(s.height()))
+                    source_pm = icon.pixmap(best)
+            except Exception:
+                source_pm = None
+
+            if source_pm is None or source_pm.isNull():
+                source_pm = icon.pixmap(512, 512)
+            if source_pm.isNull():
+                return icon
+
+            trimmed = self._trim_transparent_margins(source_pm, alpha_threshold=8)
+            if trimmed is not None and not trimmed.isNull():
+                source_pm = trimmed
+
+            tray_icon = QIcon()
+            fill_ratio = 0.95
+            for sz in (16, 20, 24, 32, 48, 64):
+                target_side = max(1, int(round(sz * fill_ratio)))
+                fitted = source_pm.scaled(
+                    target_side,
+                    target_side,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                if fitted.isNull():
+                    continue
+                canvas = QPixmap(sz, sz)
+                canvas.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(canvas)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                x = (sz - fitted.width()) // 2
+                y = (sz - fitted.height()) // 2
+                painter.drawPixmap(x, y, fitted)
+                painter.end()
+                tray_icon.addPixmap(canvas)
+
+            return tray_icon if not tray_icon.isNull() else icon
+        except Exception:
+            return icon
+
+    def _trim_transparent_margins(self, pixmap: QPixmap, alpha_threshold: int = 0) -> QPixmap:
+        """Trim outer transparent pixels so tiny tray sizes keep more visible content."""
+        try:
+            if pixmap is None or pixmap.isNull():
+                return pixmap
+            img = pixmap.toImage()
+            if img.isNull():
+                return pixmap
+
+            w, h = img.width(), img.height()
+            if w <= 0 or h <= 0:
+                return pixmap
+
+            def row_has_alpha(y: int, x0: int, x1: int) -> bool:
+                for xx in range(x0, x1):
+                    if img.pixelColor(xx, y).alpha() > alpha_threshold:
+                        return True
+                return False
+
+            def col_has_alpha(x: int, y0: int, y1: int) -> bool:
+                for yy in range(y0, y1):
+                    if img.pixelColor(x, yy).alpha() > alpha_threshold:
+                        return True
+                return False
+
+            top = 0
+            while top < h and not row_has_alpha(top, 0, w):
+                top += 1
+            if top >= h:
+                return pixmap
+
+            bottom = h - 1
+            while bottom >= top and not row_has_alpha(bottom, 0, w):
+                bottom -= 1
+
+            left = 0
+            while left < w and not col_has_alpha(left, top, bottom + 1):
+                left += 1
+
+            right = w - 1
+            while right >= left and not col_has_alpha(right, top, bottom + 1):
+                right -= 1
+
+            rect_w = right - left + 1
+            rect_h = bottom - top + 1
+            if rect_w <= 0 or rect_h <= 0:
+                return pixmap
+            if rect_w == w and rect_h == h:
+                return pixmap
+            return pixmap.copy(left, top, rect_w, rect_h)
+        except Exception:
+            return pixmap
+
+    def _make_icon_square(self, icon: QIcon, size: int = 512) -> QIcon:
+        """Adds transparent padding to non-square icons to prevent stretching,
+        after cropping existing transparent whitespace to maximize visible area."""
+        try:
+            if icon.isNull():
+                return icon
+            # Use a large base pixmap to preserve quality
+            pixmap = icon.pixmap(size, size)
+            if pixmap.isNull():
+                return icon
+            
+            # --- Autocrop transparent whitespace ---
+            try:
+                # Convert to image to find the true bounding box of non-transparent pixels
+                img = pixmap.toImage()
+                if not img.isNull():
+                    # Get the alpha mask bounding rect if possible
+                    # Fallback to manual check if logic is tricky, but mask().boundingRect() is usually reliable
+                    mask = img.createAlphaMask()
+                    rect = QPixmap.fromImage(mask).mask().boundingRect() if not mask.isNull() else img.rect()
+                    
+                    if not rect.isEmpty() and rect != img.rect():
+                        pixmap = pixmap.copy(rect)
+            except Exception:
+                pass
+            
+            w, h = pixmap.width(), pixmap.height()
+            if w == h:
+                return icon
+            
+            # Create a square transparent canvas based on the largest dimension
+            max_side = max(w, h)
+            square_pm = QPixmap(max_side, max_side)
+            square_pm.fill(Qt.GlobalColor.transparent)
+            
+            # Center the original (now cropped) pixmap onto the square canvas
+            painter = QPainter(square_pm)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            x = (max_side - w) // 2
+            y = (max_side - h) // 2
+            painter.drawPixmap(x, y, pixmap)
+            painter.end()
+            
+            return QIcon(square_pm)
         except Exception:
             return icon
 
@@ -1185,7 +1351,6 @@ class ListenMoePlayer(QWidget):
                 prev_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
             except Exception:
                 prev_nc = 1000
-            prev_dark = self._get_bool(KEY_DARK_MODE, False)
             prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
             prev_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
             dlg = SettingsDialog(self)
@@ -1264,10 +1429,8 @@ class ListenMoePlayer(QWidget):
                 # Percorso VLC
                 new_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
                 path_changed = (prev_path != new_path)
-                # Theme
-                new_dark = self._get_bool(KEY_DARK_MODE, False)
-                if new_dark != prev_dark:
-                    self.apply_theme()
+                # Theme (light mode removed, keep dark mode always applied)
+                self.apply_theme()
                 # Ricalibra network caching status
                 self.update_vlc_status_label()
                 # Se backend/path è cambiato o network-caching è variato sensibile, riavvia
@@ -1391,11 +1554,7 @@ class ListenMoePlayer(QWidget):
             try:
                 self.dev_console.open(parent_widget or self)
                 try:
-                    dark = self._get_bool(KEY_DARK_MODE, False)
-                except Exception:
-                    dark = False
-                try:
-                    self.dev_console.apply_theme(dark)
+                    self.dev_console.apply_theme(True)
                 except Exception:
                     pass
             except Exception:
@@ -1664,6 +1823,22 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _get_tray_icon(self) -> QIcon:
+        try:
+            if hasattr(self, '_icon_app_tray') and self._icon_app_tray is not None and not self._icon_app_tray.isNull():
+                return self._icon_app_tray
+        except Exception:
+            pass
+        try:
+            if hasattr(self, '_icon_app') and self._icon_app is not None and not self._icon_app.isNull():
+                return self._icon_app
+        except Exception:
+            pass
+        try:
+            return self.windowIcon()
+        except Exception:
+            return QIcon()
+
     def _ensure_tray(self, enabled: bool) -> None:
         try:
             self._tray_enabled = bool(enabled)
@@ -1685,7 +1860,7 @@ class ListenMoePlayer(QWidget):
                     return
             # Apply visibility/icon/tooltip
             try:
-                self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=self._get_tray_tooltip())
+                self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon(), tooltip=self._get_tray_tooltip())
             except Exception:
                 pass
             # Aggiorna stato dei controlli in base allo stato corrente (con override UI pausa)
@@ -1709,7 +1884,7 @@ class ListenMoePlayer(QWidget):
             if not hasattr(self, 'tray_mgr') or self.tray_mgr is None:
                 return
             # Update tray visibility/icon/tooltip based on current state
-            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self.windowIcon(), tooltip=self._get_tray_tooltip())
+            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon(), tooltip=self._get_tray_tooltip())
         except Exception:
             pass
 
@@ -1873,8 +2048,8 @@ class ListenMoePlayer(QWidget):
                         pass
                 else:
                     try:
-                        if hasattr(self, '_icon_play') and not self._icon_play.isNull():
-                            self.setWindowIcon(self._icon_play)
+                        if hasattr(self, '_icon_app') and not self._icon_app.isNull():
+                            self.setWindowIcon(self._icon_app)
                     except Exception:
                         pass
                     self.tray_icon_refresh.emit()
@@ -1900,6 +2075,7 @@ class ListenMoePlayer(QWidget):
     def pause_resume(self) -> None:
         try:
             with self._playback_lock:
+                new_paused = bool(getattr(self, '_ui_paused', False))
                 try:
                     self.log.info("[UI] pause_resume clicked")
                 except Exception:
@@ -1952,8 +2128,8 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
                 try:
-                    if hasattr(self, '_icon_stop') and not self._icon_stop.isNull():
-                        self.setWindowIcon(self._icon_stop)
+                    if hasattr(self, '_icon_app') and not self._icon_app.isNull():
+                        self.setWindowIcon(self._icon_app)
                 except Exception:
                     pass
                 try:
@@ -2085,7 +2261,7 @@ class ListenMoePlayer(QWidget):
                             if sys.platform == 'win32' and hasattr(msg, 'winId'):
                                 import ctypes
                                 hwnd = int(msg.winId())
-                                value = ctypes.c_int(1 if (self.settings.value(KEY_DARK_MODE, 'false') == 'true') else 0)
+                                value = ctypes.c_int(1)
                                 try:
                                     ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
                                 except Exception:
@@ -2151,4 +2327,4 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-
+

@@ -59,11 +59,11 @@ def _read_version_from_files() -> str:
                     data = f.read()
                 break
         if data:
-            # Prefer StringStruct 'FileVersion', e.g. 1.8.3.0
+            # Prefer StringStruct 'FileVersion', e.g. 1.9.0.0
             m = re.search(r"FileVersion\'\s*,\s*u?\'([^\']+)\'", data)
             if m:
                 return m.group(1).strip()
-            # Fallback to filevers=(1,8,3,0)
+            # Fallback to filevers=(1,9,0,0)
             m2 = re.search(r"filevers=\((\d+),(\d+),(\d+),(\d+)\)", data)
             if m2:
                 return ".".join(m2.groups())
@@ -71,7 +71,7 @@ def _read_version_from_files() -> str:
         pass
 
     # 3) Fallback to default
-    return "1.8"
+    return "1.9.0"
 
 
 APP_VERSION = _read_version_from_files()
@@ -95,7 +95,6 @@ KEY_LIBVLC_PATH = "libvlc_path"
 KEY_WINDOW_GEOMETRY = "window_geometry"
 KEY_NETWORK_CACHING = "network_caching"
 # New settings keys
-KEY_DARK_MODE = "dark_mode"
 KEY_SLEEP_MINUTES = "sleep_minutes"
 KEY_SLEEP_STOP_ON_END = "sleep_stop_on_end"
 KEY_DEV_CONSOLE_ENABLED = "dev_console_enabled"

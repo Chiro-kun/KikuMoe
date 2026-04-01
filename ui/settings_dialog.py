@@ -16,7 +16,6 @@ from constants import (
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
-    KEY_DARK_MODE,
     KEY_SLEEP_STOP_ON_END,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_SESSION_TIMER_ENABLED,
@@ -47,11 +46,6 @@ class SettingsDialog(QDialog):
         self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, 'false') == 'true')
         self.chk_autoplay.setToolTip(self.i18n.t('settings_autoplay_tip') if hasattr(self.i18n, 't') else '')
         layout.addWidget(self.chk_autoplay)
-
-        # Dark Mode
-        self.chk_dark_mode = QCheckBox(self.i18n.t('settings_dark_mode'))
-        self.chk_dark_mode.setChecked(self.settings.value(KEY_DARK_MODE, 'false') == 'true')
-        layout.addWidget(self.chk_dark_mode)
 
         # Sleep Timer option: stop on end
         self.chk_sleep_stop = QCheckBox(self.i18n.t('settings_sleep_stop_on_end'))
@@ -278,7 +272,6 @@ class SettingsDialog(QDialog):
     def _save_settings(self):
         """Logica comune per salvare le impostazioni."""
         self.settings.setValue(KEY_AUTOPLAY, 'true' if self.chk_autoplay.isChecked() else 'false')
-        self.settings.setValue(KEY_DARK_MODE, 'true' if self.chk_dark_mode.isChecked() else 'false')
         self.settings.setValue(KEY_SLEEP_STOP_ON_END, 'true' if self.chk_sleep_stop.isChecked() else 'false')
         self.settings.setValue(KEY_SESSION_TIMER_ENABLED, 'true' if self.chk_session_timer.isChecked() else 'false')
         self.settings.setValue(KEY_DEV_CONSOLE_ENABLED, 'true' if self.chk_dev_console.isChecked() else 'false')
@@ -309,8 +302,7 @@ class SettingsDialog(QDialog):
             pass
         # Riapplica la titlebar scura quando la finestra viene mostrata
         try:
-            dark = self.settings.value(KEY_DARK_MODE, 'false') == 'true'
-            self._apply_windows_titlebar_dark_mode(dark)
+            self._apply_windows_titlebar_dark_mode(True)
         except Exception:
             pass
         # Populate audio devices on show

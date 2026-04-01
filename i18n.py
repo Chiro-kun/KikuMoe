@@ -78,13 +78,12 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_audio_output': 'Uscita audio',
         'settings_audio_default': 'Sistema (predefinito di Windows)',
         'settings_audio_refresh': 'Aggiorna',
-        # Sleep Timer & Dark Mode
+        # Sleep Timer
         'sleep_timer': 'Sleeptimer',
         'sleep_minutes': 'Minuti:',
         'sleep_start': 'Avvia',
         'sleep_cancel': 'Annulla',
         'sleep_remaining': 'Sleep tra {time}',
-        'settings_dark_mode': 'Tema scuro',
         # Opzione: stop allo scadere Sleep Timer
         'settings_sleep_stop_on_end': 'Alla scadenza Sleep Timer: ferma riproduzione',
         # Dev console
@@ -194,13 +193,12 @@ I18N: Dict[str, Dict[str, str]] = {
         'settings_audio_output': 'Audio output',
         'settings_audio_default': 'System (Windows default device)',
         'settings_audio_refresh': 'Refresh',
-        # Sleep Timer & Dark Mode
+        # Sleep Timer
         'sleep_timer': 'Sleep timer',
         'sleep_minutes': 'Minutes:',
         'sleep_start': 'Start',
         'sleep_cancel': 'Cancel',
         'sleep_remaining': 'Sleep in {time}',
-        'settings_dark_mode': 'Dark mode',
         # Option: stop when Sleep Timer elapses
         'settings_sleep_stop_on_end': 'When Sleep Timer elapses: stop playback',
         # Dev console

@@ -8,4 +8,4 @@ Write-Host "Running: pyinstaller --noconfirm --clean $specPath" -ForegroundColor
 pyinstaller --noconfirm --clean $specPath
 
 Write-Host "Done. Output:" -ForegroundColor Cyan
-Write-Host "  - OneFile: dist\\KikuMoe-1.8.exe"
+Write-Host "  - OneFile: dist\\KikuMoe-1.9.0.exe"
