@@ -6,8 +6,12 @@ from ui.main_window import ListenMoePlayer
 
 
 def _write_crash_log(exc: BaseException) -> str:
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
-    base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
+    else:
+        xdg_data = os.environ.get("XDG_DATA_HOME", "")
+        base_dir = os.path.join(xdg_data, "KikuMoe") if xdg_data else os.path.join(os.path.expanduser("~"), ".local", "share", "KikuMoe")
     try:
         os.makedirs(base_dir, exist_ok=True)
     except Exception:

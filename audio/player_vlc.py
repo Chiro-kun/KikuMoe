@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Callable
 import os
+import sys
 
 from core.constants import APP_NAME, APP_VERSION
 
@@ -34,7 +35,12 @@ class PlayerVLC:
         # Setup plugin path if provided
         if self._vlc_path and os.path.isdir(self._vlc_path):
             try:
-                os.add_dll_directory(self._vlc_path)
+                if sys.platform == "win32":
+                    os.add_dll_directory(self._vlc_path)
+                else:
+                    plugins_path = os.path.join(self._vlc_path, "plugins")
+                    if os.path.isdir(plugins_path):
+                        os.environ["VLC_PLUGIN_PATH"] = plugins_path
             except Exception:
                 pass
         try:
