@@ -171,7 +171,7 @@ Manages the WebSocket connection to the LISTEN.moe gateway (`wss://listen.moe/ga
 | `0` | Welcome / heartbeat interval |
 | `1` | `TRACK_UPDATE`: current track metadata |
 
-`TRACK_UPDATE` payload: `title`, `artists[].name`, `duration` (s), `albumImage.url`, `startTime` (ISO 8601).
+`TRACK_UPDATE` payload: `title`, `artists[].name`, `duration` (s), `albums[].image` (relative filename, CDN base: `https://cdn.listen.moe/covers/`), `startTime` (ISO 8601).
 
 Auto-reconnects with a 5 s delay on socket close.
 
