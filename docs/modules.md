@@ -154,6 +154,7 @@ Second fallback backend via `python-mpv` bindings (wraps libmpv).
 - Events via `@player.event_callback`: `start-file` → `opening`, `file-loaded` → `playing`, `end-file` → `ended`/`error`.
 - Cache buffering progress via `@player.property_observer('cache-buffering-state')`.
 - If libmpv is not found at startup, `is_ready()` returns `False` and the main window falls through to VLC.
+- **Linux audio routing:** passes `ao='pipewire,pulse,alsa'` to libmpv when a PipeWire socket is detected (`/run/user/<uid>/pipewire-0`), otherwise `ao='pulse,alsa'`. Falls back to MPV's own default if the preferred driver fails to initialize. For explicit device selection, `_apply_linux_audio_device()` matches the stored PortAudio device name against MPV's `audio-device-list` and sets `audio_device`.
 
 ---
 
@@ -164,6 +165,7 @@ Last fallback backend via `python-vlc` bindings.
 - VLC instance options: `--network-caching`, `--http-reconnect`, `--quiet`.
 - Custom VLC library path via `KEY_LIBVLC_PATH`: on Windows, adds the directory via `os.add_dll_directory`; on Linux, sets `VLC_PLUGIN_PATH` to the `plugins/` subdirectory.
 - If libVLC is not found at startup, the error is caught by the main window and the backend is marked unavailable.
+- **Linux audio routing:** adds `--aout=pulse` to the VLC instance options, routing audio through PulseAudio — which on modern systems is served by `pipewire-pulse`. For explicit device selection, `_apply_linux_audio_device()` enumerates the pulse output device list (`audio_output_device_enum`) and calls `audio_output_device_set` for the entry whose description matches the stored PortAudio device name.
 
 ---
 

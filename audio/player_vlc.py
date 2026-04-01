@@ -3,7 +3,8 @@ from typing import Optional, Callable
 import os
 import sys
 
-from core.constants import APP_NAME, APP_VERSION
+from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
+from core.logger import get_logger
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -23,6 +24,7 @@ class PlayerVLC:
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
+        self.log = get_logger('PlayerVLC')
         # Build dynamic User-Agent similar to ffmpeg backend
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -65,6 +67,10 @@ class PlayerVLC:
                 "--http-continuous",  # Continuous HTTP streaming
                 "--live-caching=1000",  # Small live caching for smooth playback
             ])
+            # On Linux, route audio through PulseAudio (covers PipeWire via pipewire-pulse).
+            # This ensures VLC uses PipeWire when pipewire-pulse is active.
+            if not _IS_WIN32:
+                inst_opts.append("--aout=pulse")
             # Set HTTP User-Agent globally for VLC instance
             try:
                 if getattr(self, "_user_agent", None):
@@ -89,10 +95,68 @@ class PlayerVLC:
             self.player.audio_set_volume(self._volume)
             self.player.audio_set_mute(self._muted)
             self._ready = True
+            # Apply explicit device selection (Linux/pulse only, best-effort)
+            self._apply_linux_audio_device()
         except Exception:
             self.instance = None
             self.player = None
             self._ready = False
+
+    def _get_stored_device_name(self) -> Optional[str]:
+        """Return the human-readable PortAudio name of the user-configured output device,
+        or None when the setting is absent or unresolvable."""
+        try:
+            from PyQt6.QtCore import QSettings
+            settings = QSettings(ORG_NAME, APP_SETTINGS)
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, '')
+            if val in (None, ''):
+                return None
+            import pyaudio
+            pa = pyaudio.PyAudio()
+            try:
+                info = pa.get_device_info_by_index(int(val))
+                return str(info.get('name', '')) if isinstance(info, dict) else None
+            finally:
+                pa.terminate()
+        except Exception:
+            return None
+
+    def _apply_linux_audio_device(self) -> None:
+        """On Linux with --aout=pulse, enumerate VLC audio output devices and select
+        the one whose description best matches the stored PortAudio device name."""
+        if _IS_WIN32 or not self.is_ready():
+            return
+        device_name = self._get_stored_device_name()
+        if not device_name:
+            return
+        try:
+            assert self.player is not None
+            devices = self.player.audio_output_device_enum()
+            if not devices:
+                return
+            needle = device_name.lower()
+            dev = devices
+            while dev:
+                try:
+                    desc = dev.description
+                    dev_id = dev.device
+                    if isinstance(desc, bytes):
+                        desc = desc.decode(errors='ignore')
+                    if isinstance(dev_id, bytes):
+                        dev_id = dev_id.decode(errors='ignore')
+                    desc_lc = str(desc).lower()
+                    if needle in desc_lc or desc_lc in needle:
+                        self.player.audio_output_device_set(None, dev_id)
+                        self.log.debug("[VLC] audio output device set to: %s (%s)", dev_id, desc)
+                        return
+                except Exception:
+                    pass
+                try:
+                    dev = dev.next
+                except Exception:
+                    break
+        except Exception as e:
+            self.log.debug("[VLC] _apply_linux_audio_device error: %s", e)
 
     def is_ready(self) -> bool:
         return bool(self._ready and self.instance is not None and self.player is not None)
