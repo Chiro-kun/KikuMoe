@@ -118,3 +118,5 @@ KEY_DONT_ASK_ON_CLOSE = "dont_ask_on_close"
 KEY_CLOSE_TO_TRAY = "close_to_tray"
 # New: Dev console option to show [DEV] tagged messages
 KEY_DEV_CONSOLE_SHOW_DEV = "dev_console_show_dev"
+# Audio backend selection: 'auto' | 'ffmpeg' | 'mpv' | 'vlc'
+KEY_AUDIO_BACKEND = "audio_backend"

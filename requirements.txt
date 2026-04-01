@@ -4,5 +4,7 @@ PyQt5>=5.15.4
 websocket-client>=1.6.0
 # VLC fallback backend (python binding) — optional at runtime if FFmpeg is present, but required for packaging fallback
 python-vlc>=3.0.0
+# MPV backend (python binding for libmpv) — optional, used as second fallback after FFmpeg
+python-mpv>=1.0.0
 # Audio output via PortAudio
 pyaudio>=0.2.11

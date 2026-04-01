@@ -6,7 +6,7 @@
 |---|---|
 | Language | Python 3.8+ |
 | GUI | PyQt5 (Qt5) |
-| Audio | FFmpeg (subprocess) + PyAudio, or python-vlc |
+| Audio | FFmpeg (subprocess) + PyAudio, or python-mpv, or python-vlc |
 | Metadata | WebSocket (`websocket-client`) → `wss://listen.moe/gateway_v2` |
 | Settings persistence | `QSettings` (Windows registry, INI file on other OS) |
 | Build / packaging | PyInstaller (onefile) — Windows and Linux |
@@ -38,6 +38,7 @@ KikuMoe/                     # Repository root
 │
 ├── audio/                   # Swappable audio backends
 │   ├── player_ffmpeg.py     # FFmpeg backend (subprocess + PyAudio)
+│   ├── player_mpv.py        # MPV backend (python-mpv / libmpv bindings)
 │   └── player_vlc.py        # VLC backend (python-vlc bindings)
 │
 ├── network/                 # Network client
@@ -72,7 +73,8 @@ Dependencies always flow downward. `core/` never imports from `ui/`, `audio/`, o
 ┌────────────▼─────────────────────────────────┐
 │           Audio Layer (audio/)               │
 │  PlayerFFmpeg (primary)                      │
-│  PlayerVLC    (fallback)                     │
+│  PlayerMPV    (second fallback)              │
+│  PlayerVLC    (last fallback)                │
 └────────────┬─────────────────────────────────┘
              │  callback on_player_event()
 ┌────────────▼─────────────────────────────────┐
@@ -93,7 +95,7 @@ Dependencies always flow downward. `core/` never imports from `ui/`, `audio/`, o
 | Thread | Responsibility |
 |---|---|
 | Main (Qt event loop) | UI rendering, user event handling |
-| Player thread | FFmpeg subprocess / VLC instance |
+| Player thread | FFmpeg subprocess / MPV event loop / VLC instance |
 | WebSocket thread | Daemon connection to `gateway_v2` |
 | Cover thread | Background album art download |
 
@@ -110,7 +112,7 @@ Synchronization uses an `RLock` inside the player and Qt signals for marshaling 
 2.  ListenMoePlayer._play_stream()
 3.  Selects URL from STREAMS[channel][format]
 4.  player.play(url)
-5.  Backend starts FFmpeg / VLC
+5.  Backend starts FFmpeg / MPV / VLC
 6.  Callback on_event("opening")       → status_changed.emit("Opening…")
 7.  Callback on_event("buffering", pct) → buffering_progress.emit(pct)
 8.  Callback on_event("playing")       → UI updated

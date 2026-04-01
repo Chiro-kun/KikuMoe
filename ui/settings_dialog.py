@@ -26,6 +26,7 @@ from core.constants import (
     KEY_SESSION_TIMER_ENABLED,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_DEV_CONSOLE_SHOW_DEV,
+    KEY_AUDIO_BACKEND,
 )
 
 class SettingsDialog(QDialog):
@@ -138,6 +139,25 @@ class SettingsDialog(QDialog):
         self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, 'Vorbis'))
         fmt_row.addWidget(self.cmb_format, 1)
         layout.addLayout(fmt_row)
+
+        # Audio Backend
+        backend_row = QHBoxLayout()
+        backend_row.setSpacing(8)
+        lab_backend = QLabel(self.i18n.t('settings_audio_backend'))
+        lab_backend.setMinimumWidth(140)
+        backend_row.addWidget(lab_backend)
+        self.cmb_audio_backend = QComboBox()
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_auto'), userData='auto')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_ffmpeg'), userData='ffmpeg')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_mpv'), userData='mpv')
+        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_vlc'), userData='vlc')
+        saved_backend = self.settings.value(KEY_AUDIO_BACKEND, 'auto')
+        for i in range(self.cmb_audio_backend.count()):
+            if self.cmb_audio_backend.itemData(i) == saved_backend:
+                self.cmb_audio_backend.setCurrentIndex(i)
+                break
+        backend_row.addWidget(self.cmb_audio_backend, 1)
+        layout.addLayout(backend_row)
 
         # Audio Output Device
         audio_row = QHBoxLayout()
@@ -292,6 +312,11 @@ class SettingsDialog(QDialog):
         self.settings.setValue(KEY_TRAY_ENABLED, 'true' if self.chk_tray_enabled.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_HIDE_ON_MINIMIZE, 'true' if self.chk_tray_hide_on_minimize.isChecked() else 'false')
         self.settings.setValue(KEY_TRAY_NOTIFICATIONS, 'true' if self.chk_tray_notifications.isChecked() else 'false')
+        # Save audio backend selection
+        try:
+            self.settings.setValue(KEY_AUDIO_BACKEND, self.cmb_audio_backend.currentData() or 'auto')
+        except Exception:
+            pass
         # Save audio device selection: None => use system default
         try:
             idx_data = self.cmb_audio_device.currentData()
