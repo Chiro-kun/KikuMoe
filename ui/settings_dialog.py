@@ -239,7 +239,11 @@ class SettingsDialog(QDialog):
         self.setLayout(layout)
 
     def _browse_vlc_path(self):
-        start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None) or 'C:/'
+        import sys
+        import os
+        start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
+        if not start_dir:
+            start_dir = 'C:/' if sys.platform == 'win32' else os.path.expanduser('~')
         chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
         if chosen:
             self.txt_vlc_path.setText(chosen)

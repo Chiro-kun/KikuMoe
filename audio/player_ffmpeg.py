@@ -77,7 +77,7 @@ class PlayerFFmpeg:
             return False
 
     def _get_output_device_index(self) -> Optional[int]:
-        """Legge l'indice del dispositivo di output da QSettings; None => predefinito di Windows."""
+        """Legge l'indice del dispositivo di output da QSettings; None => dispositivo predefinito di sistema."""
         try:
             settings = QSettings(ORG_NAME, APP_SETTINGS)
             val = settings.value(KEY_AUDIO_DEVICE_INDEX, '')
@@ -389,7 +389,7 @@ class PlayerFFmpeg:
                 try:
                     device_idx = self._get_output_device_index()
                     if device_idx is None:
-                        self.log.debug("[DEBUG] _stream_worker: using Windows default output device")
+                        self.log.debug("[DEBUG] _stream_worker: using system default output device")
                     else:
                         self.log.debug("[DEBUG] _stream_worker: using output_device_index=%s", device_idx)
                     open_kwargs = {
