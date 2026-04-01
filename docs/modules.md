@@ -33,6 +33,7 @@ KEY_AUDIO_DEVICE_INDEX    = "audio_device_index"
 KEY_WINDOW_GEOMETRY       = "window_geometry"
 KEY_DONT_ASK_ON_CLOSE     = "dont_ask_on_close"
 KEY_CLOSE_TO_TRAY         = "close_to_tray"
+KEY_AUDIO_BACKEND         = "audio_backend"   # 'auto' | 'ffmpeg' | 'mpv' | 'vlc'
 ```
 
 Version is resolved in order from:

@@ -150,6 +150,7 @@ Apri le Impostazioni dal menu del tray o dal pulsante nella finestra principale.
 | Canale predefinito | J-POP o K-POP |
 | Formato predefinito | Vorbis o MP3 |
 | Riproduzione automatica | Avvia lo stream all'apertura dell'app |
+| Backend audio | `Automatico` (FFmpeg → MPV → VLC), `FFmpeg`, `MPV` o `VLC` |
 | Uscita audio | Dispositivo di output (enumerato da PyAudio) |
 | Percorso libVLC | Cartella contenente `libvlc.dll` (es. `C:/Program Files/VideoLAN/VLC`) |
 | Network caching | Buffer di rete in millisecondi (100–5000 ms, default 1000) |

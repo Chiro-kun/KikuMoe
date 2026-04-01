@@ -41,7 +41,8 @@ from core.constants import (
     KEY_DEV_CONSOLE_SHOW_DEV,
     KEY_WINDOW_GEOMETRY,
     KEY_DONT_ASK_ON_CLOSE,
-    KEY_CLOSE_TO_TRAY
+    KEY_CLOSE_TO_TRAY,
+    KEY_AUDIO_BACKEND,
 )
 import threading
 from core.logger import get_logger
@@ -574,26 +575,49 @@ class ListenMoePlayer(QWidget):
 
         self._layout.addWidget(self.footer_bar)
 
-    def _init_audio_backend(self):
+    def _create_player(self, on_event):
         """
-        Identifies and initializes the available audio backend.
-        Prioritizes FFmpeg (PyAudio) and falls back to VLC if FFmpeg is unavailable.
-        Also synchronizes initial volume and mute states.
+        Instantiates the audio backend according to KEY_AUDIO_BACKEND setting.
+        'auto'   → tries FFmpeg → MPV → VLC in order.
+        'ffmpeg' → only FFmpeg.
+        'mpv'    → only MPV.
+        'vlc'    → only VLC.
+        Returns the created player (may not be ready if the chosen backend is unavailable).
         """
+        backend = self.settings.value(KEY_AUDIO_BACKEND, 'auto')
         libvlc_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
         try:
             network_caching = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
         except Exception:
             network_caching = 1000
-            
-        # Try FFmpeg first, then MPV, then VLC
-        self.player = PlayerFFmpeg(on_event=self._on_player_event)
-        if not self.player.is_ready():
+
+        if backend == 'ffmpeg':
+            self.log.info("[BACKEND] Using FFmpeg (user setting).")
+            return PlayerFFmpeg(on_event=on_event)
+        if backend == 'mpv':
+            self.log.info("[BACKEND] Using MPV (user setting).")
+            return PlayerMPV(on_event=on_event)
+        if backend == 'vlc':
+            self.log.info("[BACKEND] Using VLC (user setting).")
+            return PlayerVLC(on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
+
+        # 'auto': FFmpeg → MPV → VLC
+        player = PlayerFFmpeg(on_event=on_event)
+        if not player.is_ready():
             self.log.info("[BACKEND] FFmpeg not available, trying MPV.")
-            self.player = PlayerMPV(on_event=self._on_player_event)
-        if not self.player.is_ready():
+            player = PlayerMPV(on_event=on_event)
+        if not player.is_ready():
             self.log.info("[BACKEND] MPV not available, using VLC fallback.")
-            self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
+            player = PlayerVLC(on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching)
+        return player
+
+    def _init_audio_backend(self):
+        """
+        Identifies and initializes the available audio backend.
+        Respects the KEY_AUDIO_BACKEND setting; defaults to auto (FFmpeg → MPV → VLC).
+        Also synchronizes initial volume and mute states.
+        """
+        self.player = self._create_player(on_event=self._on_player_event)
 
         # Set initial audio state
         try:
@@ -1727,6 +1751,7 @@ class ListenMoePlayer(QWidget):
             prev_channel = self.settings.value(KEY_CHANNEL, 'J-POP')
             prev_format = self.settings.value(KEY_FORMAT, 'Vorbis')
             prev_path = self.player.get_configured_path()
+            prev_backend = self.settings.value(KEY_AUDIO_BACKEND, 'auto')
             prev_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
             try:
                 prev_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
@@ -1807,9 +1832,11 @@ class ListenMoePlayer(QWidget):
                             )
                 except Exception:
                     pass
-                # Percorso VLC
+                # Percorso VLC / backend
                 new_path = self.settings.value(KEY_LIBVLC_PATH, '') or None
+                new_backend = self.settings.value(KEY_AUDIO_BACKEND, 'auto')
                 path_changed = (prev_path != new_path)
+                backend_changed = (prev_backend != new_backend)
                 # Theme (light mode removed, keep dark mode always applied)
                 self.apply_theme()
                 # Ricalibra network caching status
@@ -1819,7 +1846,7 @@ class ListenMoePlayer(QWidget):
                     new_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
                 except Exception:
                     new_nc = 1000
-                if path_changed or new_nc != prev_nc:
+                if backend_changed or path_changed or new_nc != prev_nc:
                     self.status_changed.emit(self.t('status_restarting'))
                     time.sleep(0.5)
                     # Recreate player with new settings
@@ -1828,13 +1855,9 @@ class ListenMoePlayer(QWidget):
                     except Exception:
                         pass
                     try:
-                        self.player = PlayerFFmpeg(on_event=getattr(self, '_on_player_event', None))
-                        if not self.player.is_ready():
-                            self.player = PlayerMPV(on_event=getattr(self, '_on_player_event', None))
-                        if not self.player.is_ready():
-                            self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
+                        self.player = self._create_player(on_event=self._on_player_event)
                     except Exception:
-                        self.player = PlayerVLC(on_event=getattr(self, '_on_player_event', None), libvlc_path=new_path, network_caching_ms=new_nc)
+                        self.player = PlayerVLC(on_event=self._on_player_event, libvlc_path=new_path, network_caching_ms=new_nc)
                     self.player.set_volume(self.volume_slider.value())
                     self.player.set_mute(self.mute_button.isChecked())
                     self.update_vlc_status_label()
