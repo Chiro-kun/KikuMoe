@@ -37,6 +37,10 @@ if _IS_WIN32:
             vlc_binaries.append((str(libvlccore), "."))
         if plugins_dir.is_dir():
             datas.append((str(plugins_dir), "plugins"))
+            
+    mpv_dll = repo_root / "packaging" / "windows" / "libmpv-2.dll"
+    if mpv_dll.exists():
+        vlc_binaries.append((str(mpv_dll), "."))
 
 block_cipher = None
 

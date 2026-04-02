@@ -1003,7 +1003,12 @@ class ListenMoePlayer(QWidget):
                 self.buffering_visible.emit(False)
                 if c == "ended":
                     self._skip_session_reset_once = True
-                    if not getattr(self, "_retry_pending", False):
+                    if getattr(self, "_ui_paused", False):
+                        try:
+                            self.log.info("[UI] Ignored 'ended' event because player is intentionally paused.")
+                        except Exception:
+                            pass
+                    elif not getattr(self, "_retry_pending", False):
                         self._retry_pending = True
                         self.schedule_play.emit(1000)
                         # Optionally only notify on unexpected end if not already retrying
@@ -2780,6 +2785,7 @@ class ListenMoePlayer(QWidget):
 
     def pause_resume(self) -> None:
         try:
+            needs_play = False
             with self._playback_lock:
                 try:
                     self.log.info("[UI] pause_resume clicked")
@@ -2799,14 +2805,33 @@ class ListenMoePlayer(QWidget):
                         self.tray_mgr.update_controls_state(not new_paused, new_paused, is_muted)
                 except Exception:
                     pass
-                # Esegui il toggle del backend
-                self.player.pause_toggle()
+                
+                if not new_paused:
+                    try:
+                        is_playing = getattr(self.player, "is_playing", lambda: False)()
+                        is_paused_backend = getattr(self.player, "is_paused", lambda: False)()
+                        if not is_playing and not is_paused_backend:
+                            needs_play = True
+                    except Exception:
+                        pass
+                
+                if not needs_play:
+                    # Esegui il toggle del backend
+                    self.player.pause_toggle()
+                
                 # Gestisci il session timer e aggiorna solo il tooltip
                 try:
                     self._apply_session_timer_running_state(not new_paused)
                 except Exception:
                     pass
                 self._refresh_play_button_text(not new_paused)
+                
+            if needs_play:
+                try:
+                    self.log.info("[UI] Backend stopped during pause, restarting stream.")
+                except Exception:
+                    pass
+                self.play_stream()
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import locale
+import os
 import sys
+from pathlib import Path
 from typing import Any, Callable
 
 from core.constants import APP_NAME, APP_VERSION
@@ -9,15 +11,65 @@ from core.logger import get_logger
 
 _IS_WIN32 = sys.platform == "win32"
 
-# MPV end-file reason integers (MPV_END_FILE_REASON_*)
-_MPV_END_STOP = 2
-_MPV_END_QUIT = 3
-_MPV_END_ERROR = 4
+
+def _find_libmpv_path() -> str | None:
+    """Cerca la DLL di libmpv nelle posizioni comuni su Windows."""
+    if not _IS_WIN32:
+        return None
+
+    # Nomi comuni per libmpv su Windows
+    names = ["libmpv-2.dll", "mpv-2.dll", "libmpv-1.dll", "mpv-1.dll", "mpv.dll"]
+
+    # Cerca nella root dell'app e nella cartella audio/
+    try:
+        # Percorso della root (dove solitamente sta l'eseguibile o lo script principale)
+        root_dir = Path(getattr(sys, "_MEIPASS", os.getcwd()))
+        # Percorso locale dello script audio/player_mpv.py
+        script_dir = Path(__file__).parent
+        # Percorso di packaging (sviluppo locale)
+        packaging_win_dir = root_dir / "packaging" / "windows"
+
+        search_dirs = [root_dir, script_dir, packaging_win_dir]
+
+        for d in search_dirs:
+            if not d.exists():
+                continue
+            for name in names:
+                dll_path = d / name
+                if dll_path.exists():
+                    return str(dll_path.resolve())
+    except Exception:
+        pass
+
+    return None
+
+
+# Configura il path DLL PRIMA di importare mpv
+_found_libmpv = _find_libmpv_path()
+if _found_libmpv:
+    _dll_dir = str(Path(_found_libmpv).parent)
+    if _IS_WIN32:
+        # Forza python-mpv a usare questa specifica DLL (utile per nomi non standard come libmpv-2.dll)
+        os.environ["MPV_PATH"] = _found_libmpv
+        # Aggiungi al PATH per sicurezza
+        os.environ["PATH"] = _dll_dir + os.pathsep + os.environ.get("PATH", "")
+        # Per Python 3.8+ su Windows, aggiungi alla directory DLL sicura
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(_dll_dir)
+            except Exception:
+                pass
+
 
 try:
     import mpv
 except Exception:
     mpv = None  # type: ignore
+
+# MPV end-file reason integers (MPV_END_FILE_REASON_*)
+_MPV_END_STOP = 2
+_MPV_END_QUIT = 3
+_MPV_END_ERROR = 4
 
 
 class PlayerMPV:
@@ -48,6 +100,10 @@ class PlayerMPV:
         except Exception:
             pass
         try:
+            lib_path = _found_libmpv
+            if lib_path:
+                self.log.info("[BACKEND] PlayerMPV: using libmpv at %s", lib_path)
+
             self._player = mpv.MPV(
                 vid="no",
                 terminal=False,
@@ -104,8 +160,12 @@ class PlayerMPV:
                         pass
 
             self._ready = True
+            try:
+                self.log.info("[BACKEND] PlayerMPV: backend initialized (version: %s)", self.get_version())
+            except Exception:
+                pass
         except Exception as e:
-            self.log.debug("[DEBUG] PlayerMPV: init failed: %s", e)
+            self.log.error("[BACKEND] PlayerMPV: init failed: %s", e)
             self._player = None
             self._ready = False
 
@@ -131,9 +191,11 @@ class PlayerMPV:
         try:
             assert self._player is not None
             self._stopping = False
+            self._player.pause = False
             self._player.play(url)
             return True
-        except Exception:
+        except Exception as e:
+            self.log.error("[BACKEND] PlayerMPV: play_url failed: %s", e)
             self._emit("error", None)
             return False
 
