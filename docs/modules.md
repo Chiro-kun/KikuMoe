@@ -239,7 +239,7 @@ Signals are the only safe channel for updating the UI from non-main threads.
 
 ### `settings_dialog.py`
 
-Non-modal, frameless window with a `CustomTitleBar` at the top. Reads and writes directly to `QSettings`. On close, emits `settings_changed`, triggering re-initialization of dependent components (language, audio device, backend).
+Non-modal, frameless window with a `CustomTitleBar` at the top. The title bar's close button receives a scoped CSS tweak (font size reduced to 20px with a 1px top padding) specifically for this dialog to ensure perfect vertical alignment of the `×` glyph. Reads and writes directly to `QSettings`. On close, emits `settings_changed`, triggering re-initialization of dependent components (language, audio device, backend).
 
 ---
 
@@ -296,7 +296,7 @@ install_size_grip(window)   # call once after the title bar is added
 
 **Drag:** mouse press on the bar calls `QWindow.startSystemMove()`, which delegates the move to the compositor or WM. This is the only correct approach on Wayland and works identically on X11 and Windows. Double-clicking the bar toggles maximize.
 
-**Buttons:** minimize (`—`), maximize/restore (`□` / `❐`), close (`✖`). All three buttons use 16 px bold weight; the close button uses 24 px so the `✖` glyph matches the visual weight of `—` and `□`. The close button turns red on hover. All styling is scoped to `#customTitleBar` and never leaks to the global application stylesheet.
+**Buttons:** minimize (`—`), maximize/restore (`□` / `❐`), close (`×`). All three buttons use 16 px bold weight; the close button uses 24 px so the `×` glyph matches the visual weight of `—` and `□` (though `SettingsDialog` overrides this to 20 px with a top padding for specific vertical alignment). The close button turns red on hover. All styling is scoped to `#customTitleBar` and never leaks to the global application stylesheet.
 
 **`install_size_grip(window)`** — attaches a `QSizeGrip` overlay anchored to the bottom-right corner of a frameless window. A `_GripPositioner` event filter repositions it on every `Resize` event. Qt6's `QSizeGrip` calls `QWindow::startSystemResize()` on Wayland, so resize works correctly without any compositor-specific code.
 

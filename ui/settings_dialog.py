@@ -66,6 +66,14 @@ class SettingsDialog(QDialog):
 
         self._title_bar = CustomTitleBar(self)
         self._title_bar.set_title(self.i18n.t('settings_title'))
+        
+        # Adjust close button alignment specifically for the settings window
+        self._title_bar.setStyleSheet(self._title_bar.styleSheet() + """
+            #customTitleBar QPushButton#titleBarBtnClose {
+                padding-top: 1px;
+            }
+        """)
+        
         root_layout.addWidget(self._title_bar)
         install_size_grip(self)
 
