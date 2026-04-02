@@ -846,15 +846,16 @@ class ListenMoePlayer(QWidget):
             msg.setWindowTitle(self.i18n.t('close_dialog_title'))
             msg.setText(self.i18n.t('close_dialog_text'))
             msg.setIcon(QMessageBox.Icon.Question)
-            
+
             tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.ButtonRole.AcceptRole)
             quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.ButtonRole.DestructiveRole)
             cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.ButtonRole.RejectRole)
             msg.setEscapeButton(cancel_btn)
-            
+
             cb = QCheckBox(self.i18n.t('close_remember'))
             msg.setCheckBox(cb)
-            
+
+            self._make_frameless_msg(msg)
             try:
                 apply_windows_titlebar_dark_mode(msg, True)
             except Exception: pass
@@ -1389,6 +1390,14 @@ class ListenMoePlayer(QWidget):
             apply_windows_titlebar_dark_mode(self, enable)
         except Exception:
             pass
+
+    @staticmethod
+    def _make_frameless_msg(msg: QMessageBox) -> None:
+        """Remove compositor decorations from a QMessageBox and add a visible border."""
+        msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        msg.setStyleSheet(
+            "QDialog { background-color: #121212; border: 1px solid #3a3a3a; }"
+        )
 
     def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:
@@ -2700,7 +2709,7 @@ class ListenMoePlayer(QWidget):
                         restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.ButtonRole.AcceptRole)
                         cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.ButtonRole.RejectRole)
                         msg.setIcon(QMessageBox.Icon.Question)
-                        # Forza titlebar scura su Windows per il QMessageBox
+                        self._make_frameless_msg(msg)
                         try:
                             apply_windows_titlebar_dark_mode(msg, True)
                         except Exception:

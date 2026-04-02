@@ -36,7 +36,8 @@ _STYLE = """
         border: none;
         border-radius: 0px;
         padding: 0px;
-        font-size: 14px;
+        font-size: 16px;
+        font-weight: 600;
     }
     #customTitleBar QPushButton:hover {
         background-color: #3a3a3a;
@@ -79,7 +80,7 @@ class CustomTitleBar(QWidget):
         layout.addWidget(self._title_label, 1)
 
         # Window control buttons
-        self._btn_min = QPushButton("─")
+        self._btn_min = QPushButton("—")
         self._btn_min.setObjectName("titleBarBtn")
         self._btn_min.setToolTip("Minimizza")
         self._btn_min.setFixedSize(_BTN_SIZE)
@@ -89,7 +90,7 @@ class CustomTitleBar(QWidget):
         self._btn_max.setToolTip("Ingrandisci")
         self._btn_max.setFixedSize(_BTN_SIZE)
 
-        self._btn_close = QPushButton("✕")
+        self._btn_close = QPushButton("×")
         self._btn_close.setObjectName("titleBarBtnClose")
         self._btn_close.setToolTip("Chiudi")
         self._btn_close.setFixedSize(_BTN_SIZE)

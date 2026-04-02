@@ -275,6 +275,7 @@ class SettingsDialog(QDialog):
 
         root_layout.addLayout(layout)
         self.setLayout(root_layout)
+        self.adjustSize()
 
     def _browse_vlc_path(self):
         start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
