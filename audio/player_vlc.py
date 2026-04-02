@@ -127,25 +127,38 @@ class PlayerVLC:
             return False
         try:
             assert self.instance is not None and self.player is not None
-            # Suppress stale events (EndReached / EncounteredError) that VLC
-            # fires when tearing down the previous stream.
-            self._stopping = True
-            self.player.stop()
-            # Clear media to force connection close
-            self.player.set_media(None)
-            # Wait for cleanup
-            import time
-            time.sleep(0.3)
-            # Create and set new media
+            # Only stop if the player is actually active.  Calling stop() on a
+            # freshly-initialised (never-played) player raises in some VLC
+            # builds and is not needed when no stream is open.
+            try:
+                st = self.player.get_state()
+                active = st in (
+                    vlc.State.Playing,
+                    vlc.State.Buffering,
+                    vlc.State.Opening,
+                    vlc.State.Paused,
+                )
+            except Exception:
+                active = False
+            if active:
+                # Suppress stale events (EndReached / EncounteredError) fired
+                # by VLC while tearing down the previous stream.
+                self._stopping = True
+                try:
+                    self.player.stop()
+                except Exception:
+                    pass
+            # Do NOT call set_media(None): the VLC docs require a valid Media
+            # object and passing None/NULL causes an exception on some builds.
+            # The upcoming set_media(media) call replaces the previous media.
             media = self.instance.media_new(url)
-            # Also set per-media user agent to be extra sure
             try:
                 if getattr(self, "_user_agent", None):
                     media.add_option(f":http-user-agent={self._user_agent}")
             except Exception:
                 pass
             self.player.set_media(media)
-            # Re-enable events before starting playback so the new stream's
+            # Re-enable events before play() so the new stream's
             # Opening / Playing / Error events are forwarded normally.
             self._stopping = False
             self.player.play()
@@ -162,9 +175,7 @@ class PlayerVLC:
         try:
             assert self.player is not None
             self._stopping = True
-            # Stop and clear media
             self.player.stop()
-            self.player.set_media(None)
             # Force cleanup of any remaining connections
             self.force_kill_all_vlc()
             self._stopping = False
@@ -295,13 +306,12 @@ class PlayerVLC:
         if not self.is_ready():
             return
         try:
-            # Force cleanup
             assert self.player is not None
             self._stopping = True
-            self.player.stop()
-            self.player.set_media(None)
-            import time
-            time.sleep(0.2)
+            try:
+                self.player.stop()
+            except Exception:
+                pass
             # Force kill any remaining VLC processes
             self.force_kill_all_vlc()
             self._stopping = False
