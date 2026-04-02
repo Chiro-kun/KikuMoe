@@ -149,6 +149,8 @@ class ListenMoePlayer(QWidget):
         self._sleep_fadeout_sec = 15
         self._sleep_saved_volume: Optional[int] = None
         self._clock_sync_offset = 0.0  # Difference between server time and local CPU clock
+        self._retry_count = 0
+        self._max_retries = 10
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -966,14 +968,20 @@ class ListenMoePlayer(QWidget):
                 self.buffering_indeterminate.emit(True)
                 self.backend_status_refresh.emit()
             elif c == "buffering":
-                self.status_changed.emit(self.t("status_buffering"))
-                self.buffering_visible.emit(True)
-                if isinstance(value, int) and 0 <= value <= 100:
+                if isinstance(value, int) and value >= 100:
+                    self.buffering_visible.emit(False)
                     self.buffering_indeterminate.emit(False)
-                    self.buffering_progress.emit(int(value))
+                    self.status_changed.emit(self.t("status_playing"))
                 else:
-                    self.buffering_indeterminate.emit(True)
+                    self.status_changed.emit(self.t("status_buffering"))
+                    self.buffering_visible.emit(True)
+                    if isinstance(value, int) and 0 <= value < 100:
+                        self.buffering_indeterminate.emit(False)
+                        self.buffering_progress.emit(int(value))
+                    else:
+                        self.buffering_indeterminate.emit(True)
             elif c == "playing":
+                self._retry_count = 0
                 self.status_changed.emit(self.t("status_playing"))
                 self.buffering_visible.emit(False)
                 self.buffering_indeterminate.emit(False)
@@ -1015,8 +1023,17 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(self.t("status_error"))
                 self.buffering_visible.emit(False)
                 self._skip_session_reset_once = True
-                self.schedule_play.emit(1200)
-                self.notify_tray.emit("Listen.moe", "Errore audio: tentativo di riavvio...")
+                
+                self._retry_count += 1
+                if self._retry_count <= self._max_retries:
+                    # Exponential backoff: 1.2s * 1.5 ^ retry_count (cap at 30s)
+                    delay = int(min(30000, 1200 * (1.5 ** self._retry_count)))
+                    self.schedule_play.emit(delay)
+                    self.log.info(f"[UI] Playback restart scheduled in {delay}ms (retry {self._retry_count})")
+                    self.notify_tray.emit("Listen.moe", self.t("status_restarting"))
+                else:
+                    self.log.error(f"[UI] Maximum retries ({self._retry_count}) reached. Giving up.")
+                    self.notify_tray.emit("Listen.moe", "Errore persistente: ricarica interrotta.")
             self._refresh_play_button_text()
         except Exception:
             pass
@@ -2647,6 +2664,7 @@ class ListenMoePlayer(QWidget):
     # ------------------- Player controls -------------------
     def play_stream(self) -> None:
         try:
+            self._retry_count = 0
             with self._playback_lock:
                 # Determine URL and check backend readiness
                 url = None
@@ -2780,6 +2798,7 @@ class ListenMoePlayer(QWidget):
 
     def stop_stream(self, reset_session: bool = True) -> None:
         try:
+            self._retry_count = 0
             try:
                 self.log.info("[UI] stop_stream clicked")
             except Exception:

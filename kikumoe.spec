@@ -27,7 +27,7 @@ if version_yml.exists():
 # VLC bundling (Windows: bundle DLLs; Linux: system-installed VLC is used directly)
 vlc_binaries = []
 if _IS_WIN32:
-    vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files (x86)\VideoLAN\VLC")
+    vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files\VideoLAN\VLC")
     libvlc = vlc_dir / "libvlc.dll"
     libvlccore = vlc_dir / "libvlccore.dll"
     plugins_dir = vlc_dir / "plugins"
