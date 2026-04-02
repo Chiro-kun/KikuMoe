@@ -18,7 +18,7 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Sleep timer](#sleep-timer)
 - [Console sviluppatore](#console-sviluppatore)
 - [Risoluzione problemi](#risoluzione-problemi)
-- [Build Windows](#build-windows)
+- [Build](#build)
 
 ---
 
@@ -268,19 +268,17 @@ In caso di errore fatale l'applicazione scrive un log in:
 
 ---
 
-## Build Windows
+## Build
 
-Usa lo script di build dalla root del repository:
+La configurazione PyInstaller si trova in `kikumoe.spec`.
+
+### Windows
 
 ```powershell
 .\build.ps1
 ```
 
-Lo script installa/aggiorna PyInstaller, installa le dipendenze e produce:
-
-```
-dist\KikuMoe-<versione>.exe
-```
+Produce `dist\KikuMoe-<versione>.exe`.
 
 Se VLC non si trova nel percorso predefinito, imposta la variabile d'ambiente prima di eseguire il build:
 
@@ -289,9 +287,13 @@ $env:VLC_DIR = "C:\Percorso\A\VLC"
 .\build.ps1
 ```
 
-La configurazione PyInstaller si trova in `kikumoe.spec`.
+### Linux
 
-> Il build è supportato **solo su Windows**. Per eseguire l'applicazione da sorgente su Linux o macOS, vedi [Installazione](#installazione).
+```bash
+./build.sh
+```
+
+Produce `dist/KikuMoe-<versione>`. VLC non viene incluso nel binario; deve essere installato a livello di sistema (`sudo pacman -S vlc`, `sudo apt install vlc`, ecc.) e verrà trovato automaticamente da `python-vlc`.
 
 ---
 

@@ -107,8 +107,8 @@ On Windows, `stdout` is wrapped in `_SafeTextStream` to prevent `UnicodeEncodeEr
 
 Time formatting utilities:
 
-- `compute_display_mmss(elapsed_s)` → `"mm:ss"` of elapsed time
-- `compute_remaining(duration_s, start_epoch)` → remaining seconds from a Unix timestamp
+- `compute_remaining(duration_seconds, start_epoch)` → remaining seconds (`int | None`); returns `None` if either argument is `None`
+- `compute_display_mmss(duration_seconds, start_epoch)` → `tuple[str, bool]` where the string is `"mm:ss"` and the bool is `True` when the value is remaining time, `False` when it falls back to total duration (or `"--:--"` if neither is available)
 
 ---
 
@@ -119,14 +119,15 @@ All backends expose the same callback interface, letting the main window treat t
 ### Common interface
 
 ```python
-player.play(url: str)         -> None
-player.pause()                -> None
-player.resume()               -> None
+player.is_ready()             -> bool   # False if the required library is missing
+player.play_url(url: str)     -> bool   # True on success
+player.pause_toggle()         -> None   # toggles pause/resume
 player.stop()                 -> None
-player.force_stop()           -> None
-player.set_volume(v: int)     -> None   # 0–100
-player.set_mute(muted: bool)  -> None
-player.set_device(index: int) -> None   # PyAudio device index
+player.force_cleanup()        -> None   # emergency teardown
+player.set_volume(vol: int)   -> None   # 0–100
+player.set_mute(mute: bool)   -> None
+player.get_volume()           -> int
+player.get_mute()             -> bool
 ```
 
 Callback set by `main_window.py`:
@@ -186,26 +187,27 @@ Manages the WebSocket connection to the LISTEN.moe gateway (`wss://listen.moe/ga
 
 | Sent message | Purpose |
 |---|---|
-| `{"op": 9}` | Heartbeat (interval received in the welcome message) |
-| `{"op": 2, "d": {"channel": "..."}}` | Channel subscription |
+| `{"op": 2}` | Initial acknowledgement (sent on open and on welcome) |
+| `{"op": 9}` | Periodic heartbeat (sent at the interval received in the welcome message) |
 
 | Received event (`op`) | Meaning |
 |---|---|
-| `0` | Welcome / heartbeat interval |
-| `1` | `TRACK_UPDATE`: current track metadata |
+| `0` | Welcome — contains `d.heartbeat` interval in ms |
+| `1` | Dispatch — `TRACK_UPDATE` / `TRACK_UPDATE_REQUEST`: current track metadata |
 
-`TRACK_UPDATE` payload: `title`, `artists[].name`, `duration` (s), `albums[].image` (relative filename, CDN base: `https://cdn.listen.moe/covers/`), `startTime` (ISO 8601).
+`TRACK_UPDATE` payload: `song.title`, `song.artists[].name`, `song.duration` (s), `song.albums[].image` (relative filename, CDN base: `https://cdn.listen.moe/covers/`), `startTime` (ISO 8601).
 
-Auto-reconnects with a 5 s delay on socket close.
+Channel filtering is applied client-side via the `channel_filter` callback passed to the constructor. Auto-reconnects with a 5 s delay on socket close.
 
 ```python
 ws = NowPlayingWS(
-    on_now_playing=fn,    # fn(title, artist, duration_s, cover_url, start_epoch)
-    on_error_text=fn,     # fn(msg: str)
-    on_closed_text=fn,    # fn(msg: str)
+    on_now_playing=fn,       # fn(title, artist, duration_s, start_epoch, cover_filename)
+    on_error_text=fn,        # fn(msg: str)
+    on_closed_text=fn,       # fn(msg: str)
+    channel_filter=fn,       # optional fn(d: dict) -> bool
 )
-ws.start(channel="J-POP")
-ws.stop()
+ws.start()
+ws.shutdown()
 ```
 
 ---
@@ -231,7 +233,7 @@ Signals are the only safe channel for updating the UI from non-main threads.
 
 **Custom widget:** `SmoothProgressBar(QProgressBar)` — rounded corners, custom colors.
 
-**Backend initialization:** tries `PlayerFFmpeg` first; falls back to `PlayerVLC` if FFmpeg is not found. Active backend stored in `self._player`.
+**Backend initialization:** `_create_player()` tries backends in order — `PlayerFFmpeg` → `PlayerMPV` → `PlayerVLC` — stopping at the first one whose `is_ready()` returns `True`. Manual selection via `KEY_AUDIO_BACKEND` bypasses the chain. Active backend stored in `self.player`.
 
 ---
 

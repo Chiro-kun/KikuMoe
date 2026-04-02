@@ -1,21 +1,25 @@
 import json
 import threading
 from typing import Callable, Optional
+
 try:
     from websocket import WebSocketApp
 except Exception:
-    WebSocketApp = None  # type: ignore[assignment]
+    WebSocketApp = None  # type: ignore[assignment, misc]
 from datetime import datetime, timezone
 
 WS_URL = "wss://listen.moe/gateway_v2"
 
+
 class NowPlayingWS:
-    def __init__(self,
-                 on_now_playing: Callable[[str, str, Optional[int], Optional[float], Optional[str]], None],
-                 on_error_text: Callable[[str], None],
-                 on_closed_text: Callable[[str], None],
-                 channel_filter: Optional[Callable[[dict], bool]] = None,
-                 ws_url: Optional[str] = None):
+    def __init__(
+        self,
+        on_now_playing: Callable[[str, str, Optional[int], Optional[float], Optional[str]], None],
+        on_error_text: Callable[[str], None],
+        on_closed_text: Callable[[str], None],
+        channel_filter: Optional[Callable[[dict], bool]] = None,
+        ws_url: Optional[str] = None,
+    ):
         self.ws_app: Optional[WebSocketApp] = None
         self.ws_thread: Optional[threading.Thread] = None
         self.ws_heartbeat_interval_ms: Optional[int] = None
@@ -30,7 +34,9 @@ class NowPlayingWS:
     def start(self):
         if WebSocketApp is None:
             try:
-                self.on_error_text("websocket-client non installato: impossibile avviare il websocket.")
+                self.on_error_text(
+                    "websocket-client non installato: impossibile avviare il websocket."
+                )
             except Exception:
                 pass
             return
@@ -121,18 +127,22 @@ class NowPlayingWS:
             on_error=on_error,
             on_close=on_close,
         )
-        self.ws_thread = threading.Thread(target=self.ws_app.run_forever, kwargs={"ping_interval": None}, daemon=True)
+        self.ws_thread = threading.Thread(
+            target=self.ws_app.run_forever, kwargs={"ping_interval": None}, daemon=True
+        )
         self.ws_thread.start()
 
     def _schedule_heartbeat(self):
         if self.ws_heartbeat_interval_ms is None or self.ws_app is None:
             return
+
         def send_hb():
             try:
                 self.ws_app.send(json.dumps({"op": 9}))
             except Exception:
                 pass
             self._schedule_heartbeat()
+
         delay = self.ws_heartbeat_interval_ms / 1000.0
         self.ws_heartbeat_timer = threading.Timer(delay, send_hb)
         self.ws_heartbeat_timer.daemon = True

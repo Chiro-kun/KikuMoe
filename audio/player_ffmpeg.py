@@ -1,15 +1,17 @@
 from __future__ import annotations
-from typing import Optional, Callable, Any, List
-import os
-import threading
-import time
+
+import re
+import struct
 import subprocess
 import sys
-import struct
-import re
-from core.logger import get_logger, silence_stderr
+import threading
+import time
+from typing import Any, Callable
+
 from PyQt6.QtCore import QSettings
-from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
+
+from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
+from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -20,25 +22,25 @@ except Exception:
 
 
 class PlayerFFmpeg:
-    def __init__(self, on_event: Optional[Callable[[str, Optional[int]], None]] = None) -> None:
+    def __init__(self, on_event: Callable[[str, int | None], None] | None = None) -> None:
         self._on_event = on_event
         self._muted: bool = False
         self._volume: float = 1.0
         self._ready: bool = False
         self._playing: bool = False
-        self._current_stream: Optional[str] = None
+        self._current_stream: str | None = None
         # stop event replaces boolean flag to safely notify worker thread
         self._stop_requested = False
         self._stop_event = threading.Event()
         # lock protecting _ffmpeg_process and _audio_stream
         self._state_lock = threading.RLock()
-        self._stream_thread: Optional[threading.Thread] = None
-        self._audio_stream: Optional[Any] = None
-        self._pyaudio_instance: Optional[Any] = None  # type: ignore
-        self._ffmpeg_process: Optional[subprocess.Popen] = None
+        self._stream_thread: threading.Thread | None = None
+        self._audio_stream: Any | None = None
+        self._pyaudio_instance: Any | None = None  # type: ignore
+        self._ffmpeg_process: subprocess.Popen | None = None
         # Track pause state explicitly
         self._paused: bool = False
-        self.log = get_logger('PlayerFFmpeg')
+        self.log = get_logger("PlayerFFmpeg")
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.10.0")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -111,10 +113,12 @@ class PlayerFFmpeg:
     def is_ready(self) -> bool:
         return bool(self._ready and pyaudio is not None)
 
-    def reinitialize(self, libvlc_path: Optional[str] = None, network_caching_ms: Optional[int] = None) -> bool:
+    def reinitialize(
+        self, libvlc_path: str | None = None, network_caching_ms: int | None = None
+    ) -> bool:
         return self.is_ready()
 
-    def _emit(self, code: str, value: Optional[int] = None) -> None:
+    def _emit(self, code: str, value: int | None = None) -> None:
         if self._on_event:
             try:
                 self._on_event(code, value)
@@ -124,13 +128,21 @@ class PlayerFFmpeg:
     def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available."""
         try:
-            result = subprocess.run(['ffmpeg', '-version'],
-                                    capture_output=True, check=False, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if _IS_WIN32 else {}))
+            kwargs: dict = {}
+            if _IS_WIN32:
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            result = subprocess.run(
+                ["ffmpeg", "-version"],
+                capture_output=True,
+                check=False,
+                timeout=5,
+                **kwargs,
+            )
             return result.returncode == 0
         except Exception:
             return False
 
-    def _get_output_device_index(self) -> Optional[int]:
+    def _get_output_device_index(self) -> int | None:
         """Returns the PyAudio output device index to use.
 
         Priority:
@@ -140,22 +152,24 @@ class PlayerFFmpeg:
         """
         try:
             settings = QSettings(ORG_NAME, APP_SETTINGS)
-            val = settings.value(KEY_AUDIO_DEVICE_INDEX, '')
-            if val not in (None, ''):
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            if val not in (None, ""):
                 return int(val)
         except Exception:
             pass
         # On Linux, use the pre-detected preferred device if available
         if not _IS_WIN32:
-            return getattr(self, '_linux_preferred_device', None)
+            return getattr(self, "_linux_preferred_device", None)
         return None
 
     def _sanitize_stream_url(self, raw: str) -> str:
-        """Estrae e sanifica un URL di streaming, rimuovendo in modo aggressivo apici/backtick e punteggiatura finale.
-        Usa una classe di caratteri consentiti per l'URL (coerente con la UI) per evitare di catturare simboli indesiderati.
+        """Estrae e sanifica un URL di streaming, rimuovendo in modo aggressivo
+        apici/backtick e punteggiatura finale.
+        Usa una classe di caratteri consentiti per l'URL (coerente con la UI)
+        per evitare di catturare simboli indesiderati.
         """
         try:
-            s = (raw or "")
+            s = raw or ""
             # Rimuovi globalmente caratteri di apici/backtick e spazi superflui
             s = re.sub(r"[`'\"“”‘’]+", "", s)
             s = s.strip()
@@ -166,7 +180,7 @@ class PlayerFFmpeg:
             url = url.strip()
             lower = url.lower()
             # Normalizza suffissi accidentali che terminano con un punto
-            if lower.endswith('/mp3.') or lower.endswith('.mp3.'):
+            if lower.endswith("/mp3.") or lower.endswith(".mp3."):
                 url = url[:-1]
             # Rimuovi comune punteggiatura finale/spazi
             url = url.rstrip(".,;!?)]}'\"` \t\r\n")
@@ -178,7 +192,7 @@ class PlayerFFmpeg:
     def play_url(self, url: str) -> bool:
         if not self.is_ready():
             # Backend (ffmpeg) non pronto: emette errore generico
-            self._emit('error', None)
+            self._emit("error", None)
             return False
 
         try:
@@ -188,13 +202,17 @@ class PlayerFFmpeg:
             safe_url = self._sanitize_stream_url(raw_in)
             if safe_url != raw_in:
                 try:
-                    self.log.debug("[DEBUG] play_url: sanitized url: %r from raw: %r", safe_url, raw_in)
+                    self.log.debug(
+                        "[DEBUG] play_url: sanitized url: %r from raw: %r", safe_url, raw_in
+                    )
                 except Exception:
                     pass
             # Stop any current stream first (only if needed)
             need_stop = False
             with self._state_lock:
-                need_stop = bool(self._playing or (self._stream_thread and self._stream_thread.is_alive()))
+                need_stop = bool(
+                    self._playing or (self._stream_thread and self._stream_thread.is_alive())
+                )
                 # Reset pause state for a fresh start
                 self._paused = False
             if need_stop:
@@ -232,14 +250,14 @@ class PlayerFFmpeg:
             except Exception:
                 self._playing = False
                 self._current_stream = None
-                self._emit('error', None)
+                self._emit("error", None)
                 return False
 
             return True
         except Exception:
             self._playing = False
             self._current_stream = None
-            self._emit('error', None)
+            self._emit("error", None)
             return False
 
     def stop(self) -> None:
@@ -262,7 +280,7 @@ class PlayerFFmpeg:
 
             # Terminate ffmpeg process safely
             with self._state_lock:
-                proc = self._ffmpeg_process
+                proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
                 self._ffmpeg_process = None
             if proc:
                 try:
@@ -302,7 +320,7 @@ class PlayerFFmpeg:
             self._current_stream = None
             # Evita doppio emit: se c'era un worker attivo, sarà il worker ad emettere 'stopped'
             if not had_worker_running:
-                self._emit('stopped', None)
+                self._emit("stopped", None)
         except Exception as e:
             try:
                 self.log.debug("[DEBUG] stop: exception during stop: %s", e)
@@ -325,7 +343,7 @@ class PlayerFFmpeg:
                             pass
                     except Exception:
                         pass
-                    self._emit('paused', None)
+                    self._emit("paused", None)
                 elif self._audio_stream:
                     try:
                         self._audio_stream.start_stream()
@@ -336,9 +354,9 @@ class PlayerFFmpeg:
                             pass
                     except Exception:
                         pass
-                    self._emit('playing', None)
+                    self._emit("playing", None)
         except Exception:
-            self._emit('error', None)
+            self._emit("error", None)
 
     def set_volume(self, vol: int) -> None:
         self._volume = max(0.0, min(1.0, float(vol) / 100.0))
@@ -358,18 +376,26 @@ class PlayerFFmpeg:
     def is_paused(self) -> bool:
         return bool(self._paused)
 
-    def get_version(self) -> Optional[str]:
+    def get_version(self) -> str | None:
         """Return ffmpeg version string if available."""
         try:
-            result = subprocess.run(['ffmpeg', '-version'],
-                                    capture_output=True, text=True, timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if _IS_WIN32 else {}))
+            kwargs: dict = {}
+            if _IS_WIN32:
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            result = subprocess.run(
+                ["ffmpeg", "-version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                **kwargs,
+            )
             if result.returncode == 0:
-                return result.stdout.split('\n')[0]
+                return str(result.stdout.split("\n")[0])
         except Exception:
             pass
         return None
 
-    def get_configured_path(self) -> Optional[str]:
+    def get_configured_path(self) -> str | None:
         """Return None - ffmpeg doesn't use external paths."""
         return None
 
@@ -383,7 +409,7 @@ class PlayerFFmpeg:
 
             # Force kill ffmpeg process
             with self._state_lock:
-                proc = self._ffmpeg_process
+                proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
                 self._ffmpeg_process = None
             if proc:
                 try:
@@ -416,7 +442,9 @@ class PlayerFFmpeg:
             # Wait for thread to finish with timeout
             if self._stream_thread and self._stream_thread.is_alive():
                 try:
-                    self.log.debug("[DEBUG] Waiting for stream thread to terminate after force_cleanup...")
+                    self.log.debug(
+                        "[DEBUG] Waiting for stream thread to terminate after force_cleanup..."
+                    )
                     self._stream_thread.join(timeout=2.0)
                 except Exception:
                     pass
@@ -433,13 +461,13 @@ class PlayerFFmpeg:
     def _stream_worker(self, url: str) -> None:
         self.log.debug("[DEBUG] _stream_worker: started for url: %s", url)
         try:
-            self._emit('opening', None)
+            self._emit("opening", None)
 
             # Check ffmpeg availability
             self.log.debug("[DEBUG] _stream_worker: checking ffmpeg availability")
             if not self._check_ffmpeg():
                 self.log.debug("[DEBUG] _stream_worker: ffmpeg not available")
-                self._emit('error', None)
+                self._emit("error", None)
                 return
 
             # Open audio stream
@@ -451,30 +479,41 @@ class PlayerFFmpeg:
                     if device_idx is None:
                         self.log.debug("[DEBUG] _stream_worker: using system default output device")
                     else:
-                        self.log.debug("[DEBUG] _stream_worker: using output_device_index=%s", device_idx)
+                        self.log.debug(
+                            "[DEBUG] _stream_worker: using output_device_index=%s", device_idx
+                        )
                     open_kwargs = {
-                        'format': pa_format,
-                        'channels': 2,
-                        'rate': 44100,
-                        'output': True,
-                        'frames_per_buffer': 1024,
+                        "format": pa_format,
+                        "channels": 2,
+                        "rate": 44100,
+                        "output": True,
+                        "frames_per_buffer": 1024,
                     }
                     if device_idx is not None:
-                        open_kwargs['output_device_index'] = device_idx
+                        open_kwargs["output_device_index"] = device_idx
                     # Try open; if fails with a specific device, retry with default system device
                     try:
                         self._audio_stream = self._pyaudio_instance.open(**open_kwargs)
                     except Exception as oe:
                         if device_idx is not None:
                             try:
-                                self.log.debug("[DEBUG] _stream_worker: failed to open with device %s, retrying with Windows default: %s", device_idx, oe)
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: failed to open with device "
+                                    "%s, retrying with Windows default: %s",
+                                    device_idx,
+                                    oe,
+                                )
                             except Exception:
                                 pass
                             try:
-                                open_kwargs.pop('output_device_index', None)
+                                open_kwargs.pop("output_device_index", None)
                                 self._audio_stream = self._pyaudio_instance.open(**open_kwargs)
                             except Exception as oe2:
-                                self.log.debug("[DEBUG] _stream_worker: also failed to open default device: %s", oe2)
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: also failed to open default "
+                                    "device: %s",
+                                    oe2,
+                                )
                                 raise
                         else:
                             raise
@@ -484,34 +523,38 @@ class PlayerFFmpeg:
                             self._audio_stream.start_stream()
                             self.log.debug("[DEBUG] _stream_worker: PyAudio stream started")
                     except Exception as se:
-                        self.log.debug("[DEBUG] _stream_worker: could not start PyAudio stream: %s", se)
+                        self.log.debug(
+                            "[DEBUG] _stream_worker: could not start PyAudio stream: %s", se
+                        )
                 except Exception as e:
                     self.log.debug("[DEBUG] _stream_worker: failed to open PyAudio stream: %s", e)
-                    self._emit('error', None)
+                    self._emit("error", None)
                     return
             else:
                 self.log.debug("[DEBUG] _stream_worker: PyAudio instance not ready")
-                self._emit('error', None)
+                self._emit("error", None)
                 return
 
             # Sanitize URL (robusta e coerente con play_url)
             raw_url = url
             safe_url = self._sanitize_stream_url(raw_url)
-            self.log.debug("[DEBUG] _stream_worker: sanitized url: %r from raw: %r", safe_url, raw_url)
+            self.log.debug(
+                "[DEBUG] _stream_worker: sanitized url: %r from raw: %r", safe_url, raw_url
+            )
 
             # Costruisci lista di URL candidati con fallback automatici
-            candidates: List[str] = [safe_url]
+            candidates: list[str] = [safe_url]
             try:
                 u = safe_url.lower()
-                if '/kpop/' in u:
+                if "/kpop/" in u:
                     # Preferisci HTTPS Vorbis prima di M3U/HTTP
-                    candidates.append('https://listen.moe/kpop/stream')
-                    candidates.append('https://listen.moe/kpop/stream.m3u')
-                    candidates.append('http://listen.moe:9999/kpop/stream')
+                    candidates.append("https://listen.moe/kpop/stream")
+                    candidates.append("https://listen.moe/kpop/stream.m3u")
+                    candidates.append("http://listen.moe:9999/kpop/stream")
                 else:
-                    candidates.append('https://listen.moe/stream')
-                    candidates.append('https://listen.moe/stream.m3u')
-                    candidates.append('http://listen.moe:9999/stream')
+                    candidates.append("https://listen.moe/stream")
+                    candidates.append("https://listen.moe/stream.m3u")
+                    candidates.append("http://listen.moe:9999/stream")
             except Exception:
                 pass
 
@@ -522,7 +565,9 @@ class PlayerFFmpeg:
                 if self._stop_event.is_set():
                     break
                 try:
-                    self.log.debug("[DEBUG] _stream_worker: attempt %d with url: %s", attempt_idx + 1, cur_url)
+                    self.log.debug(
+                        "[DEBUG] _stream_worker: attempt %d with url: %s", attempt_idx + 1, cur_url
+                    )
                 except Exception:
                     pass
 
@@ -535,55 +580,81 @@ class PlayerFFmpeg:
                     is_mp3 = False
 
                 ffmpeg_cmd = [
-                    'ffmpeg',
-                    '-hide_banner',
-                    '-nostdin',
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-nostdin",
                     # Network/HTTP options for robust streaming
-                    '-rw_timeout', '15000000',
-                    '-user_agent', self._user_agent,
+                    "-rw_timeout",
+                    "15000000",
+                    "-user_agent",
+                    self._user_agent,
                 ]
                 # Add reconnect options to handle stream switches gracefully
                 try:
-                    ffmpeg_cmd.extend([
-                        '-reconnect', '1',
-                        '-reconnect_streamed', '1',
-                        '-reconnect_at_eof', '1',
-                        '-reconnect_delay_max', '2',
-                        '-reconnect_on_network_error', '1',
-                    ])
+                    ffmpeg_cmd.extend(
+                        [
+                            "-reconnect",
+                            "1",
+                            "-reconnect_streamed",
+                            "1",
+                            "-reconnect_at_eof",
+                            "1",
+                            "-reconnect_delay_max",
+                            "2",
+                            "-reconnect_on_network_error",
+                            "1",
+                        ]
+                    )
                 except Exception:
                     pass
 
                 # Apply MP3-specific headers (some servers expect audio/mpeg Accept)
                 if is_mp3:
                     try:
-                        ffmpeg_cmd.extend([
-                            '-headers', 'Accept: audio/mpeg\r\nIcy-MetaData: 0\r\n',
-                        ])
+                        ffmpeg_cmd.extend(
+                            [
+                                "-headers",
+                                "Accept: audio/mpeg\r\nIcy-MetaData: 0\r\n",
+                            ]
+                        )
                         self.log.debug("[DEBUG] _stream_worker: applying MP3-specific headers")
                     except Exception:
                         pass
 
                 # Input URL
-                ffmpeg_cmd.extend(['-i', cur_url])
+                ffmpeg_cmd.extend(["-i", cur_url])
 
                 # Output format: raw PCM s16le to stdout
-                ffmpeg_cmd.extend([
-                    '-vn',
-                    '-fflags', 'nobuffer',
-                    '-f', 's16le',
-                    '-ar', '44100',
-                    '-ac', '2',
-                    '-acodec', 'pcm_s16le',
-                    '-af', f'volume={self._volume:.2f}',
-                    '-loglevel', 'error',
-                    '-',
-                ])
+                ffmpeg_cmd.extend(
+                    [
+                        "-vn",
+                        "-fflags",
+                        "nobuffer",
+                        "-f",
+                        "s16le",
+                        "-ar",
+                        "44100",
+                        "-ac",
+                        "2",
+                        "-acodec",
+                        "pcm_s16le",
+                        "-af",
+                        f"volume={self._volume:.2f}",
+                        "-loglevel",
+                        "error",
+                        "-",
+                    ]
+                )
 
                 # Launch ffmpeg process
                 with self._state_lock:
                     self._ffmpeg_process = None
                 try:
+                    kwargs: dict = {}
+                    if _IS_WIN32:
+                        kwargs["creationflags"] = getattr(
+                            subprocess, "CREATE_NO_WINDOW", 0x08000000
+                        )
                     self.log.debug("[DEBUG] _stream_worker: launching ffmpeg: %r", ffmpeg_cmd)
                     self._ffmpeg_process = subprocess.Popen(
                         ffmpeg_cmd,
@@ -591,9 +662,12 @@ class PlayerFFmpeg:
                         stderr=subprocess.PIPE,
                         stdin=subprocess.DEVNULL,
                         bufsize=0,
-                        **({"creationflags": subprocess.CREATE_NO_WINDOW} if _IS_WIN32 else {})
+                        **kwargs,
                     )
-                    self.log.debug("[DEBUG] _stream_worker: ffmpeg process started, pid: %s", self._ffmpeg_process.pid)
+                    self.log.debug(
+                        "[DEBUG] _stream_worker: ffmpeg process started, pid: %s",
+                        self._ffmpeg_process.pid,
+                    )
                 except Exception as e:
                     self.log.debug("[DEBUG] _stream_worker: failed to start ffmpeg: %s", e)
                     self._ffmpeg_process = None
@@ -607,7 +681,7 @@ class PlayerFFmpeg:
                 last_data_ts = time.time()
                 # Watchdog di stallo: se non arrivano dati per troppo tempo, forza riavvio di ffmpeg
                 watchdog_stop = threading.Event()
-                forced_error_ref = {'v': False}
+                forced_error_ref = {"v": False}
 
                 def _stall_watchdog_local():
                     _last_wd_log = [0]
@@ -626,21 +700,32 @@ class PlayerFFmpeg:
                             delta = time.time() - last_data_ts
                         except Exception:
                             delta = stall_timeout + 1
-                            
+
                         # Throttled status log for debugging stalls (once per 5s)
                         now_int = int(time.time())
                         if now_int != _last_wd_log[0] and now_int % 5 == 0:
                             _last_wd_log[0] = now_int
                             try:
-                                self.log.debug("[DEBUG] _stall_watchdog: delta=%.1f s, pid=%s, started=%s", delta, p.pid if p else 'None', started_streaming)
-                            except Exception: pass
+                                self.log.debug(
+                                    "[DEBUG] _stall_watchdog: delta=%.1f s, pid=%s, started=%s",
+                                    delta,
+                                    p.pid if p else "None",
+                                    started_streaming,
+                                )
+                            except Exception:
+                                pass
 
                         if delta > stall_timeout:
                             try:
-                                self.log.debug("[DEBUG] _stall_watchdog: stall detected (%.2fs > %.2fs), terminating ffmpeg", delta, stall_timeout)
+                                self.log.debug(
+                                    "[DEBUG] _stall_watchdog: stall detected (%.2fs > %.2fs), "
+                                    "terminating ffmpeg",
+                                    delta,
+                                    stall_timeout,
+                                )
                             except Exception:
                                 pass
-                            forced_error_ref['v'] = True
+                            forced_error_ref["v"] = True
                             try:
                                 p.terminate()
                                 p.wait(timeout=1.0)
@@ -656,7 +741,8 @@ class PlayerFFmpeg:
                 try:
                     watchdog_thread.start()
                 except Exception:
-                    # Se il watchdog non parte, prosegui comunque (sarà lo stdout.read a segnalare problemi)
+                    # Se il watchdog non parte, prosegui comunque
+                    # (sarà lo stdout.read a segnalare problemi)
                     pass
 
                 while True:
@@ -664,30 +750,35 @@ class PlayerFFmpeg:
                         if self._stop_event.is_set():
                             self.log.debug("[DEBUG] _stream_worker: stop event set, breaking loop")
                             break
-                        proc = self._ffmpeg_process
+                        proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
                     if proc is None:
                         self.log.debug("[DEBUG] _stream_worker: ffmpeg process missing")
                         forced_error = True
                         break
                     if proc.poll() is not None:
                         code = proc.poll()
-                        self.log.debug("[DEBUG] _stream_worker: ffmpeg process ended with code: %s", code)
+                        self.log.debug(
+                            "[DEBUG] _stream_worker: ffmpeg process ended with code: %s", code
+                        )
                         # Try to read stderr if possible
                         err = b""
                         try:
                             if proc.stderr:
-                                err = proc.stderr.read() or b""
+                                err = proc.stderr.read() or b""  # type: ignore[assignment]
                                 if err:
-                                    self.log.debug("[DEBUG] ffmpeg stderr: %s", err.decode(errors='ignore'))
+                                    self.log.debug(
+                                        "[DEBUG] ffmpeg stderr: %s", err.decode(errors="ignore")
+                                    )
                         except Exception as e:
                             self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
                         # Se il watchdog ha segnalato stallo, marca come errore forzato
                         try:
-                            if 'forced_error_ref' in locals() and forced_error_ref.get('v'):
+                            if "forced_error_ref" in locals() and forced_error_ref.get("v"):
                                 forced_error = True
                         except Exception:
                             pass
-                        # Se ffmpeg è terminato con codice != 0 o ha scritto su stderr, considera errore
+                        # Se ffmpeg è terminato con codice != 0 o ha scritto su stderr,
+                        # considera errore
                         if not forced_error:
                             try:
                                 if code not in (0, None):
@@ -699,7 +790,6 @@ class PlayerFFmpeg:
                         # Fine tentativo corrente: passa al prossimo URL
                         break
 
-                        
                     if proc.stdout is None:
                         self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
                         forced_error = True
@@ -708,20 +798,30 @@ class PlayerFFmpeg:
                     try:
                         chunk = proc.stdout.read(chunk_size)
                     except Exception as e:
-                        self.log.debug("[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e)
+                        self.log.debug(
+                            "[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e
+                        )
                         forced_error = True
                         break
 
                     if not chunk:
                         empty_reads += 1
-                        # If ffmpeg is still running, wait a bit and retry instead of breaking immediately
+                        # If ffmpeg is still running, wait a bit and retry
+                        # instead of breaking immediately
                         if proc.poll() is None:
                             if empty_reads % 20 == 0:
-                                self.log.debug("[DEBUG] _stream_worker: empty chunk (x%d), waiting for data...", empty_reads)
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: empty chunk (x%d), "
+                                    "waiting for data...",
+                                    empty_reads,
+                                )
                             time.sleep(0.05)
                             continue
                         else:
-                            self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk after process ended")
+                            self.log.debug(
+                                "[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk "
+                                "after process ended"
+                            )
                             break
 
                     # got data
@@ -730,21 +830,29 @@ class PlayerFFmpeg:
                     if not started_streaming:
                         started_streaming = True
                         try:
-                            self.log.debug("[DEBUG] _stream_worker: first audio chunk received (len=%d), emitting playing", len(chunk))
-                        except Exception: pass
-                        self._emit('playing', None)
+                            self.log.debug(
+                                "[DEBUG] _stream_worker: first audio chunk received "
+                                "(len=%d), emitting playing",
+                                len(chunk),
+                            )
+                        except Exception:
+                            pass
+                        self._emit("playing", None)
 
                     n_bytes = (len(chunk) // 2) * 2
                     if n_bytes == 0:
                         time.sleep(0.01)
                         continue
-                    data = chunk[:n_bytes]
+                    data: bytes = chunk[:n_bytes]  # type: ignore[assignment]
 
-                    # Avoid writing to PyAudio when paused/stream inactive to prevent [Errno -9988] spam
+                    # Avoid writing to PyAudio when paused/stream inactive to prevent
+                    # [Errno -9988] spam
                     stream_active = False
                     if self._audio_stream is not None:
                         try:
-                            stream_active = getattr(self._audio_stream, "is_active", lambda: False)()
+                            stream_active = getattr(
+                                self._audio_stream, "is_active", lambda: False
+                            )()
                         except Exception:
                             stream_active = False
 
@@ -754,10 +862,14 @@ class PlayerFFmpeg:
                             if self._volume >= 0.99:
                                 volume_chunk = data
                             else:
-                                samples = struct.unpack(f'<{n_bytes // 2}h', data)
+                                samples = struct.unpack(f"<{n_bytes // 2}h", data)
                                 volume_samples = [int(sample * self._volume) for sample in samples]
-                                volume_samples = [max(-32768, min(32767, s)) for s in volume_samples]
-                                volume_chunk = struct.pack(f'<{len(volume_samples)}h', *volume_samples)
+                                volume_samples = [
+                                    max(-32768, min(32767, s)) for s in volume_samples
+                                ]
+                                volume_chunk = struct.pack(
+                                    f"<{len(volume_samples)}h", *volume_samples
+                                )
 
                             if self._audio_stream is not None and stream_active:
                                 self._audio_stream.write(volume_chunk)
@@ -768,26 +880,32 @@ class PlayerFFmpeg:
                         except Exception as e:
                             # Log errors only if stream is active; otherwise likely paused/closed
                             if stream_active:
-                                self.log.debug("[DEBUG] _stream_worker: error in audio processing: %s", e)
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: error in audio processing: %s", e
+                                )
                                 try:
                                     if self._audio_stream is not None and stream_active:
-                                        self._audio_stream.write(b'\x00' * n_bytes)
+                                        self._audio_stream.write(b"\x00" * n_bytes)
                                 except Exception as e2:
-                                    self.log.debug("[DEBUG] _stream_worker: error writing silence: %s", e2)
+                                    self.log.debug(
+                                        "[DEBUG] _stream_worker: error writing silence: %s", e2
+                                    )
                             else:
                                 time.sleep(0.02)
                                 continue
                     else:
                         try:
                             if self._audio_stream is not None and stream_active:
-                                self._audio_stream.write(b'\x00' * n_bytes)
+                                self._audio_stream.write(b"\x00" * n_bytes)
                             else:
                                 # Paused or no audio stream: skip writing to avoid errors
                                 time.sleep(0.02)
                                 continue
                         except Exception as e:
                             if stream_active:
-                                self.log.debug("[DEBUG] _stream_worker: error writing silence (muted): %s", e)
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: error writing silence (muted): %s", e
+                                )
                             else:
                                 # Suppress spam when paused/closed
                                 pass
@@ -795,20 +913,21 @@ class PlayerFFmpeg:
                 # prova a spegnere il watchdog
                 try:
                     watchdog_stop.set()
-                    if 'watchdog_thread' in locals() and watchdog_thread.is_alive():
+                    if "watchdog_thread" in locals() and watchdog_thread.is_alive():
                         watchdog_thread.join(timeout=1.0)
                 except Exception:
                     pass
                 # Propaga eventuale errore forzato dal watchdog per questo tentativo
                 try:
-                    if 'forced_error_ref' in locals() and forced_error_ref.get('v'):
+                    if "forced_error_ref" in locals() and forced_error_ref.get("v"):
                         forced_error = True
                 except Exception:
                     pass
 
-                # Fine tentativo: se non abbiamo iniziato a ricevere dati, chiudi il processo e prova il prossimo
+                # Fine tentativo: se non abbiamo iniziato a ricevere dati,
+                # chiudi il processo e prova il prossimo
                 with self._state_lock:
-                    proc = self._ffmpeg_process
+                    proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
                 if proc and proc.poll() is None and not started_streaming:
                     try:
                         proc.terminate()
@@ -825,7 +944,7 @@ class PlayerFFmpeg:
             # Post-loop: gestione esiti
             self.log.debug("[DEBUG] _stream_worker: cleaning up ffmpeg process")
             with self._state_lock:
-                proc = self._ffmpeg_process
+                proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
             if proc and proc.poll() is None:
                 try:
                     proc.terminate()
@@ -842,21 +961,24 @@ class PlayerFFmpeg:
             if not self._stop_requested:
                 if forced_error:
                     self.log.debug("[DEBUG] _stream_worker: emitting error due to forced_error")
-                    self._emit('error', None)
+                    self._emit("error", None)
                 elif not started_streaming:
-                    self.log.debug("[DEBUG] _stream_worker: connection failed before receiving data (all attempts)")
-                    self._emit('error', None)
+                    self.log.debug(
+                        "[DEBUG] _stream_worker: connection failed before receiving "
+                        "data (all attempts)"
+                    )
+                    self._emit("error", None)
                 else:
                     self.log.debug("[DEBUG] _stream_worker: stream ended naturally")
-                    self._emit('ended', None)
+                    self._emit("ended", None)
             else:
                 self.log.debug("[DEBUG] _stream_worker: stream stopped by request")
-                self._emit('stopped', None)
+                self._emit("stopped", None)
 
         except Exception as e:
             self.log.debug("[DEBUG] _stream_worker: outer exception: %s", e)
             if not self._stop_requested:
-                self._emit('error', None)
+                self._emit("error", None)
         finally:
             self.log.debug("[DEBUG] _stream_worker: final cleanup")
             self._playing = False
@@ -868,7 +990,9 @@ class PlayerFFmpeg:
                             self._audio_stream.stop_stream()
                             self.log.debug("[DEBUG] _stream_worker: audio stream stopped")
                         except Exception as e:
-                            self.log.debug("[DEBUG] _stream_worker: error stopping audio stream: %s", e)
+                            self.log.debug(
+                                "[DEBUG] _stream_worker: error stopping audio stream: %s", e
+                            )
                     try:
                         self._audio_stream.close()
                         self.log.debug("[DEBUG] _stream_worker: audio stream closed")

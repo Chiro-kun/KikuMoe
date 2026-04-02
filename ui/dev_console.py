@@ -1,9 +1,22 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QCheckBox, QComboBox, QFileDialog, QSizePolicy
-from PyQt6.QtGui import QTextCursor, QTextOption
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer, Qt
-from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 import builtins
 import logging
+from typing import Optional
+
+from PyQt6.QtCore import QObject, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QTextCursor, QTextOption
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QPushButton,
+    QSizePolicy,
+    QTextEdit,
+    QVBoxLayout,
+)
+
+from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 
 class _QtStream(QObject):
@@ -79,9 +92,9 @@ class DevConsole(QObject):
         # filtro per i messaggi [DEV]
         self._show_dev = False
 
-    def _t(self, key: str, default: str = None):
+    def _t(self, key: str, default: Optional[str] = None):
         try:
-            if self._translator is not None and hasattr(self._translator, 't'):
+            if self._translator is not None and hasattr(self._translator, "t"):
                 return self._translator.t(key)
         except Exception:
             pass
@@ -89,7 +102,7 @@ class DevConsole(QObject):
 
     def is_open(self) -> bool:
         try:
-            dlg = getattr(self, '_console_dialog', None)
+            dlg = getattr(self, "_console_dialog", None)
             return bool(dlg and dlg.isVisible())
         except Exception:
             return False
@@ -103,7 +116,7 @@ class DevConsole(QObject):
     # Nuovo: attiva la cattura dei log anche senza UI aperta
     def activate_logging(self) -> None:
         try:
-            if getattr(self, '_logging_active', False):
+            if getattr(self, "_logging_active", False):
                 return
         except Exception:
             pass
@@ -116,11 +129,12 @@ class DevConsole(QObject):
         # Monkeypatch di print per catturare stdout
         try:
             if self._old_print is None:
-                self._old_print = getattr(builtins, 'print', None)
+                self._old_print = getattr(builtins, "print", None)
+
                 def _console_print(*args, **kwargs):
                     try:
-                        sep = kwargs.get('sep', ' ')
-                        end = kwargs.get('end', '\n')
+                        sep = kwargs.get("sep", " ")
+                        end = kwargs.get("end", "\n")
                         text = sep.join(str(a) for a in args) + end
                         try:
                             if self._qt_stream:
@@ -135,6 +149,7 @@ class DevConsole(QObject):
                             pass
                     except Exception:
                         pass
+
                 try:
                     builtins.print = _console_print
                 except Exception:
@@ -146,16 +161,16 @@ class DevConsole(QObject):
             if self._qt_stream and self._log_handler is None:
                 self._log_handler = _DevConsoleHandler(self._qt_stream.write)
                 self._log_handler.setLevel(logging.DEBUG)
-                fmt = logging.Formatter('[%(levelname)s] [%(name)s] %(message)s')
+                fmt = logging.Formatter("[%(levelname)s] [%(name)s] %(message)s")
                 self._log_handler.setFormatter(fmt)
                 root_logger = logging.getLogger()
-                if self._log_handler not in getattr(root_logger, 'handlers', []):
+                if self._log_handler not in getattr(root_logger, "handlers", []):
                     root_logger.addHandler(self._log_handler)
                 try:
                     for lname in list(logging.Logger.manager.loggerDict.keys()):
                         try:
                             lg = logging.getLogger(lname)
-                            if self._log_handler not in getattr(lg, 'handlers', []):
+                            if self._log_handler not in getattr(lg, "handlers", []):
                                 lg.addHandler(self._log_handler)
                                 self._attached_loggers.append(lg)
                         except Exception:
@@ -169,7 +184,11 @@ class DevConsole(QObject):
     # Nuovo: disattiva la cattura dei log e ripristina gli hook
     def deactivate_logging(self) -> None:
         try:
-            if not getattr(self, '_logging_active', False) and self._log_handler is None and self._old_print is None:
+            if (
+                not getattr(self, "_logging_active", False)
+                and self._log_handler is None
+                and self._old_print is None
+            ):
                 return
         except Exception:
             pass
@@ -201,6 +220,7 @@ class DevConsole(QObject):
         self._log_handler = None
         self._qt_stream = None
         self._logging_active = False
+
     def raise_window(self):
         try:
             if self._console_dialog:
@@ -231,9 +251,15 @@ class DevConsole(QObject):
                     """
                     QDialog { background-color: #121212; color: #e0e0e0; }
                     QTextEdit { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; }
-                    QPushButton { background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; }
+                    QPushButton {
+                        background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333;
+                        padding: 6px 10px; border-radius: 4px;
+                    }
                     QPushButton:hover { background-color: #2a2a2a; }
-                    QComboBox { background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333; border-radius: 4px; padding: 2px 6px; }
+                    QComboBox {
+                        background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333;
+                        border-radius: 4px; padding: 2px 6px;
+                    }
                     QCheckBox { color: #e0e0e0; }
                     """
                 )
@@ -250,22 +276,28 @@ class DevConsole(QObject):
     def refresh_texts(self):
         try:
             if self._console_dialog:
-                self._console_dialog.setWindowTitle(self._t('dev_console_title', 'Developer Console'))
+                self._console_dialog.setWindowTitle(
+                    self._t("dev_console_title", "Developer Console")
+                )
                 if self._btn_clear:
-                    self._btn_clear.setText(self._t('dev_console_clear', 'Clear'))
+                    self._btn_clear.setText(self._t("dev_console_clear", "Clear"))
                 if self._btn_copy:
-                    self._btn_copy.setText(self._t('dev_console_copy', 'Copy All'))
+                    self._btn_copy.setText(self._t("dev_console_copy", "Copy All"))
                 if self._btn_pause:
-                    self._btn_pause.setText(self._t('dev_console_pause', 'Pause') if not self._paused else self._t('dev_console_resume', 'Resume'))
+                    self._btn_pause.setText(
+                        self._t("dev_console_pause", "Pause")
+                        if not self._paused
+                        else self._t("dev_console_resume", "Resume")
+                    )
                 if self._btn_save:
-                    self._btn_save.setText(self._t('dev_console_save', 'Save...'))
+                    self._btn_save.setText(self._t("dev_console_save", "Save..."))
                 if self._cb_autoscroll:
-                    self._cb_autoscroll.setText(self._t('dev_console_autoscroll', 'Autoscroll'))
+                    self._cb_autoscroll.setText(self._t("dev_console_autoscroll", "Autoscroll"))
                 if self._cb_wrap:
-                    self._cb_wrap.setText(self._t('dev_console_wrap', 'Wrap'))
+                    self._cb_wrap.setText(self._t("dev_console_wrap", "Wrap"))
                 if self._level_combo:
                     # Placeholder text via accessible name (QComboBox non ha label interno)
-                    self._level_combo.setToolTip(self._t('dev_console_level', 'Level filter'))
+                    self._level_combo.setToolTip(self._t("dev_console_level", "Level filter"))
         except Exception:
             pass
 
@@ -283,7 +315,7 @@ class DevConsole(QObject):
         # Build console dialog UI
         dlg_parent = parent or self._parent
         self._console_dialog = QDialog(dlg_parent)
-        self._console_dialog.setWindowTitle(self._t('dev_console_title', 'Developer Console'))
+        self._console_dialog.setWindowTitle(self._t("dev_console_title", "Developer Console"))
         self._console_dialog.setModal(False)
         try:
             # Quando l'utente chiude la finestra (X) o viene distrutta, azzera i riferimenti
@@ -307,7 +339,9 @@ class DevConsole(QObject):
         except Exception:
             pass
         try:
-            self._console_text.setStyleSheet("font-family: Consolas, 'Courier New', monospace; font-size: 12px;")
+            self._console_text.setStyleSheet(
+                "font-family: Consolas, 'Courier New', monospace; font-size: 12px;"
+            )
         except Exception:
             pass
         try:
@@ -322,35 +356,43 @@ class DevConsole(QObject):
         hc.setSpacing(8)
         # livello
         self._level_combo = QComboBox()
-        self._level_combo.addItems(['DEBUG', 'INFO', 'WARNING', 'ERROR'])
-        self._level_combo.setCurrentText('DEBUG')
+        self._level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
+        self._level_combo.setCurrentText("DEBUG")
         self._level_combo.currentTextChanged.connect(self._on_level_changed)
-        self._level_combo.setToolTip(self._t('dev_console_level', 'Level filter'))
+        self._level_combo.setToolTip(self._t("dev_console_level", "Level filter"))
         try:
             self._level_combo.setMinimumWidth(120)
         except Exception:
             pass
         # pausa
-        self._btn_pause = QPushButton(self._t('dev_console_pause', 'Pause'))
+        self._btn_pause = QPushButton(self._t("dev_console_pause", "Pause"))
         try:
-            self._btn_pause.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_MediaPause))
-            self._btn_pause.setObjectName('devConsolePause')
+            self._btn_pause.setIcon(
+                self._console_dialog.style().standardIcon(
+                    self._console_dialog.style().SP_MediaPause
+                )
+            )
+            self._btn_pause.setObjectName("devConsolePause")
             self._btn_pause.setStyleSheet("")
         except Exception:
             pass
         self._btn_pause.clicked.connect(self._on_toggle_pause)
         # autoscroll
-        self._cb_autoscroll = QCheckBox(self._t('dev_console_autoscroll', 'Autoscroll'))
+        self._cb_autoscroll = QCheckBox(self._t("dev_console_autoscroll", "Autoscroll"))
         self._cb_autoscroll.setChecked(True)
         self._cb_autoscroll.toggled.connect(self._on_toggle_autoscroll)
         # wrap
-        self._cb_wrap = QCheckBox(self._t('dev_console_wrap', 'Wrap'))
+        self._cb_wrap = QCheckBox(self._t("dev_console_wrap", "Wrap"))
         self._cb_wrap.setChecked(True)
         self._cb_wrap.toggled.connect(self._on_toggle_wrap)
         # salva
-        self._btn_save = QPushButton(self._t('dev_console_save', 'Save...'))
+        self._btn_save = QPushButton(self._t("dev_console_save", "Save..."))
         try:
-            self._btn_save.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_DialogSaveButton))
+            self._btn_save.setIcon(
+                self._console_dialog.style().standardIcon(
+                    self._console_dialog.style().SP_DialogSaveButton
+                )
+            )
         except Exception:
             pass
         self._btn_save.clicked.connect(self._on_save_clicked)
@@ -365,18 +407,28 @@ class DevConsole(QObject):
 
         h = QHBoxLayout()
         h.setSpacing(8)
-        self._btn_clear = QPushButton(self._t('dev_console_clear', 'Clear'))
+        self._btn_clear = QPushButton(self._t("dev_console_clear", "Clear"))
         try:
-            self._btn_clear.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_DialogResetButton))
+            self._btn_clear.setIcon(
+                self._console_dialog.style().standardIcon(
+                    self._console_dialog.style().SP_DialogResetButton
+                )
+            )
         except Exception:
             pass
-        self._btn_copy = QPushButton(self._t('dev_console_copy', 'Copy All'))
+        self._btn_copy = QPushButton(self._t("dev_console_copy", "Copy All"))
         try:
-            self._btn_copy.setIcon(self._console_dialog.style().standardIcon(self._console_dialog.style().SP_DialogYesButton))
+            self._btn_copy.setIcon(
+                self._console_dialog.style().standardIcon(
+                    self._console_dialog.style().SP_DialogYesButton
+                )
+            )
         except Exception:
             pass
         self._btn_clear.clicked.connect(lambda: self._console_text.clear())
-        self._btn_copy.clicked.connect(lambda: (self._console_text.selectAll(), self._console_text.copy()))
+        self._btn_copy.clicked.connect(
+            lambda: (self._console_text.selectAll(), self._console_text.copy())
+        )
         h.addStretch(1)
         h.addWidget(self._btn_clear)
         h.addWidget(self._btn_copy)
@@ -386,7 +438,9 @@ class DevConsole(QObject):
 
         # Initial message to confirm rendering
         try:
-            self._console_text.setPlaceholderText(self._t('dev_console_placeholder', 'Logs will appear here...'))
+            self._console_text.setPlaceholderText(
+                self._t("dev_console_placeholder", "Logs will appear here...")
+            )
         except Exception:
             pass
         try:
@@ -396,8 +450,8 @@ class DevConsole(QObject):
 
         # Svuota eventuali log accumulati prima dell'apertura della UI
         try:
-            if getattr(self, '_preopen_buffer', None):
-                buffered = ''.join(self._preopen_buffer)
+            if getattr(self, "_preopen_buffer", None):
+                buffered = "".join(self._preopen_buffer)
                 self._preopen_buffer.clear()
                 if buffered:
                     self._append_console(buffered)
@@ -448,7 +502,7 @@ class DevConsole(QObject):
                 return
             # Se la UI non è pronta, bufferizza i log pre-apertura quando il logging è attivo
             if not self._console_text:
-                if getattr(self, '_logging_active', False) and not self._paused:
+                if getattr(self, "_logging_active", False) and not self._paused:
                     self._preopen_buffer.append(text)
                 return
             if self._paused:
@@ -460,14 +514,15 @@ class DevConsole(QObject):
             except Exception:
                 lines = [text]
             try:
-                if not getattr(self, '_show_dev', False):
-                    lines = [ln for ln in lines if '[DEV]' not in ln]
+                if not getattr(self, "_show_dev", False):
+                    lines = [ln for ln in lines if "[DEV]" not in ln]
             except Exception:
                 pass
-            filtered = ''.join(lines)
+            filtered = "".join(lines)
             if not filtered:
                 return
-            # Garantisce a capo tra blocchi: se l'ultimo carattere non è '\n' e il nuovo testo non inizia con '\n', premetti '\n'
+            # Garantisce a capo tra blocchi: se l'ultimo carattere non è '\n'
+            # e il nuovo testo non inizia con '\n', premetti '\n'
             try:
                 current = self._console_text.toPlainText()
                 if current and not current.endswith("\n") and not filtered.startswith("\n"):
@@ -475,7 +530,11 @@ class DevConsole(QObject):
             except Exception:
                 pass
             # Gestione autoscroll: se disabilitato, preservo posizione scrollbar
-            sb = self._console_text.verticalScrollBar() if hasattr(self._console_text, 'verticalScrollBar') else None
+            sb = (
+                self._console_text.verticalScrollBar()
+                if hasattr(self._console_text, "verticalScrollBar")
+                else None
+            )
             prev_val = sb.value() if sb is not None else None
             self._console_text.moveCursor(QTextCursor.MoveOperation.End)
             self._console_text.insertPlainText(filtered)
@@ -491,17 +550,23 @@ class DevConsole(QObject):
         try:
             self._paused = not self._paused
             if self._btn_pause:
-                self._btn_pause.setText(self._t('dev_console_pause', 'Pause') if not self._paused else self._t('dev_console_resume', 'Resume'))
+                self._btn_pause.setText(
+                    self._t("dev_console_pause", "Pause")
+                    if not self._paused
+                    else self._t("dev_console_resume", "Resume")
+                )
                 try:
                     # Aggiorna icona in base allo stato
                     st = self._console_dialog.style()
-                    self._btn_pause.setIcon(st.standardIcon(st.SP_MediaPause if not self._paused else st.SP_MediaPlay))
+                    self._btn_pause.setIcon(
+                        st.standardIcon(st.SP_MediaPause if not self._paused else st.SP_MediaPlay)
+                    )
                     # nessuna colorazione di sfondo, solo icona
                 except Exception:
                     pass
             if not self._paused and self._pause_buffer:
                 # flush buffer
-                flushed = ''.join(self._pause_buffer)
+                flushed = "".join(self._pause_buffer)
                 self._pause_buffer = []
                 self._append_console(flushed)
         except Exception:
@@ -531,10 +596,10 @@ class DevConsole(QObject):
     def _on_level_changed(self, level_text: str):
         try:
             level_map = {
-                'DEBUG': logging.DEBUG,
-                'INFO': logging.INFO,
-                'WARNING': logging.WARNING,
-                'ERROR': logging.ERROR,
+                "DEBUG": logging.DEBUG,
+                "INFO": logging.INFO,
+                "WARNING": logging.WARNING,
+                "ERROR": logging.ERROR,
             }
             lvl = level_map.get(level_text, logging.DEBUG)
             if self._log_handler is not None:
@@ -548,24 +613,25 @@ class DevConsole(QObject):
             if not self._console_text:
                 return
             import time
-            ts = time.strftime('%Y%m%d-%H%M%S')
+
+            ts = time.strftime("%Y%m%d-%H%M%S")
             suggested = f"console-{ts}.log"
             filename, selected_filter = QFileDialog.getSaveFileName(
                 self._console_dialog,
-                self._t('dev_console_save', 'Save...'),
+                self._t("dev_console_save", "Save..."),
                 suggested,
-                'Log Files (*.log);;Text Files (*.txt);;All Files (*)'
+                "Log Files (*.log);;Text Files (*.txt);;All Files (*)",
             )
             if filename:
                 # Scegli encoding: UTF-8 con BOM solo se necessario (Windows Notepad compatibility)
                 text = self._console_text.toPlainText()
                 try:
-                    with open(filename, 'w', encoding='utf-8') as f:
+                    with open(filename, "w", encoding="utf-8") as f:
                         f.write(text)
                 except Exception:
                     # Ritenta con UTF-8-SIG
                     try:
-                        with open(filename, 'w', encoding='utf-8-sig') as f:
+                        with open(filename, "w", encoding="utf-8-sig") as f:
                             f.write(text)
                     except Exception:
                         pass
@@ -574,7 +640,7 @@ class DevConsole(QObject):
 
     def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
         try:
-            dlg = getattr(self, '_console_dialog', None)
+            dlg = getattr(self, "_console_dialog", None)
             apply_windows_titlebar_dark_mode(dlg, enable)
         except Exception:
             pass
