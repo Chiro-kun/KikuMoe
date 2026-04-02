@@ -118,8 +118,6 @@ class ListenMoePlayer(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.log = get_logger('KikuMoe')
-        
         # State variables
         self._playback_lock = threading.Lock()
         self._ui_paused: bool = False
@@ -165,13 +163,14 @@ class ListenMoePlayer(QWidget):
         saved_lang = self.settings.value(KEY_LANG, 'it')
         self.i18n = I18n(saved_lang if saved_lang in ('it', 'en') else 'it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
+        self.log = get_logger('KikuMoe')
         self._sync_clock_with_server()
 
     def _sync_clock_with_server(self):
         """Fetches the current server time from LISTEN.moe to calculate clock skew."""
         try:
             # We use a HEAD request to the main page which is faster and guaranteed to have a Date header
-            req = urllib.request.Request("https://listen.moe/", method='HEAD', headers={'User-Agent': 'KikuMoe/1.9.0'})
+            req = urllib.request.Request("https://listen.moe/", method='HEAD')
             with urllib.request.urlopen(req, timeout=5) as res:
                 server_date_str = res.headers.get('Date')
                 if server_date_str:
@@ -184,11 +183,9 @@ class ListenMoePlayer(QWidget):
                     
                     local_dt = datetime.now(timezone.utc)
                     self._clock_sync_offset = (server_dt - local_dt).total_seconds()
-                    if hasattr(self, 'log'):
-                        self.log.info(f"[UI] Clock sync performed. Server offset: {self._clock_sync_offset:+.2f}s")
+                    self.log.info(f"[UI] Clock sync performed. Server offset: {self._clock_sync_offset:+.2f}s")
         except Exception as e:
-            if hasattr(self, 'log'):
-                self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
+            self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
             self._clock_sync_offset = 0.0
 
     def _init_icons(self):
@@ -1379,15 +1376,12 @@ class ListenMoePlayer(QWidget):
                 return icon
             dst = QPixmap(src.size())
             dst.fill(Qt.GlobalColor.transparent)
-            painter = QPainter()
-            if painter.begin(dst):
-                try:
-                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-                    painter.drawPixmap(0, 0, src)
-                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                    painter.fillRect(dst.rect(), color)
-                finally:
-                    painter.end()
+            painter = QPainter(dst)
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.drawPixmap(0, 0, src)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(dst.rect(), color)
+            painter.end()
             return QIcon(dst)
         except Exception:
             return icon
@@ -1620,32 +1614,25 @@ class ListenMoePlayer(QWidget):
             tray_icon = QIcon()
             fill_ratio = 0.95
             for sz in (16, 20, 24, 32, 48, 64):
-                try:
-                    target_side = max(1, int(round(sz * fill_ratio)))
-                    fitted = source_pm.scaled(
-                        target_side,
-                        target_side,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    if fitted.isNull():
-                        continue
-                    canvas = QPixmap(sz, sz)
-                    canvas.fill(Qt.GlobalColor.transparent)
-                    painter = QPainter()
-                    if painter.begin(canvas):
-                        try:
-                            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                            x = (sz - fitted.width()) // 2
-                            y = (sz - fitted.height()) // 2
-                            painter.drawPixmap(x, y, fitted)
-                        finally:
-                            painter.end()
-                    if not canvas.isNull():
-                        tray_icon.addPixmap(canvas)
-                except Exception:
+                target_side = max(1, int(round(sz * fill_ratio)))
+                fitted = source_pm.scaled(
+                    target_side,
+                    target_side,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                if fitted.isNull():
                     continue
+                canvas = QPixmap(sz, sz)
+                canvas.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(canvas)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                x = (sz - fitted.width()) // 2
+                y = (sz - fitted.height()) // 2
+                painter.drawPixmap(x, y, fitted)
+                painter.end()
+                tray_icon.addPixmap(canvas)
 
             return tray_icon if not tray_icon.isNull() else icon
         except Exception:
