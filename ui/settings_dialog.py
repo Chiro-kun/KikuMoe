@@ -9,6 +9,7 @@ from core.i18n import I18n
 
 _IS_WIN32 = sys.platform == "win32"
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+from core.logger import silence_stderr
 from core.constants import (
     ORG_NAME,
     APP_SETTINGS,
@@ -129,7 +130,7 @@ class SettingsDialog(QDialog):
         fmt_row.addWidget(lab_fmt)
         self.cmb_format = QComboBox()
         try:
-            self.cmb_format.addItems(['Vorbis', 'MP3'])
+            self.cmb_format.addItems(['Vorbis', 'Opus', 'MP3'])
         except Exception:
             pass
         try:
@@ -378,7 +379,8 @@ class SettingsDialog(QDialog):
             return
         pa = None
         try:
-            pa = pyaudio.PyAudio()
+            with silence_stderr():
+                pa = pyaudio.PyAudio()
             # Build host API index → type map for annotation
             api_type_map: dict = {}
             try:

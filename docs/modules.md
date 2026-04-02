@@ -86,13 +86,18 @@ A runtime language switch calls `retranslateUi()` on the main window without res
 ### `logger.py`
 
 ```python
-from core.logger import get_logger
+from core.logger import get_logger, silence_stderr, set_debug
 
 log = get_logger(__name__)
-log.debug("debug message")
+log.debug("verbose trace")   # suppressed by default
+log.info("backend selected") # always visible
 ```
 
-Returns a `logging.Logger` set to `DEBUG` level writing to `stdout`. On Windows, `stdout` is wrapped in `_SafeTextStream` to prevent `UnicodeEncodeError` with codepage cp1252.
+- `get_logger(name)` — returns a `logging.Logger` writing to `stdout`. Default level is `INFO`; `DEBUG` traces are hidden unless the app is started with `--debug`.
+- `set_debug(enabled)` — switches all created loggers between `DEBUG` and `INFO`. Called once at startup by `KikuMoe.py` when `--debug` is detected.
+- `silence_stderr()` — context manager that redirects C-level fd 2 to `/dev/null` for the duration of the block. Used around `PyAudio()` and `vlc.Instance()` to suppress ALSA/JACK/libVLC probe noise. No-op when debug mode is active so `--debug` exposes those messages too.
+
+On Windows, `stdout` is wrapped in `_SafeTextStream` to prevent `UnicodeEncodeError` with codepage cp1252.
 
 ---
 

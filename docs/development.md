@@ -14,6 +14,9 @@ poetry install --with dev
 
 # Run the application
 poetry run python KikuMoe.py
+
+# Run with verbose debug output (Python DEBUG traces + raw C-level stderr)
+poetry run python KikuMoe.py --debug
 ```
 
 
@@ -139,7 +142,7 @@ Configuration for both tools lives in `pyproject.toml` under `[tool.ruff]` and `
 
 - **Style:** PEP 8, 4-space indentation. Enforced by `ruff format`.
 - **Imports:** absolute from the root (`from core.constants import ...`), not relative.
-- **Logging:** use `get_logger(__name__)` instead of `print()` for debug output.
+- **Logging:** use `get_logger(__name__)` instead of `print()`. Use `log.debug()` for verbose traces (hidden by default, shown with `--debug`) and `log.info()` for messages that should always be visible. Wrap C-library init calls (PyAudio, libVLC) with `silence_stderr()` from `core.logger`.
 - **UI thread safety:** any UI update from a non-main thread must go through a Qt signal. Never call Qt methods directly from secondary threads.
 - **UI strings:** always use `self._i18n.t("key")`. Never hardcode user-visible strings.
 - **Settings keys:** always use the constants from `core/constants.py`. Never use string literals.
