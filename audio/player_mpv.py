@@ -171,8 +171,6 @@ class PlayerMPV:
                         pass
 
             self._ready = True
-            # Apply explicit device selection (Linux only, best-effort)
-            self._apply_linux_audio_device()
         except Exception as e:
             self.log.debug("[DEBUG] PlayerMPV: init failed: %s", e)
             # If we specified an ao and it caused the failure, retry without it
@@ -212,6 +210,7 @@ class PlayerMPV:
         try:
             assert self._player is not None
             self._stopping = False
+            self._apply_linux_audio_device()
             self._player.play(url)
             return True
         except Exception:

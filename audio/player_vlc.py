@@ -203,6 +203,7 @@ class PlayerVLC:
             except Exception:
                 pass
             self.player.set_media(media)
+            self._apply_linux_audio_device()
             self.player.play()
             return True
         except Exception:
