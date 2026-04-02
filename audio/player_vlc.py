@@ -41,7 +41,7 @@ class PlayerVLC:
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
         except Exception:
-            self._user_agent = "KikuMoe/1.9.0"
+            self._user_agent = "KikuMoe/1.10.0"
         self._init_vlc()
 
     def _init_vlc(self) -> None:

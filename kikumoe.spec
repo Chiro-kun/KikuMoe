@@ -76,7 +76,7 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name="KikuMoe-1.9.0",
+    name="KikuMoe-1.10.0",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
