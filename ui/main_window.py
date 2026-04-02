@@ -2150,7 +2150,9 @@ class ListenMoePlayer(QWidget):
         # Append remaining or total duration
         time_text = "--:--"
         try:
-            if self._current_duration_seconds and int(self._current_duration_seconds) > 0:
+            if getattr(self, '_current_duration_seconds', None) == 0:
+                time_text = self.t('live_mode')
+            elif self._current_duration_seconds and int(self._current_duration_seconds) > 0:
                 # Prefer remaining time only if start timestamp is plausible; otherwise show total duration
                 mmss = None
                 try:
