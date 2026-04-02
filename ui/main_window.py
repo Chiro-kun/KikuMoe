@@ -151,6 +151,7 @@ class ListenMoePlayer(QWidget):
         self._clock_sync_offset = 0.0  # Difference between server time and local CPU clock
         self._retry_count = 0
         self._max_retries = 10
+        self._retry_pending = False
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -1002,10 +1003,14 @@ class ListenMoePlayer(QWidget):
                 self.buffering_visible.emit(False)
                 if c == "ended":
                     self._skip_session_reset_once = True
-                    self.schedule_play.emit(1000)
-                    self.notify_tray.emit(
-                        "Listen.moe", "Audio riavviato: il timer di sessione continua"
-                    )
+                    if not getattr(self, "_retry_pending", False):
+                        self._retry_pending = True
+                        self.schedule_play.emit(1000)
+                        # Optionally only notify on unexpected end if not already retrying
+                        if getattr(self, "_retry_count", 0) == 0:
+                            self.notify_tray.emit(
+                                "Listen.moe", "Audio riavviato: il timer di sessione continua"
+                            )
                 else:
                     # Reset on explicit stop (unless skip flag is set)
                     if not getattr(self, "_skip_session_reset_once", False):
@@ -1024,16 +1029,21 @@ class ListenMoePlayer(QWidget):
                 self.buffering_visible.emit(False)
                 self._skip_session_reset_once = True
                 
-                self._retry_count += 1
-                if self._retry_count <= self._max_retries:
-                    # Exponential backoff: 1.2s * 1.5 ^ retry_count (cap at 30s)
-                    delay = int(min(30000, 1200 * (1.5 ** self._retry_count)))
-                    self.schedule_play.emit(delay)
-                    self.log.info(f"[UI] Playback restart scheduled in {delay}ms (retry {self._retry_count})")
-                    self.notify_tray.emit("Listen.moe", self.t("status_restarting"))
-                else:
-                    self.log.error(f"[UI] Maximum retries ({self._retry_count}) reached. Giving up.")
-                    self.notify_tray.emit("Listen.moe", "Errore persistente: ricarica interrotta.")
+                if not getattr(self, "_retry_pending", False):
+                    self._retry_count += 1
+                    if self._retry_count <= self._max_retries:
+                        self._retry_pending = True
+                        # Exponential backoff: 1.2s * 1.5 ^ retry_count (cap at 30s)
+                        delay = int(min(30000, 1200 * (1.5 ** self._retry_count)))
+                        self.schedule_play.emit(delay)
+                        self.log.info(f"[UI] Playback restart scheduled in {delay}ms (retry {self._retry_count})")
+                        # Only notify on the first failure to avoid toast spam
+                        if self._retry_count == 1:
+                            self.notify_tray.emit("Listen.moe", self.t("status_restarting"))
+                    else:
+                        self.log.error(f"[UI] Maximum retries ({self._retry_count}) reached. Giving up.")
+                        # Always notify when we stop permanently
+                        self.notify_tray.emit("Listen.moe", "Errore persistente: ricarica interrotta.")
             self._refresh_play_button_text()
         except Exception:
             pass
@@ -1041,9 +1051,9 @@ class ListenMoePlayer(QWidget):
     def _schedule_play_stream(self, delay_ms: int) -> None:
         """Slot per avviare lo stream dopo un delay (thread-safe UI call)."""
         try:
-            QTimer.singleShot(int(delay_ms), self.play_stream)
+            QTimer.singleShot(int(delay_ms), lambda: self.play_stream(is_retry=True))
         except Exception:
-            self.play_stream()
+            self.play_stream(is_retry=True)
 
     # 3. WebSocket & Metadata Events
     def _on_now_playing(
@@ -2662,9 +2672,13 @@ class ListenMoePlayer(QWidget):
             pass
 
     # ------------------- Player controls -------------------
-    def play_stream(self) -> None:
+    def play_stream(self, is_retry: bool = False, *args) -> None:
         try:
-            self._retry_count = 0
+            self._retry_pending = False
+            if is_retry and getattr(self, "_retry_count", 0) > self._max_retries:
+                return
+            if not is_retry:
+                self._retry_count = 0
             with self._playback_lock:
                 # Determine URL and check backend readiness
                 url = None
