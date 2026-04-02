@@ -585,7 +585,9 @@ class DevConsole(QObject):
             if checked:
                 self._console_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
                 try:
-                    self._console_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+                    self._console_text.setWordWrapMode(
+                        QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
+                    )
                 except Exception:
                     pass
             else:

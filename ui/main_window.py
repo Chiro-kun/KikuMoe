@@ -32,10 +32,7 @@ from audio.player_mpv import PlayerMPV
 from audio.player_vlc import PlayerVLC
 from core.config import STREAMS
 from core.constants import (
-    APP_NAME,
     APP_SETTINGS,
-    APP_TITLE,
-    APP_VERSION,
     APP_TITLE,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
@@ -63,11 +60,11 @@ from core.constants import (
 from core.i18n import I18n
 from core.logger import get_logger
 from network.ws_client import NowPlayingWS
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
 from ui.settings_dialog import SettingsDialog
 from ui.tray_manager import TrayManager
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
-from ui.custom_titlebar import CustomTitleBar, install_size_grip
 
 
 # Custom Progress Bar for Pixel-Perfect Fluidity
@@ -99,7 +96,6 @@ class SmoothProgressBar(QWidget):
     def paintEvent(self, a0):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
 
         # Background track
         painter.setPen(Qt.PenStyle.NoPen)
@@ -324,9 +320,7 @@ class ListenMoePlayer(QWidget):
 
         # Custom title bar at index 0 — must come before _init_header_section
         # inserts the settings bar at index 1.
-        self._title_bar = CustomTitleBar(
-            self, icon=getattr(self, "_icon_app", None)
-        )
+        self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
         self._root_layout.addWidget(self._title_bar)
         install_size_grip(self)
 
@@ -890,9 +884,13 @@ class ListenMoePlayer(QWidget):
             msg.setText(self.i18n.t("close_dialog_text"))
             msg.setIcon(QMessageBox.Icon.Question)
 
-            tray_btn = msg.addButton(self.i18n.t("close_option_tray"), QMessageBox.ButtonRole.AcceptRole)
+            tray_btn = msg.addButton(
+                self.i18n.t("close_option_tray"), QMessageBox.ButtonRole.AcceptRole
+            )
             msg.addButton(self.i18n.t("close_option_quit"), QMessageBox.ButtonRole.DestructiveRole)
-            cancel_btn = msg.addButton(self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole)
+            cancel_btn = msg.addButton(
+                self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole
+            )
             msg.setEscapeButton(cancel_btn)
 
             cb = QCheckBox(self.i18n.t("close_remember"))
@@ -1595,9 +1593,7 @@ class ListenMoePlayer(QWidget):
     def _make_frameless_msg(msg: QMessageBox) -> None:
         """Remove compositor decorations from a QMessageBox and add a visible border."""
         msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        msg.setStyleSheet(
-            "QDialog { background-color: #121212; border: 1px solid #3a3a3a; }"
-        )
+        msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
 
     def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:
@@ -1953,11 +1949,13 @@ class ListenMoePlayer(QWidget):
                     # Fallback to manual check if logic is tricky,
                     # but mask().boundingRect() is usually reliable
                     mask = img.createAlphaMask()
-                    rect = (
-                        QPixmap.fromImage(mask).mask().boundingRect()
-                        if not mask.isNull()
-                        else img.rect()
-                    )
+                    if not mask.isNull():
+                        from PyQt6.QtGui import QRegion
+
+                        mask_pm = QPixmap.fromImage(mask).mask()
+                        rect = QRegion(mask_pm).boundingRect() if mask_pm else img.rect()
+                    else:
+                        rect = img.rect()
 
                     if not rect.isEmpty() and rect != img.rect():
                         pixmap = pixmap.copy(rect)
@@ -2701,7 +2699,7 @@ class ListenMoePlayer(QWidget):
             ok = bool(self.player and self.player.is_ready())
             # Aggiorna pallino colore
             try:
-                self.vlc_status_icon.setStyleSheet(
+                self.vlc_status_icon.setStyleSheet(  # type: ignore[attr-defined]
                     "background-color: #2e7d32; border-radius: 5px;"
                     if ok
                     else "background-color: #c62828; border-radius: 5px;"
@@ -2717,9 +2715,9 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 txt = None
             if not ok:
-                self.vlc_status.setText(self.i18n.t("vlc_not_found"))
+                self.vlc_status.setText(self.i18n.t("vlc_not_found"))  # type: ignore[attr-defined]
             else:
-                self.vlc_status.setText(txt or "Audio backend OK")
+                self.vlc_status.setText(txt or "Audio backend OK")  # type: ignore[attr-defined]
         except Exception:
             pass
 
@@ -3023,8 +3021,12 @@ class ListenMoePlayer(QWidget):
                         msg = QMessageBox(self)
                         msg.setWindowTitle(self.i18n.t("volume_zero_title"))
                         msg.setText(self.i18n.t("volume_zero_text"))
-                        restore_btn = msg.addButton(self.i18n.t("restore"), QMessageBox.ButtonRole.AcceptRole)
-                        msg.addButton(self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole)
+                        restore_btn = msg.addButton(
+                            self.i18n.t("restore"), QMessageBox.ButtonRole.AcceptRole
+                        )
+                        msg.addButton(
+                            self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole
+                        )
                         msg.setIcon(QMessageBox.Icon.Question)
                         self._make_frameless_msg(msg)
                         try:

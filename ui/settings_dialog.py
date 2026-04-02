@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-
 from core.constants import (
     APP_SETTINGS,
     KEY_AUDIO_BACKEND,
@@ -65,15 +64,18 @@ class SettingsDialog(QDialog):
         root_layout.setSpacing(0)
 
         self._title_bar = CustomTitleBar(self)
-        self._title_bar.set_title(self.i18n.t('settings_title'))
-        
+        self._title_bar.set_title(self.i18n.t("settings_title"))
+
         # Adjust close button alignment specifically for the settings window
-        self._title_bar.setStyleSheet(self._title_bar.styleSheet() + """
+        self._title_bar.setStyleSheet(
+            self._title_bar.styleSheet()
+            + """
             #customTitleBar QPushButton#titleBarBtnClose {
                 padding-top: 1px;
             }
-        """)
-        
+        """
+        )
+
         root_layout.addWidget(self._title_bar)
         install_size_grip(self)
 
@@ -350,6 +352,7 @@ class SettingsDialog(QDialog):
             if parent and hasattr(parent, "open_dev_console"):
                 # Apri la console con parent = finestra principale
                 from PyQt6.QtCore import QTimer
+
                 QTimer.singleShot(0, lambda: parent.open_dev_console(parent))
         except Exception:
             pass
@@ -426,15 +429,15 @@ class SettingsDialog(QDialog):
 
     # PortAudio host API type → display tag (same constants as player_ffmpeg.py)
     _PA_API_TAGS = {
-        8:  "ALSA",
+        8: "ALSA",
         18: "PipeWire/Pulse",  # paPulseAudio — also used by pipewire-pulse
         12: "JACK",
-        2:  "MME",
+        2: "MME",
         13: "WASAPI",
-        1:  "DirectSound",
+        1: "DirectSound",
     }
 
-    def _populate_audio_devices(self):
+    def _populate_audio_devices(self) -> None:
         """Enumerate PortAudio devices via PyAudio and fill combo box.
         Keeps first entry as 'System default'; on Linux annotates each device
         with its host API (PipeWire/Pulse, ALSA, JACK …).
@@ -478,7 +481,7 @@ class SettingsDialog(QDialog):
                 # Include only devices that can output
                 if max_output > 0:
                     if not _IS_WIN32:
-                        api_idx = info.get('hostApi', -1)
+                        api_idx = info.get("hostApi", -1)
                         api_type = api_type_map.get(api_idx, -1)
                         tag = self._PA_API_TAGS.get(api_type, "")
                         label = f"[{tag}] {name} (#{i})" if tag else f"{name} (#{i})"

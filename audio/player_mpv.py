@@ -4,7 +4,7 @@ import locale
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import get_logger
@@ -90,20 +90,22 @@ class PlayerMPV:
             self._user_agent = "KikuMoe/1.10.0"
         self._init_mpv()
 
-    def _get_stored_device_name(self) -> Optional[str]:
+    def _get_stored_device_name(self) -> str | None:
         """Return the human-readable name of the user-configured PortAudio output device,
         or None when the setting is absent or unresolvable."""
         try:
             from PyQt6.QtCore import QSettings
+
             settings = QSettings(ORG_NAME, APP_SETTINGS)
-            val = settings.value(KEY_AUDIO_DEVICE_INDEX, '')
-            if val in (None, ''):
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            if val in (None, ""):
                 return None
             import pyaudio
+
             pa = pyaudio.PyAudio()
             try:
                 info = pa.get_device_info_by_index(int(val))
-                return str(info.get('name', '')) if isinstance(info, dict) else None
+                return str(info.get("name", "")) if isinstance(info, dict) else None
             finally:
                 pa.terminate()
         except Exception:
@@ -119,23 +121,23 @@ class PlayerMPV:
             return
         try:
             assert self._player is not None
-            device_list = getattr(self._player, 'audio_device_list', None)
+            device_list = getattr(self._player, "audio_device_list", None)
             if not device_list:
                 return
             needle = device_name.lower()
             for dev in device_list:
                 try:
-                    desc = str(dev.get('description', '')).lower()
-                    name = str(dev.get('name', '')).lower()
+                    desc = str(dev.get("description", "")).lower()
+                    name = str(dev.get("name", "")).lower()
                 except Exception:
                     try:
-                        desc = str(getattr(dev, 'description', '')).lower()
-                        name = str(getattr(dev, 'name', '')).lower()
+                        desc = str(getattr(dev, "description", "")).lower()
+                        name = str(getattr(dev, "name", "")).lower()
                     except Exception:
                         continue
                 if needle in desc or needle in name or desc in needle:
                     try:
-                        self._player.audio_device = dev.get('name') or getattr(dev, 'name', None)
+                        self._player.audio_device = dev.get("name") or getattr(dev, "name", None)
                         self.log.debug("[MPV] audio_device set to: %s", self._player.audio_device)
                     except Exception as e:
                         self.log.debug("[MPV] Could not set audio_device: %s", e)
@@ -155,12 +157,11 @@ class PlayerMPV:
             pass
         # On Linux, prefer PipeWire → PulseAudio → ALSA in that order.
         # MPV processes the comma-separated list and uses the first driver that works.
-        linux_ao: Optional[str] = None
+        linux_ao: str | None = None
         if not _IS_WIN32:
             try:
                 uid = os.getuid()
-                pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR",
-                                         f"/run/user/{uid}")
+                pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR", f"/run/user/{uid}")
                 if os.path.exists(os.path.join(pw_sock, "pipewire-0")):
                     linux_ao = "pipewire,pulse,alsa"
                 else:

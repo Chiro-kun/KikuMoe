@@ -4,7 +4,6 @@ from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QFont, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-
 from core.constants import KEY_CHANNEL, KEY_FORMAT
 
 

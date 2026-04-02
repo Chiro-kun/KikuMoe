@@ -4,7 +4,7 @@ import os
 import sys
 from typing import Callable
 
-from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
+from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
@@ -69,16 +69,19 @@ class PlayerVLC:
                 except Exception:
                     pass
             # Add options to reduce verbose output and improve stream handling
-            inst_opts.extend([
-                "--intf", "dummy",  # No interface
-                "--quiet",  # Reduce output
-                "--no-video-title-show",  # No video title
-                "--no-stats",  # No statistics
-                "--no-plugins-cache",  # No plugins cache
-                "--http-reconnect",  # Reconnect on HTTP errors
-                "--http-continuous",  # Continuous HTTP streaming
-                "--live-caching=1000",  # Small live caching for smooth playback
-            ])
+            inst_opts.extend(
+                [
+                    "--intf",
+                    "dummy",  # No interface
+                    "--quiet",  # Reduce output
+                    "--no-video-title-show",  # No video title
+                    "--no-stats",  # No statistics
+                    "--no-plugins-cache",  # No plugins cache
+                    "--http-reconnect",  # Reconnect on HTTP errors
+                    "--http-continuous",  # Continuous HTTP streaming
+                    "--live-caching=1000",  # Small live caching for smooth playback
+                ]
+            )
             # On Linux, route audio through PulseAudio (covers PipeWire via pipewire-pulse).
             # This ensures VLC uses PipeWire when pipewire-pulse is active.
             if not _IS_WIN32:
@@ -121,20 +124,22 @@ class PlayerVLC:
             self.player = None
             self._ready = False
 
-    def _get_stored_device_name(self) -> Optional[str]:
+    def _get_stored_device_name(self) -> str | None:
         """Return the human-readable PortAudio name of the user-configured output device,
         or None when the setting is absent or unresolvable."""
         try:
             from PyQt6.QtCore import QSettings
+
             settings = QSettings(ORG_NAME, APP_SETTINGS)
-            val = settings.value(KEY_AUDIO_DEVICE_INDEX, '')
-            if val in (None, ''):
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            if val in (None, ""):
                 return None
             import pyaudio
+
             pa = pyaudio.PyAudio()
             try:
                 info = pa.get_device_info_by_index(int(val))
-                return str(info.get('name', '')) if isinstance(info, dict) else None
+                return str(info.get("name", "")) if isinstance(info, dict) else None
             finally:
                 pa.terminate()
         except Exception:
@@ -160,9 +165,9 @@ class PlayerVLC:
                     desc = dev.description
                     dev_id = dev.device
                     if isinstance(desc, bytes):
-                        desc = desc.decode(errors='ignore')
+                        desc = desc.decode(errors="ignore")
                     if isinstance(dev_id, bytes):
-                        dev_id = dev_id.decode(errors='ignore')
+                        dev_id = dev_id.decode(errors="ignore")
                     desc_lc = str(desc).lower()
                     if needle in desc_lc or desc_lc in needle:
                         self.player.audio_output_device_set(None, dev_id)

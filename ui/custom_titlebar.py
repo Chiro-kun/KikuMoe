@@ -165,15 +165,14 @@ class _GripPositioner(QObject):
         window.installEventFilter(self)
         self._reposition(window)
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.Resize:
+    def eventFilter(self, obj: QObject | None, event: QEvent | None) -> bool:
+        if event and event.type() == QEvent.Type.Resize and isinstance(obj, QWidget):
             self._reposition(obj)
         return False
 
-    def _reposition(self, window: QObject) -> None:
+    def _reposition(self, window: QWidget) -> None:
         g = self._grip
-        w = window  # type: ignore[assignment]
-        g.move(w.width() - g.width(), w.height() - g.height())
+        g.move(window.width() - g.width(), window.height() - g.height())
 
 
 def install_size_grip(window: QWidget) -> None:

@@ -1,6 +1,7 @@
 import os
 import sys
 import traceback
+
 from PyQt6.QtWidgets import QApplication
 
 from ui.main_window import ListenMoePlayer
@@ -51,7 +52,7 @@ def main() -> int:
     except BaseException as exc:
         log_path = _write_crash_log(exc)
         try:
-            print(f"\n--- CRITICAL STARTUP ERROR ---")
+            print("\n--- CRITICAL STARTUP ERROR ---")
             print(f"Type: {type(exc).__name__}")
             print(f"Error: {exc}")
             print(f"Details written to: {log_path}\n")

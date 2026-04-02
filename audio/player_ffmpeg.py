@@ -49,8 +49,8 @@ class PlayerFFmpeg:
         self._init_audio()
 
     # PortAudio host API type constants (from portaudio.h)
-    _PA_ALSA        = 8
-    _PA_PULSE_AUDIO = 18   # also covers PipeWire-pulse
+    _PA_ALSA = 8
+    _PA_PULSE_AUDIO = 18  # also covers PipeWire-pulse
 
     def _init_audio(self) -> None:
         self._ready = False
@@ -67,7 +67,7 @@ class PlayerFFmpeg:
         except Exception:
             self._ready = False
 
-    def _detect_linux_output_device(self) -> Optional[int]:
+    def _detect_linux_output_device(self) -> int | None:
         """On Linux, pick the best default output device from the highest-priority
         host API available: PulseAudio/PipeWire (type 18) > ALSA (type 8).
         Returns a PortAudio device index, or None to fall back to PortAudio's own default.
@@ -84,14 +84,20 @@ class PlayerFFmpeg:
             if not device_count:
                 continue
             # Use the default output device reported by this host API
-            default_out = api_info.get("defaultOutputDevice", -1) if isinstance(api_info, dict) else -1
+            default_out = (
+                api_info.get("defaultOutputDevice", -1) if isinstance(api_info, dict) else -1
+            )
             if default_out is not None and default_out >= 0:
                 try:
                     dev_info = pa.get_device_info_by_index(default_out)
                     if isinstance(dev_info, dict) and int(dev_info.get("maxOutputChannels", 0)) > 0:
                         label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
-                        self.log.debug("[FFmpeg] Linux audio: using %s device index=%d (%s)",
-                                       label, default_out, dev_info.get("name", ""))
+                        self.log.debug(
+                            "[FFmpeg] Linux audio: using %s device index=%d (%s)",
+                            label,
+                            default_out,
+                            dev_info.get("name", ""),
+                        )
                         return default_out
                 except Exception:
                     pass
@@ -100,10 +106,18 @@ class PlayerFFmpeg:
             for i in range(pa.get_device_count()):
                 try:
                     d = pa.get_device_info_by_index(i)
-                    if isinstance(d, dict) and d.get("hostApi") == api_idx and int(d.get("maxOutputChannels", 0)) > 0:
+                    if (
+                        isinstance(d, dict)
+                        and d.get("hostApi") == api_idx
+                        and int(d.get("maxOutputChannels", 0)) > 0
+                    ):
                         label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
-                        self.log.debug("[FFmpeg] Linux audio: using first %s device index=%d (%s)",
-                                       label, i, d.get("name", ""))
+                        self.log.debug(
+                            "[FFmpeg] Linux audio: using first %s device index=%d (%s)",
+                            label,
+                            i,
+                            d.get("name", ""),
+                        )
                         return i
                 except Exception:
                     pass
