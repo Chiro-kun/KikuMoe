@@ -27,7 +27,7 @@ if version_yml.exists():
 # VLC bundling (Windows: bundle DLLs; Linux: system-installed VLC is used directly)
 vlc_binaries = []
 if _IS_WIN32:
-    vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files\VideoLAN\VLC")
+    vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files (x86)\VideoLAN\VLC")
     libvlc = vlc_dir / "libvlc.dll"
     libvlccore = vlc_dir / "libvlccore.dll"
     plugins_dir = vlc_dir / "plugins"
@@ -59,10 +59,14 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 # Windows-only EXE metadata (icon, version resource, manifest)
 exe_kwargs = {}
 if _IS_WIN32:
-    packaging_win = repo_root / "packaging" / "windows"
+    packaging_win = (repo_root / "packaging" / "windows").resolve()
     ico = packaging_win / "KikuMoe.ico"
     ver = packaging_win / "version_info.txt"
     mfst = packaging_win / "KikuMoe.manifest"
+    print(f"\n[BUILD DIAGNOSTICS]")
+    print(f" - Icon path: {ico} (Exists: {ico.exists()})")
+    print(f" - Version path: {ver} (Exists: {ver.exists()})")
+    print(f" - Manifest path: {mfst} (Exists: {mfst.exists()})\n")
     if ico.exists():
         exe_kwargs["icon"] = str(ico)
     if ver.exists():
