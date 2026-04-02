@@ -31,14 +31,20 @@ QT_QPA_PLATFORM=xcb poetry run python KikuMoe.py
 
 ### Audio (PipeWire / PulseAudio / ALSA)
 
-On Linux, `PlayerFFmpeg` probes PortAudio host APIs at startup and routes output through the first available backend in this order:
+Each backend routes audio on Linux without requiring manual configuration:
+
+**FFmpeg / PyAudio (`PlayerFFmpeg`)** — probes PortAudio host APIs at startup and selects the default output device of the first available backend:
 
 | Priority | PortAudio host API | Typical provider |
 |---|---|---|
 | 1 | PulseAudio (type 18) | PipeWire-pulse **or** PulseAudio |
 | 2 | ALSA (type 8) | Direct ALSA |
 
-No configuration is required — the right backend is selected automatically. The **Audio output** selector in Settings lists each device with its host API tag (`[PipeWire/Pulse]`, `[ALSA]`, etc.) so the user can override it explicitly if needed.
+The **Audio output** selector in Settings lists each device with its host API tag (`[PipeWire/Pulse]`, `[ALSA]`, etc.) so the user can override the auto-detected device.
+
+**MPV (`PlayerMPV`)** — passes `ao='pipewire,pulse,alsa'` to libmpv when a PipeWire socket is detected at `/run/user/<uid>/pipewire-0`, otherwise `ao='pulse,alsa'`. libmpv tries each driver in order and falls back automatically.
+
+**VLC (`PlayerVLC`)** — passes `--aout=pulse` to the VLC instance on Linux, routing audio through PulseAudio. On systems running PipeWire, `pipewire-pulse` transparently satisfies this.
 
 **System dependencies** (not installed by Poetry):
 
