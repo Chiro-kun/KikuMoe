@@ -237,7 +237,7 @@ Signals are the only safe channel for updating the UI from non-main threads.
 
 ### `settings_dialog.py`
 
-Non-modal window. Reads and writes directly to `QSettings`. On close, emits `settings_changed`, triggering re-initialization of dependent components (language, audio device, backend).
+Non-modal, frameless window with a `CustomTitleBar` at the top. Reads and writes directly to `QSettings`. On close, emits `settings_changed`, triggering re-initialization of dependent components (language, audio device, backend).
 
 ---
 
@@ -270,3 +270,32 @@ apply_windows_titlebar_dark_mode(hwnd)
 ```
 
 Calls `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` via `ctypes`. No-op on non-Windows platforms.
+
+---
+
+### `custom_titlebar.py`
+
+```python
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
+
+bar = CustomTitleBar(window, icon=app_icon)
+root_layout.addWidget(bar)
+install_size_grip(window)   # call once after the title bar is added
+```
+
+`CustomTitleBar(QWidget)` — a minimal CSD title bar drawn entirely by the application. The owning window must have `Qt.WindowType.FramelessWindowHint` set before it is shown. `ListenMoePlayer._init_ui_base()` and `SettingsDialog.__init__()` both set that flag and insert the title bar at index 0 of a zero-margin root layout, with the regular content layout nested below.
+
+**Public API — `CustomTitleBar`:**
+
+| Method | Description |
+|---|---|
+| `set_title(title: str)` | Update the text shown in the bar (called by `_apply_window_title`) |
+| `sync_maximize_button()` | Refresh the □ / ❐ button; call from `changeEvent` |
+
+**Drag:** mouse press on the bar calls `QWindow.startSystemMove()`, which delegates the move to the compositor or WM. This is the only correct approach on Wayland and works identically on X11 and Windows. Double-clicking the bar toggles maximize.
+
+**Buttons:** minimize (`—`), maximize/restore (`□` / `❐`), close (`✖`). All three buttons use 16 px bold weight; the close button uses 24 px so the `✖` glyph matches the visual weight of `—` and `□`. The close button turns red on hover. All styling is scoped to `#customTitleBar` and never leaks to the global application stylesheet.
+
+**`install_size_grip(window)`** — attaches a `QSizeGrip` overlay anchored to the bottom-right corner of a frameless window. A `_GripPositioner` event filter repositions it on every `Resize` event. Qt6's `QSizeGrip` calls `QWindow::startSystemResize()` on Wayland, so resize works correctly without any compositor-specific code.
+
+**Frameless `QMessageBox`:** `ListenMoePlayer._make_frameless_msg(msg)` is a static helper that applies `FramelessWindowHint` and a dark background + border to any `QMessageBox`, keeping dialogs visually consistent with the rest of the app.

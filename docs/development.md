@@ -32,6 +32,12 @@ poetry run python KikuMoe.py --debug
 QT_QPA_PLATFORM=xcb poetry run python KikuMoe.py
 ```
 
+### Window decorations (CSD)
+
+All windows (`ListenMoePlayer`, `SettingsDialog`, `QMessageBox` dialogs) use `Qt.WindowType.FramelessWindowHint` — compositor/WM decorations are intentionally suppressed. `CustomTitleBar` (`ui/custom_titlebar.py`) draws the title bar, window buttons, and drag surface entirely within Qt. This works identically on Wayland, XCB, and Windows and eliminates any dependence on the compositor's decoration protocol (`xdg-decoration-unstable-v1`).
+
+A `QSizeGrip` overlay (bottom-right corner) provides resize. On Wayland, Qt6's `QSizeGrip` uses `QWindow::startSystemResize()` internally.
+
 ### Audio (PipeWire / PulseAudio / ALSA)
 
 Each backend routes audio on Linux without requiring manual configuration:

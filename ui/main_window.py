@@ -54,6 +54,7 @@ from core.now_playing import compute_display_mmss
 from ui.tray_manager import TrayManager
 from ui.dev_console import DevConsole
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 
 # Custom Progress Bar for Pixel-Perfect Fluidity
 class SmoothProgressBar(QWidget):
@@ -256,7 +257,11 @@ class ListenMoePlayer(QWidget):
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        fixed_w, fixed_h = 500, 620
+        # FramelessWindowHint removes compositor/WM decorations; our CustomTitleBar
+        # provides cross-platform CSD instead (Wayland, X11, Windows).
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+
+        fixed_w, fixed_h = 500, 652  # 620 + 32 (CustomTitleBar.HEIGHT)
         self.setMinimumSize(fixed_w, fixed_h)
         self.resize(fixed_w, fixed_h)
         self._apply_window_title("")
@@ -277,11 +282,19 @@ class ListenMoePlayer(QWidget):
         except Exception:
             self.resize(fixed_w, fixed_h)
 
-        # Root layout: no margins so top header can be edge-to-edge and attached to title bar
+        # Root layout: no margins so title bar and header can be edge-to-edge
         self._root_layout = QVBoxLayout()
         self._root_layout.setContentsMargins(0, 0, 0, 0)
         self._root_layout.setSpacing(0)
         self.setLayout(self._root_layout)
+
+        # Custom title bar at index 0 — must come before _init_header_section
+        # inserts the settings bar at index 1.
+        self._title_bar = CustomTitleBar(
+            self, icon=getattr(self, "_icon_app", None)
+        )
+        self._root_layout.addWidget(self._title_bar)
+        install_size_grip(self)
 
         # Content layout: regular inner spacing for the rest of the UI
         self._content_widget = QWidget()
@@ -312,7 +325,8 @@ class ListenMoePlayer(QWidget):
         self.menu_bar_layout.addStretch(1)
         # 1. Settings header at the very top (under the Windows title bar)
         if hasattr(self, '_root_layout'):
-            self._root_layout.insertWidget(0, self.settings_header_bar)
+            # index 0 is the CustomTitleBar; settings bar goes directly below it
+            self._root_layout.insertWidget(1, self.settings_header_bar)
         else:
             self._layout.addWidget(self.settings_header_bar)
 
@@ -773,7 +787,10 @@ class ListenMoePlayer(QWidget):
 
     def _apply_window_title(self, song_title: Optional[str] = None) -> None:
         try:
-            self.setWindowTitle(self._build_window_title(song_title))
+            title = self._build_window_title(song_title)
+            self.setWindowTitle(title)
+            if hasattr(self, "_title_bar"):
+                self._title_bar.set_title(title)
         except Exception:
             pass
 
@@ -829,15 +846,16 @@ class ListenMoePlayer(QWidget):
             msg.setWindowTitle(self.i18n.t('close_dialog_title'))
             msg.setText(self.i18n.t('close_dialog_text'))
             msg.setIcon(QMessageBox.Icon.Question)
-            
+
             tray_btn = msg.addButton(self.i18n.t('close_option_tray'), QMessageBox.ButtonRole.AcceptRole)
             quit_btn = msg.addButton(self.i18n.t('close_option_quit'), QMessageBox.ButtonRole.DestructiveRole)
             cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.ButtonRole.RejectRole)
             msg.setEscapeButton(cancel_btn)
-            
+
             cb = QCheckBox(self.i18n.t('close_remember'))
             msg.setCheckBox(cb)
-            
+
+            self._make_frameless_msg(msg)
             try:
                 apply_windows_titlebar_dark_mode(msg, True)
             except Exception: pass
@@ -899,6 +917,8 @@ class ListenMoePlayer(QWidget):
         event = a0
         try:
             if event.type() == QEvent.Type.WindowStateChange:
+                if hasattr(self, "_title_bar"):
+                    self._title_bar.sync_maximize_button()
                 if self.isMinimized() and self._get_bool(KEY_TRAY_ENABLED, True) and self._get_bool(KEY_TRAY_HIDE_ON_MINIMIZE, True):
                     self.hide()
                     event.accept()
@@ -1370,6 +1390,14 @@ class ListenMoePlayer(QWidget):
             apply_windows_titlebar_dark_mode(self, enable)
         except Exception:
             pass
+
+    @staticmethod
+    def _make_frameless_msg(msg: QMessageBox) -> None:
+        """Remove compositor decorations from a QMessageBox and add a visible border."""
+        msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        msg.setStyleSheet(
+            "QDialog { background-color: #121212; border: 1px solid #3a3a3a; }"
+        )
 
     def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:
@@ -2681,7 +2709,7 @@ class ListenMoePlayer(QWidget):
                         restore_btn = msg.addButton(self.i18n.t('restore'), QMessageBox.ButtonRole.AcceptRole)
                         cancel_btn = msg.addButton(self.i18n.t('settings_cancel'), QMessageBox.ButtonRole.RejectRole)
                         msg.setIcon(QMessageBox.Icon.Question)
-                        # Forza titlebar scura su Windows per il QMessageBox
+                        self._make_frameless_msg(msg)
                         try:
                             apply_windows_titlebar_dark_mode(msg, True)
                         except Exception:
