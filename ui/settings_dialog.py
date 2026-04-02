@@ -9,6 +9,7 @@ from core.i18n import I18n
 
 _IS_WIN32 = sys.platform == "win32"
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+from core.logger import silence_stderr
 from core.constants import (
     ORG_NAME,
     APP_SETTINGS,
@@ -368,7 +369,8 @@ class SettingsDialog(QDialog):
             return
         pa = None
         try:
-            pa = pyaudio.PyAudio()
+            with silence_stderr():
+                pa = pyaudio.PyAudio()
             host_info = pa.get_host_api_info_by_index(0) if hasattr(pa, 'get_host_api_info_by_index') else None
             device_count = host_info.get('deviceCount', 0) if isinstance(host_info, dict) else (
                 pa.get_device_count() if hasattr(pa, 'get_device_count') else 0

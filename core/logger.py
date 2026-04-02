@@ -1,4 +1,6 @@
+import contextlib
 import logging
+import os
 import sys
 from typing import Optional
 
@@ -38,6 +40,34 @@ class _SafeTextStream:
     @property
     def encoding(self):
         return getattr(self._stream, "encoding", None)
+
+
+@contextlib.contextmanager
+def silence_stderr():
+    """Temporarily redirect C-level stderr (fd 2) to /dev/null.
+
+    Use this around PyAudio initialisation to suppress the flood of ALSA/JACK
+    probe errors emitted by PortAudio when it enumerates audio devices.  Those
+    messages are written directly by the C library and cannot be filtered
+    through Python's logging system.
+
+    Example::
+
+        with silence_stderr():
+            pa = pyaudio.PyAudio()
+    """
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        saved_fd = os.dup(2)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+        try:
+            yield
+        finally:
+            os.dup2(saved_fd, 2)
+            os.close(saved_fd)
+    except Exception:
+        yield
 
 
 def set_debug(enabled: bool) -> None:
