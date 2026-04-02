@@ -58,6 +58,14 @@ a = Analysis(
     win_private_assemblies=False,
     noarchive=False,
 )
+# On Linux, PyInstaller auto-detects libvlc.so.5 / libvlccore.so.9 via ctypes
+# analysis and bundles them — but without the full VLC plugin tree and runtime
+# dependencies (libdbus, libsystemd, audio plugins…), the bundled copy cannot
+# initialise audio output.  Remove them so the system-installed VLC is used
+# end-to-end, which is what the comment above already intends.
+if not _IS_WIN32:
+    a.binaries = [b for b in a.binaries if not b[0].startswith(("libvlc", "libvlccore"))]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # Windows-only EXE metadata (icon, version resource, manifest)
