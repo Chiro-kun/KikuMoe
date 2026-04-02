@@ -29,6 +29,11 @@ def _write_crash_log(exc: BaseException) -> str:
 
 
 def main() -> int:
+    if '--debug' in sys.argv:
+        sys.argv = [a for a in sys.argv if a != '--debug']
+        from core.logger import set_debug
+        set_debug(True)
+
     try:
         app = QApplication(sys.argv)
         window = ListenMoePlayer()

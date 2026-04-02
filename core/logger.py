@@ -3,6 +3,10 @@ import sys
 from typing import Optional
 
 _DEFAULT_FORMAT = '[%(levelname)s] %(message)s'
+_DEFAULT_LEVEL = logging.INFO
+
+_debug_enabled = False
+_created_loggers: list = []
 
 
 class _SafeTextStream:
@@ -36,9 +40,29 @@ class _SafeTextStream:
         return getattr(self._stream, "encoding", None)
 
 
+def set_debug(enabled: bool) -> None:
+    """Enable or disable DEBUG-level output for all KikuMoe loggers.
+
+    Call this before creating any player or UI objects (i.e. right at startup,
+    before ListenMoePlayer() is instantiated) so that every subsequent
+    get_logger() call picks up the correct level.  Already-created loggers are
+    updated in-place as well.
+    """
+    global _debug_enabled
+    _debug_enabled = bool(enabled)
+    level = logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL
+    for lg in _created_loggers:
+        try:
+            lg.setLevel(level)
+        except Exception:
+            pass
+
+
 def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """Return a configured logger that logs to stdout at DEBUG level by default.
-    It avoids adding duplicate handlers on repeated calls.
+    """Return a configured logger writing to stdout.
+
+    The effective level is DEBUG when debug mode is active (see set_debug()),
+    and INFO otherwise.  Duplicate handlers are never added on repeated calls.
     """
     lname = name or 'KikuMoe'
     logger = logging.getLogger(lname)
@@ -47,6 +71,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
         formatter = logging.Formatter(_DEFAULT_FORMAT)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL)
         logger.propagate = False
+        _created_loggers.append(logger)
     return logger
