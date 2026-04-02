@@ -12,6 +12,8 @@ import re
 import urllib.request
 import urllib.parse
 from core.i18n import I18n
+import email.utils
+from datetime import datetime, timezone
 from network.ws_client import NowPlayingWS
 from audio.player_ffmpeg import PlayerFFmpeg
 from audio.player_mpv import PlayerMPV
@@ -132,6 +134,7 @@ class ListenMoePlayer(QWidget):
         self._sleep_remaining_sec = 0
         self._sleep_fadeout_sec = 15
         self._sleep_saved_volume = None
+        self._clock_sync_offset = 0.0 # Difference between server time and local CPU clock
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -161,6 +164,29 @@ class ListenMoePlayer(QWidget):
         self.i18n = I18n(saved_lang if saved_lang in ('it', 'en') else 'it')
         self._lang_map = {"Italiano": 'it', "English": 'en'}
         self.log = get_logger('KikuMoe')
+        self._sync_clock_with_server()
+
+    def _sync_clock_with_server(self):
+        """Fetches the current server time from LISTEN.moe to calculate clock skew."""
+        try:
+            # We use a HEAD request to the main page which is faster and guaranteed to have a Date header
+            req = urllib.request.Request("https://listen.moe/", method='HEAD')
+            with urllib.request.urlopen(req, timeout=5) as res:
+                server_date_str = res.headers.get('Date')
+                if server_date_str:
+                    server_dt = email.utils.parsedate_to_datetime(server_date_str)
+                    # Convert both to UTC for comparison
+                    if server_dt.tzinfo is None:
+                        server_dt = server_dt.replace(tzinfo=timezone.utc)
+                    else:
+                        server_dt = server_dt.astimezone(timezone.utc)
+                    
+                    local_dt = datetime.now(timezone.utc)
+                    self._clock_sync_offset = (server_dt - local_dt).total_seconds()
+                    self.log.info(f"[UI] Clock sync performed. Server offset: {self._clock_sync_offset:+.2f}s")
+        except Exception as e:
+            self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
+            self._clock_sync_offset = 0.0
 
     def _init_icons(self):
         """Load and prepare application icons for window and tray."""
@@ -971,30 +997,24 @@ class ListenMoePlayer(QWidget):
             self._current_start_epoch = float(start_ts) if start_ts is not None else None
             self._current_cover_ref = album_cover if isinstance(album_cover, str) and album_cover.strip() else None
             
-            # --- Automatic Skew Compensation ---
-            try:
-                import time
-                if self._current_start_epoch is not None:
-                    raw_elapsed = time.time() - self._current_start_epoch
-                    # If PC is significantly behind (elapsed is negative), offset it.
-                    # We also allow up to 10s of positive skew (for buffering slack).
-                    if raw_elapsed < -2:
-                        self._skew_offset = abs(raw_elapsed)
-                        self.log.info(f"[UI] Automatic skew compensation applied: +{self._skew_offset:.1f}s")
-                    else:
-                        self._skew_offset = 0
-                else:
-                    self._skew_offset = 0
-            except Exception:
-                self._skew_offset = 0
-            
-            # --- Update Song Progress Bar ---
+            # --- Song Progress Bar Sync ---
             if hasattr(self, 'song_progress'):
                 # Only show and set progress bar if we have a valid, positive duration
                 if self._current_duration_seconds is not None and self._current_duration_seconds > 0:
                     # Multiplier (1000) for sub-second smoothness
                     self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
-                    self.song_progress.setValue(0)
+                    
+                    # Calculate initial progress instead of resetting to 0
+                    if self._current_start_epoch is not None:
+                        import time
+                        now = time.time() + self._clock_sync_offset
+                        # LISTEN.moe 'startTime' is actually the expected END time of the track
+                        remaining = self._current_start_epoch - now
+                        elapsed = max(0, self._current_duration_seconds - remaining)
+                        self.song_progress.setValue(int(min(elapsed, self._current_duration_seconds) * 1000))
+                    else:
+                        self.song_progress.setValue(0)
+                        
                     self.song_progress.show()
                 else:
                     self.song_progress.hide()
@@ -1072,9 +1092,12 @@ class ListenMoePlayer(QWidget):
                     self.log.debug(f"[DEV] Song ticker: LIVE MODE (title={self._current_title})")
                 return
             
-            # Apply skew offset to the local clock comparison
-            skew = getattr(self, '_skew_offset', 0)
-            elapsed_raw = now - epoch + skew
+            # Use synced clock: now + clock_sync_offset
+            now_synced = now + getattr(self, '_clock_sync_offset', 0)
+            
+            # epoch is actually the END time of the track
+            remaining_raw = epoch - now_synced
+            elapsed_raw = dur - remaining_raw
             
             # --- Progress Bar (Fluid 50ms update) ---
             # Use milliseconds for the internal bar value
@@ -2136,8 +2159,11 @@ class ListenMoePlayer(QWidget):
                     dur = None
                 if dur and self._current_start_epoch is not None:
                     try:
-                        skew = int(getattr(self, '_skew_offset', 0))
-                        elapsed = int(time.time()) - int(self._current_start_epoch) + skew
+                        import time
+                        now = time.time() + getattr(self, '_clock_sync_offset', 0)
+                        # _current_start_epoch is the absolute UTC end time of the song
+                        remaining = self._current_start_epoch - now
+                        elapsed = dur - remaining
                     except Exception:
                         elapsed = None
                     # Use remaining only when elapsed is within plausible range (+/- 60s slack for clock skew)
