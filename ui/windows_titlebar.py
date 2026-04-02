@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 import sys
-from typing import Any, Optional
+from typing import Any
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -11,7 +12,7 @@ def apply_windows_titlebar_dark_mode(target: Any, enable: bool) -> None:
         if not _IS_WIN32:
             return
 
-        hwnd: Optional[int] = None
+        hwnd: int | None = None
         try:
             if isinstance(target, int):
                 hwnd = int(target)
@@ -24,15 +25,15 @@ def apply_windows_titlebar_dark_mode(target: Any, enable: bool) -> None:
             return
 
         import ctypes
+
         value = ctypes.c_int(1 if enable else 0)
 
         for attr in (20, 19):
             try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
                     hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
                 )
             except Exception:
                 pass
     except Exception:
         pass
-

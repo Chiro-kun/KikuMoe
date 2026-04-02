@@ -1,44 +1,56 @@
 import os
 import sys
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox,
-    QPushButton, QLineEdit, QFileDialog, QSpinBox
-)
-from PyQt5.QtCore import Qt, QSettings, pyqtSignal
-from core.i18n import I18n
 
-_IS_WIN32 = sys.platform == "win32"
-from ui.windows_titlebar import apply_windows_titlebar_dark_mode
-from core.logger import silence_stderr
+from PyQt5.QtCore import QSettings, pyqtSignal
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+)
+
 from core.constants import (
-    ORG_NAME,
     APP_SETTINGS,
-    KEY_LANG,
-    KEY_CHANNEL,
-    KEY_FORMAT,
+    KEY_AUDIO_BACKEND,
+    KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
-    KEY_TRAY_ENABLED,
-    KEY_TRAY_NOTIFICATIONS,
-    KEY_TRAY_HIDE_ON_MINIMIZE,
+    KEY_CHANNEL,
+    KEY_DEV_CONSOLE_ENABLED,
+    KEY_DEV_CONSOLE_SHOW_DEV,
+    KEY_FORMAT,
+    KEY_LANG,
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
-    KEY_SLEEP_STOP_ON_END,
-    KEY_DEV_CONSOLE_ENABLED,
     KEY_SESSION_TIMER_ENABLED,
-    KEY_AUDIO_DEVICE_INDEX,
-    KEY_DEV_CONSOLE_SHOW_DEV,
-    KEY_AUDIO_BACKEND,
+    KEY_SLEEP_STOP_ON_END,
+    KEY_TRAY_ENABLED,
+    KEY_TRAY_HIDE_ON_MINIMIZE,
+    KEY_TRAY_NOTIFICATIONS,
+    ORG_NAME,
 )
+from core.i18n import I18n
+from core.logger import silence_stderr
+from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+
+_IS_WIN32 = sys.platform == "win32"
+
 
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         # Rendi il dialogo non modale per permettere interazione con altre finestre (es. DevConsole)
         self.setModal(False)
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
-        self.i18n = I18n(self.settings.value(KEY_LANG, 'it'))
-        self.setWindowTitle(self.i18n.t('settings_title'))
+        self.i18n = I18n(self.settings.value(KEY_LANG, "it"))
+        self.setWindowTitle(self.i18n.t("settings_title"))
         try:
             self.setMinimumSize(560, 360)
         except Exception:
@@ -49,30 +61,36 @@ class SettingsDialog(QDialog):
         layout.setSpacing(8)
 
         # Autoplay
-        self.chk_autoplay = QCheckBox(self.i18n.t('settings_autoplay'))
-        self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, 'false') == 'true')
-        self.chk_autoplay.setToolTip(self.i18n.t('settings_autoplay_tip') if hasattr(self.i18n, 't') else '')
+        self.chk_autoplay = QCheckBox(self.i18n.t("settings_autoplay"))
+        self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
+        self.chk_autoplay.setToolTip(
+            self.i18n.t("settings_autoplay_tip") if hasattr(self.i18n, "t") else ""
+        )
         layout.addWidget(self.chk_autoplay)
 
         # Sleep Timer option: stop on end
-        self.chk_sleep_stop = QCheckBox(self.i18n.t('settings_sleep_stop_on_end'))
-        self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, 'true') == 'true')
+        self.chk_sleep_stop = QCheckBox(self.i18n.t("settings_sleep_stop_on_end"))
+        self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true")
         layout.addWidget(self.chk_sleep_stop)
 
         # Session timer enable
-        self.chk_session_timer = QCheckBox(self.i18n.t('settings_session_timer_enable'))
-        self.chk_session_timer.setToolTip(self.i18n.t('settings_session_timer_tip'))
-        self.chk_session_timer.setChecked(self.settings.value(KEY_SESSION_TIMER_ENABLED, 'true') == 'true')
+        self.chk_session_timer = QCheckBox(self.i18n.t("settings_session_timer_enable"))
+        self.chk_session_timer.setToolTip(self.i18n.t("settings_session_timer_tip"))
+        self.chk_session_timer.setChecked(
+            self.settings.value(KEY_SESSION_TIMER_ENABLED, "true") == "true"
+        )
         layout.addWidget(self.chk_session_timer)
 
         # Developer Console (optional)
-        self.chk_dev_console = QCheckBox(self.i18n.t('settings_dev_console'))
-        self.chk_dev_console.setChecked(self.settings.value(KEY_DEV_CONSOLE_ENABLED, 'false') == 'true')
+        self.chk_dev_console = QCheckBox(self.i18n.t("settings_dev_console"))
+        self.chk_dev_console.setChecked(
+            self.settings.value(KEY_DEV_CONSOLE_ENABLED, "false") == "true"
+        )
         # Row with checkbox + open button
         dev_row = QHBoxLayout()
         dev_row.setSpacing(8)
         dev_row.addWidget(self.chk_dev_console)
-        self.btn_open_console = QPushButton(self.i18n.t('dev_console_button'))
+        self.btn_open_console = QPushButton(self.i18n.t("dev_console_button"))
         try:
             self.btn_open_console.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
         except Exception:
@@ -84,25 +102,31 @@ class SettingsDialog(QDialog):
         dev_row.addWidget(self.btn_open_console)
         layout.addLayout(dev_row)
         # RIMOSSO: non disabilitare più il pulsante quando la console è disattivata
-        # self.chk_dev_console.stateChanged.connect(lambda s: self.btn_open_console.setEnabled(self.chk_dev_console.isChecked()))
+        # self.chk_dev_console.stateChanged.connect(
+        #     lambda s: self.btn_open_console.setEnabled(self.chk_dev_console.isChecked())
+        # )
 
         # New: show [DEV] tagged messages toggle (only meaningful when console enabled)
-        self.chk_dev_show_dev = QCheckBox(self.i18n.t('settings_dev_console_show_dev'))
-        self.chk_dev_show_dev.setChecked(self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, 'false') == 'true')
+        self.chk_dev_show_dev = QCheckBox(self.i18n.t("settings_dev_console_show_dev"))
+        self.chk_dev_show_dev.setChecked(
+            self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
+        )
         self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
         # sync enabled state
-        self.chk_dev_console.stateChanged.connect(lambda s: self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked()))
+        self.chk_dev_console.stateChanged.connect(
+            lambda s: self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
+        )
         layout.addWidget(self.chk_dev_show_dev)
 
         # Language
         lang_row = QHBoxLayout()
         lang_row.setSpacing(8)
-        lab_lang = QLabel(self.i18n.t('settings_language'))
+        lab_lang = QLabel(self.i18n.t("settings_language"))
         lab_lang.setMinimumWidth(140)
         lang_row.addWidget(lab_lang)
         self.cmb_lang = QComboBox()
-        self.cmb_lang.addItems(['Italiano', 'English'])
-        self.cmb_lang.setCurrentIndex(0 if self.settings.value(KEY_LANG, 'it') == 'it' else 1)
+        self.cmb_lang.addItems(["Italiano", "English"])
+        self.cmb_lang.setCurrentIndex(0 if self.settings.value(KEY_LANG, "it") == "it" else 1)
         try:
             self.cmb_lang.setMinimumWidth(160)
         except Exception:
@@ -113,46 +137,48 @@ class SettingsDialog(QDialog):
         # Channel & Format
         ch_row = QHBoxLayout()
         ch_row.setSpacing(8)
-        lab_ch = QLabel(self.i18n.t('settings_channel'))
+        lab_ch = QLabel(self.i18n.t("settings_channel"))
         lab_ch.setMinimumWidth(140)
         ch_row.addWidget(lab_ch)
         self.cmb_channel = QComboBox()
-        self.cmb_channel.addItems(['J-POP', 'K-POP'])
-        self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, 'J-POP'))
+        self.cmb_channel.addItems(["J-POP", "K-POP"])
+        self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, "J-POP"))
         ch_row.addWidget(self.cmb_channel, 1)
         layout.addLayout(ch_row)
 
         # Format
         fmt_row = QHBoxLayout()
         fmt_row.setSpacing(8)
-        lab_fmt = QLabel(self.i18n.t('settings_format'))
+        lab_fmt = QLabel(self.i18n.t("settings_format"))
         lab_fmt.setMinimumWidth(140)
         fmt_row.addWidget(lab_fmt)
         self.cmb_format = QComboBox()
         try:
-            self.cmb_format.addItems(['Vorbis', 'Opus', 'MP3'])
+            self.cmb_format.addItems(["Vorbis", "Opus", "MP3"])
         except Exception:
             pass
         try:
             self.cmb_format.setMinimumWidth(160)
         except Exception:
             pass
-        self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, 'Vorbis'))
+        self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, "Vorbis"))
         fmt_row.addWidget(self.cmb_format, 1)
         layout.addLayout(fmt_row)
 
         # Audio Backend
         backend_row = QHBoxLayout()
         backend_row.setSpacing(8)
-        lab_backend = QLabel(self.i18n.t('settings_audio_backend'))
+        lab_backend = QLabel(self.i18n.t("settings_audio_backend"))
         lab_backend.setMinimumWidth(140)
         backend_row.addWidget(lab_backend)
         self.cmb_audio_backend = QComboBox()
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_auto'), userData='auto')
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_ffmpeg'), userData='ffmpeg')
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_mpv'), userData='mpv')
-        self.cmb_audio_backend.addItem(self.i18n.t('settings_audio_backend_vlc'), userData='vlc')
-        saved_backend = self.settings.value(KEY_AUDIO_BACKEND, 'auto')
+        self.cmb_audio_backend.addItem(self.i18n.t("settings_audio_backend_auto"), userData="auto")
+        self.cmb_audio_backend.addItem(
+            self.i18n.t("settings_audio_backend_ffmpeg"), userData="ffmpeg"
+        )
+        self.cmb_audio_backend.addItem(self.i18n.t("settings_audio_backend_mpv"), userData="mpv")
+        self.cmb_audio_backend.addItem(self.i18n.t("settings_audio_backend_vlc"), userData="vlc")
+        saved_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
         for i in range(self.cmb_audio_backend.count()):
             if self.cmb_audio_backend.itemData(i) == saved_backend:
                 self.cmb_audio_backend.setCurrentIndex(i)
@@ -163,7 +189,7 @@ class SettingsDialog(QDialog):
         # Audio Output Device
         audio_row = QHBoxLayout()
         audio_row.setSpacing(8)
-        lab_audio = QLabel(self.i18n.t('settings_audio_output'))
+        lab_audio = QLabel(self.i18n.t("settings_audio_output"))
         lab_audio.setMinimumWidth(140)
         audio_row.addWidget(lab_audio)
         self.cmb_audio_device = QComboBox()
@@ -173,11 +199,11 @@ class SettingsDialog(QDialog):
             pass
         # Prima voce: default di sistema
         try:
-            self.cmb_audio_device.addItem(self.i18n.t('settings_audio_default'), userData=None)
+            self.cmb_audio_device.addItem(self.i18n.t("settings_audio_default"), userData=None)
         except Exception:
             pass
         audio_row.addWidget(self.cmb_audio_device, 1)
-        self.btn_audio_refresh = QPushButton(self.i18n.t('settings_audio_refresh'))
+        self.btn_audio_refresh = QPushButton(self.i18n.t("settings_audio_refresh"))
         try:
             self.btn_audio_refresh.clicked.connect(self._populate_audio_devices)
         except Exception:
@@ -188,12 +214,12 @@ class SettingsDialog(QDialog):
         # LibVLC Path
         path_row = QHBoxLayout()
         path_row.setSpacing(8)
-        lab_path = QLabel(self.i18n.t('settings_vlc_path'))
+        lab_path = QLabel(self.i18n.t("settings_vlc_path"))
         lab_path.setMinimumWidth(140)
         path_row.addWidget(lab_path)
-        self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ''))
+        self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ""))
         path_row.addWidget(self.txt_vlc_path, 1)
-        self.btn_browse = QPushButton(self.i18n.t('settings_browse'))
+        self.btn_browse = QPushButton(self.i18n.t("settings_browse"))
         self.btn_browse.clicked.connect(self._browse_vlc_path)
         path_row.addWidget(self.btn_browse)
         layout.addLayout(path_row)
@@ -201,7 +227,7 @@ class SettingsDialog(QDialog):
         # Network caching
         nc_row = QHBoxLayout()
         nc_row.setSpacing(8)
-        lab_nc = QLabel(self.i18n.t('settings_network_caching'))
+        lab_nc = QLabel(self.i18n.t("settings_network_caching"))
         lab_nc.setMinimumWidth(140)
         nc_row.addWidget(lab_nc)
         self.spin_network_caching = QSpinBox()
@@ -211,7 +237,7 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         try:
-            self.spin_network_caching.setSuffix(' ms')
+            self.spin_network_caching.setSuffix(" ms")
         except Exception:
             pass
         try:
@@ -226,26 +252,32 @@ class SettingsDialog(QDialog):
         layout.addLayout(nc_row)
 
         # Tray options
-        self.chk_tray_enabled = QCheckBox(self.i18n.t('settings_tray_enable'))
-        self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, 'true') == 'true')
+        self.chk_tray_enabled = QCheckBox(self.i18n.t("settings_tray_enable"))
+        self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, "true") == "true")
         layout.addWidget(self.chk_tray_enabled)
 
-        self.chk_tray_hide_on_minimize = QCheckBox(self.i18n.t('settings_tray_hide_on_minimize'))
-        self.chk_tray_hide_on_minimize.setChecked(self.settings.value(KEY_TRAY_HIDE_ON_MINIMIZE, 'true') == 'true')
+        self.chk_tray_hide_on_minimize = QCheckBox(self.i18n.t("settings_tray_hide_on_minimize"))
+        self.chk_tray_hide_on_minimize.setChecked(
+            self.settings.value(KEY_TRAY_HIDE_ON_MINIMIZE, "true") == "true"
+        )
         self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked())
-        self.chk_tray_enabled.stateChanged.connect(lambda s: self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked()))
+        self.chk_tray_enabled.stateChanged.connect(
+            lambda s: self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked())
+        )
         layout.addWidget(self.chk_tray_hide_on_minimize)
 
-        self.chk_tray_notifications = QCheckBox(self.i18n.t('settings_tray_notifications'))
-        self.chk_tray_notifications.setChecked(self.settings.value(KEY_TRAY_NOTIFICATIONS, 'true') == 'true')
+        self.chk_tray_notifications = QCheckBox(self.i18n.t("settings_tray_notifications"))
+        self.chk_tray_notifications.setChecked(
+            self.settings.value(KEY_TRAY_NOTIFICATIONS, "true") == "true"
+        )
         layout.addWidget(self.chk_tray_notifications)
 
         # Buttons
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        self.btn_ok = QPushButton(self.i18n.t('settings_ok'))
-        self.btn_cancel = QPushButton(self.i18n.t('settings_cancel'))
-        self.btn_apply = QPushButton(self.i18n.t('settings_apply'))
+        self.btn_ok = QPushButton(self.i18n.t("settings_ok"))
+        self.btn_cancel = QPushButton(self.i18n.t("settings_cancel"))
+        self.btn_apply = QPushButton(self.i18n.t("settings_apply"))
         try:
             self.btn_ok.setIcon(self.style().standardIcon(self.style().SP_DialogOkButton))
             self.btn_cancel.setIcon(self.style().standardIcon(self.style().SP_DialogCancelButton))
@@ -266,8 +298,10 @@ class SettingsDialog(QDialog):
     def _browse_vlc_path(self):
         start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
         if not start_dir:
-            start_dir = 'C:/' if _IS_WIN32 else os.path.expanduser('~')
-        chosen = QFileDialog.getExistingDirectory(self, self.i18n.t('libvlc_choose_title'), start_dir)
+            start_dir = "C:/" if _IS_WIN32 else os.path.expanduser("~")
+        chosen = QFileDialog.getExistingDirectory(
+            self, self.i18n.t("libvlc_choose_title"), start_dir
+        )
         if chosen:
             self.txt_vlc_path.setText(chosen)
 
@@ -290,39 +324,57 @@ class SettingsDialog(QDialog):
             # Salva subito le impostazioni (incluso KEY_DEV_CONSOLE_SHOW_DEV)
             self._save_settings()
             parent = self.parent()
-            if parent and hasattr(parent, 'open_dev_console'):
+            if parent and hasattr(parent, "open_dev_console"):
                 # Apri la console con parent = finestra principale
                 from PyQt5.QtCore import QTimer
+
                 QTimer.singleShot(0, lambda: parent.open_dev_console(parent))
         except Exception:
             pass
 
     def _save_settings(self):
         """Logica comune per salvare le impostazioni."""
-        self.settings.setValue(KEY_AUTOPLAY, 'true' if self.chk_autoplay.isChecked() else 'false')
-        self.settings.setValue(KEY_SLEEP_STOP_ON_END, 'true' if self.chk_sleep_stop.isChecked() else 'false')
-        self.settings.setValue(KEY_SESSION_TIMER_ENABLED, 'true' if self.chk_session_timer.isChecked() else 'false')
-        self.settings.setValue(KEY_DEV_CONSOLE_ENABLED, 'true' if self.chk_dev_console.isChecked() else 'false')
-        self.settings.setValue(KEY_DEV_CONSOLE_SHOW_DEV, 'true' if self.chk_dev_show_dev.isChecked() else 'false')
-        self.settings.setValue(KEY_LANG, 'it' if self.cmb_lang.currentIndex() == 0 else 'en')
+        self.settings.setValue(KEY_AUTOPLAY, "true" if self.chk_autoplay.isChecked() else "false")
+        self.settings.setValue(
+            KEY_SLEEP_STOP_ON_END, "true" if self.chk_sleep_stop.isChecked() else "false"
+        )
+        self.settings.setValue(
+            KEY_SESSION_TIMER_ENABLED, "true" if self.chk_session_timer.isChecked() else "false"
+        )
+        self.settings.setValue(
+            KEY_DEV_CONSOLE_ENABLED, "true" if self.chk_dev_console.isChecked() else "false"
+        )
+        self.settings.setValue(
+            KEY_DEV_CONSOLE_SHOW_DEV, "true" if self.chk_dev_show_dev.isChecked() else "false"
+        )
+        self.settings.setValue(KEY_LANG, "it" if self.cmb_lang.currentIndex() == 0 else "en")
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())
         path = self.txt_vlc_path.text().strip()
-        self.settings.setValue(KEY_LIBVLC_PATH, path if path else '')
+        self.settings.setValue(KEY_LIBVLC_PATH, path if path else "")
         self.settings.setValue(KEY_NETWORK_CACHING, int(self.spin_network_caching.value()))
-        self.settings.setValue(KEY_TRAY_ENABLED, 'true' if self.chk_tray_enabled.isChecked() else 'false')
-        self.settings.setValue(KEY_TRAY_HIDE_ON_MINIMIZE, 'true' if self.chk_tray_hide_on_minimize.isChecked() else 'false')
-        self.settings.setValue(KEY_TRAY_NOTIFICATIONS, 'true' if self.chk_tray_notifications.isChecked() else 'false')
+        self.settings.setValue(
+            KEY_TRAY_ENABLED, "true" if self.chk_tray_enabled.isChecked() else "false"
+        )
+        self.settings.setValue(
+            KEY_TRAY_HIDE_ON_MINIMIZE,
+            "true" if self.chk_tray_hide_on_minimize.isChecked() else "false",
+        )
+        self.settings.setValue(
+            KEY_TRAY_NOTIFICATIONS, "true" if self.chk_tray_notifications.isChecked() else "false"
+        )
         # Save audio backend selection
         try:
-            self.settings.setValue(KEY_AUDIO_BACKEND, self.cmb_audio_backend.currentData() or 'auto')
+            self.settings.setValue(
+                KEY_AUDIO_BACKEND, self.cmb_audio_backend.currentData() or "auto"
+            )
         except Exception:
             pass
         # Save audio device selection: None => use system default
         try:
             idx_data = self.cmb_audio_device.currentData()
             if idx_data is None:
-                self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, '')
+                self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, "")
             else:
                 self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, int(idx_data))
         except Exception:
@@ -371,9 +423,15 @@ class SettingsDialog(QDialog):
         try:
             with silence_stderr():
                 pa = pyaudio.PyAudio()
-            host_info = pa.get_host_api_info_by_index(0) if hasattr(pa, 'get_host_api_info_by_index') else None
-            device_count = host_info.get('deviceCount', 0) if isinstance(host_info, dict) else (
-                pa.get_device_count() if hasattr(pa, 'get_device_count') else 0
+            host_info = (
+                pa.get_host_api_info_by_index(0)
+                if hasattr(pa, "get_host_api_info_by_index")
+                else None
+            )
+            device_count = (
+                host_info.get("deviceCount", 0)
+                if isinstance(host_info, dict)
+                else (pa.get_device_count() if hasattr(pa, "get_device_count") else 0)
             )
             for i in range(device_count):
                 try:
@@ -382,16 +440,16 @@ class SettingsDialog(QDialog):
                     info = None
                 if not isinstance(info, dict):
                     continue
-                max_output = int(info.get('maxOutputChannels', 0))
-                name = str(info.get('name', f'Device {i}'))
+                max_output = int(info.get("maxOutputChannels", 0))
+                name = str(info.get("name", f"Device {i}"))
                 # Include only devices that can output
                 if max_output > 0:
                     # Show name and index in label
                     label = f"{name} (#{i})"
                     self.cmb_audio_device.addItem(label, userData=i)
             # Restore persisted selection if available
-            persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, '')
-            if persisted != '' and persisted is not None:
+            persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            if persisted != "" and persisted is not None:
                 try:
                     persisted = int(persisted)
                     # Find index in combo where userData == persisted
@@ -405,7 +463,7 @@ class SettingsDialog(QDialog):
             pass
         finally:
             try:
-                if pa is not None and hasattr(pa, 'terminate'):
+                if pa is not None and hasattr(pa, "terminate"):
                     pa.terminate()
             except Exception:
                 pass

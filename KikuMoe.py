@@ -1,7 +1,9 @@
-import sys
 import os
+import sys
 import traceback
+
 from PyQt5.QtWidgets import QApplication
+
 from ui.main_window import ListenMoePlayer
 
 _IS_WIN32 = sys.platform == "win32"
@@ -13,7 +15,11 @@ def _write_crash_log(exc: BaseException) -> str:
         base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
     else:
         xdg_data = os.environ.get("XDG_DATA_HOME", "")
-        base_dir = os.path.join(xdg_data, "KikuMoe") if xdg_data else os.path.join(os.path.expanduser("~"), ".local", "share", "KikuMoe")
+        base_dir = (
+            os.path.join(xdg_data, "KikuMoe")
+            if xdg_data
+            else os.path.join(os.path.expanduser("~"), ".local", "share", "KikuMoe")
+        )
     try:
         os.makedirs(base_dir, exist_ok=True)
     except Exception:
@@ -29,9 +35,10 @@ def _write_crash_log(exc: BaseException) -> str:
 
 
 def main() -> int:
-    if '--debug' in sys.argv:
-        sys.argv = [a for a in sys.argv if a != '--debug']
+    if "--debug" in sys.argv:
+        sys.argv = [a for a in sys.argv if a != "--debug"]
         from core.logger import set_debug
+
         set_debug(True)
 
     try:
@@ -49,5 +56,5 @@ def main() -> int:
         return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())
