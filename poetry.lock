@@ -298,6 +298,22 @@ files = [
 ]
 
 [[package]]
+name = "python-mpv"
+version = "1.0.6"
+description = "A python interface to the mpv media player"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "python_mpv-1.0.6-py3-none-any.whl", hash = "sha256:cdb3801ba122b28f37f3a019f265ee793500cd43b1d531c0ac1b7cb644d0c62a"},
+    {file = "python_mpv-1.0.6.tar.gz", hash = "sha256:77e926f2ce569c5fc83d6531176e85e4c3249552f3059e818afb2f9cb33b9eeb"},
+]
+
+[package.extras]
+screenshot-raw = ["Pillow"]
+test = ["PyVirtualDisplay"]
+
+[[package]]
 name = "python-vlc"
 version = "3.0.21203"
 description = "VLC bindings for python."
@@ -483,4 +499,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.8"
-content-hash = "27a3f092ea7d760d83f9bc99578fb9f4dcbc6ed94fc57dc178c3cb6b7fc17af2"
+content-hash = "545bc8c58e9688bb811ae1fe6f4f7d7f474b45844eebd878887adb36eca61e2c"
