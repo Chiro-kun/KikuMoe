@@ -269,13 +269,23 @@ Calls `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` via `ctypes`. No-op
 
 ---
 
-### `wayland_csd.py`
+### `custom_titlebar.py`
 
 ```python
-from ui.wayland_csd import configure_wayland_csd
-configure_wayland_csd()   # must be called before QApplication is created
+from ui.custom_titlebar import CustomTitleBar
+bar = CustomTitleBar(window, icon=app_icon)
+root_layout.addWidget(bar)
 ```
 
-Configures client-side decorations for Wayland sessions. Must be called **before** `QApplication` is instantiated (called at module level in `KikuMoe.py`).
+`CustomTitleBar(QWidget)` — a minimal CSD title bar drawn entirely by the application. The owning window must have `Qt.WindowType.FramelessWindowHint` set before it is shown. `ListenMoePlayer._init_ui_base()` sets that flag and inserts the title bar at index 0 of the root layout.
 
-On compositors that do not advertise `xdg-decoration-unstable-v1` (server-side decorations), Qt6 may render the window without a title bar or window management buttons. `configure_wayland_csd()` sets `QT_WAYLAND_DECORATION=adwaita` when the variable is not already set by the user, instructing Qt's Wayland backend to use the Adwaita CSD plugin. If the plugin is absent, Qt silently falls back to its own built-in generic CSD. No-op on non-Wayland sessions and on Windows.
+**Public API:**
+
+| Method | Description |
+|---|---|
+| `set_title(title: str)` | Update the text shown in the bar (called by `_apply_window_title`) |
+| `sync_maximize_button()` | Refresh the □ / ❐ button; call from `changeEvent` |
+
+**Drag / resize:** mouse press on the bar calls `QWindow.startSystemMove()`, which delegates the move to the compositor or WM. This is the only correct approach on Wayland and works identically on X11 and Windows. Double-clicking the bar toggles maximize.
+
+**Buttons:** minimize (`─`), maximize/restore (`□` / `❐`), close (`✕`). The close button turns red on hover. Styling is scoped to `#customTitleBar` and never leaks to the global application stylesheet.
