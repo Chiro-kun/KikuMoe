@@ -4,7 +4,7 @@ import os
 import sys
 
 from core.constants import APP_NAME, APP_VERSION
-from core.logger import get_logger
+from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -63,7 +63,8 @@ class PlayerVLC:
             if getattr(self, "_user_agent", None):
                 inst_opts.append(f"--http-user-agent={self._user_agent}")
             self.log.debug("[DEBUG] _init_vlc: creating Instance with opts=%s", inst_opts)
-            self.instance = vlc.Instance(inst_opts)
+            with silence_stderr():
+                self.instance = vlc.Instance(inst_opts)
             if self.instance is None:
                 self.log.debug("[DEBUG] _init_vlc: vlc.Instance() returned None")
                 return

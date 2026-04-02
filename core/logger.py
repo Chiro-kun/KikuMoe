@@ -1,8 +1,14 @@
+import contextlib
 import logging
+import os
 import sys
 from typing import Optional
 
 _DEFAULT_FORMAT = '[%(levelname)s] %(message)s'
+_DEFAULT_LEVEL = logging.INFO
+
+_debug_enabled = False
+_created_loggers: list = []
 
 
 class _SafeTextStream:
@@ -36,9 +42,62 @@ class _SafeTextStream:
         return getattr(self._stream, "encoding", None)
 
 
+@contextlib.contextmanager
+def silence_stderr():
+    """Temporarily redirect C-level stderr (fd 2) to /dev/null.
+
+    Use this around PyAudio/libVLC initialisation to suppress the flood of
+    ALSA/JACK/libVLC probe messages emitted directly by the C library.  Those
+    messages bypass Python's logging and cannot be filtered any other way.
+
+    No-op when debug mode is active (see set_debug()), so that --debug exposes
+    all C-level output alongside the Python DEBUG traces.
+
+    Example::
+
+        with silence_stderr():
+            pa = pyaudio.PyAudio()
+    """
+    if _debug_enabled:
+        yield
+        return
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        saved_fd = os.dup(2)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+        try:
+            yield
+        finally:
+            os.dup2(saved_fd, 2)
+            os.close(saved_fd)
+    except Exception:
+        yield
+
+
+def set_debug(enabled: bool) -> None:
+    """Enable or disable DEBUG-level output for all KikuMoe loggers.
+
+    Call this before creating any player or UI objects (i.e. right at startup,
+    before ListenMoePlayer() is instantiated) so that every subsequent
+    get_logger() call picks up the correct level.  Already-created loggers are
+    updated in-place as well.
+    """
+    global _debug_enabled
+    _debug_enabled = bool(enabled)
+    level = logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL
+    for lg in _created_loggers:
+        try:
+            lg.setLevel(level)
+        except Exception:
+            pass
+
+
 def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """Return a configured logger that logs to stdout at DEBUG level by default.
-    It avoids adding duplicate handlers on repeated calls.
+    """Return a configured logger writing to stdout.
+
+    The effective level is DEBUG when debug mode is active (see set_debug()),
+    and INFO otherwise.  Duplicate handlers are never added on repeated calls.
     """
     lname = name or 'KikuMoe'
     logger = logging.getLogger(lname)
@@ -47,6 +106,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
         formatter = logging.Formatter(_DEFAULT_FORMAT)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL)
         logger.propagate = False
+        _created_loggers.append(logger)
     return logger

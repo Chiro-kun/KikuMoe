@@ -7,7 +7,7 @@ import subprocess
 import sys
 import struct
 import re
-from core.logger import get_logger
+from core.logger import get_logger, silence_stderr
 from PyQt5.QtCore import QSettings
 from core.constants import APP_NAME, APP_VERSION, ORG_NAME, APP_SETTINGS, KEY_AUDIO_DEVICE_INDEX
 
@@ -51,7 +51,8 @@ class PlayerFFmpeg:
         if pyaudio is None:
             return
         try:
-            self._pyaudio_instance = pyaudio.PyAudio()
+            with silence_stderr():
+                self._pyaudio_instance = pyaudio.PyAudio()
             self._ready = True
         except Exception:
             self._ready = False
