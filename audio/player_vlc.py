@@ -23,6 +23,10 @@ class PlayerVLC:
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
+        # Set when stop()/play_url() is in progress so that stale VLC events
+        # (EndReached, EncounteredError) fired during teardown do not trigger
+        # restart logic in the main window.
+        self._stopping: bool = False
         # Build dynamic User-Agent similar to ffmpeg backend
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -123,7 +127,9 @@ class PlayerVLC:
             return False
         try:
             assert self.instance is not None and self.player is not None
-            # Force stop current stream
+            # Suppress stale events (EndReached / EncounteredError) that VLC
+            # fires when tearing down the previous stream.
+            self._stopping = True
             self.player.stop()
             # Clear media to force connection close
             self.player.set_media(None)
@@ -139,9 +145,13 @@ class PlayerVLC:
             except Exception:
                 pass
             self.player.set_media(media)
+            # Re-enable events before starting playback so the new stream's
+            # Opening / Playing / Error events are forwarded normally.
+            self._stopping = False
             self.player.play()
             return True
         except Exception:
+            self._stopping = False
             self._emit('error', None)
             return False
 
@@ -151,13 +161,16 @@ class PlayerVLC:
             return
         try:
             assert self.player is not None
+            self._stopping = True
             # Stop and clear media
             self.player.stop()
             self.player.set_media(None)
             # Force cleanup of any remaining connections
             self.force_kill_all_vlc()
+            self._stopping = False
             self._emit('stopped', None)
         except Exception:
+            self._stopping = False
             self._emit('error', None)
 
     def pause_toggle(self) -> None:
@@ -225,10 +238,22 @@ class PlayerVLC:
         elif et == vlc.EventType.MediaPlayerPaused:
             self._emit('paused', None)
         elif et == vlc.EventType.MediaPlayerStopped:
+            # stop() / play_url() already emit 'stopped' manually; suppress
+            # the duplicate event from VLC's callback thread.
+            if self._stopping:
+                return
             self._emit('stopped', None)
         elif et == vlc.EventType.MediaPlayerEndReached:
+            # Absorb stale EndReached fired while we are tearing down the
+            # previous stream (same guard as PlayerMPV._stopping).
+            if self._stopping:
+                return
             self._emit('ended', None)
         elif et == vlc.EventType.MediaPlayerEncounteredError:
+            # Absorb errors fired during intentional stop/restart teardown so
+            # that they do not schedule a spurious extra restart in the UI.
+            if self._stopping:
+                return
             self._emit('error', None)
 
     # -------- Dettagli/diagnostica VLC --------
@@ -272,14 +297,16 @@ class PlayerVLC:
         try:
             # Force cleanup
             assert self.player is not None
+            self._stopping = True
             self.player.stop()
             self.player.set_media(None)
             import time
             time.sleep(0.2)
             # Force kill any remaining VLC processes
             self.force_kill_all_vlc()
+            self._stopping = False
         except Exception:
-            pass
+            self._stopping = False
 
     def _force_complete_cleanup(self) -> None:
         """Force complete cleanup by recreating VLC instance."""
