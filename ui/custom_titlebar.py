@@ -43,6 +43,10 @@ _STYLE = """
         background-color: #3a3a3a;
         color: #ffffff;
     }
+    #customTitleBar QPushButton#titleBarBtnClose {
+        font-size: 24px;
+        font-weight: 700;
+    }
     #customTitleBar QPushButton#titleBarBtnClose:hover {
         background-color: #c0392b;
         color: #ffffff;
@@ -51,7 +55,7 @@ _STYLE = """
 
 
 class CustomTitleBar(QWidget):
-    """Minimal CSD title bar: icon · title · [─] [□] [✕]."""
+    """Minimal CSD title bar: icon · title · [—] [□] [✖]."""
 
     HEIGHT = _TITLE_BAR_HEIGHT
 
@@ -90,7 +94,7 @@ class CustomTitleBar(QWidget):
         self._btn_max.setToolTip("Ingrandisci")
         self._btn_max.setFixedSize(_BTN_SIZE)
 
-        self._btn_close = QPushButton("×")
+        self._btn_close = QPushButton("✖")
         self._btn_close.setObjectName("titleBarBtnClose")
         self._btn_close.setToolTip("Chiudi")
         self._btn_close.setFixedSize(_BTN_SIZE)
