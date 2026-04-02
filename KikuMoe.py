@@ -3,11 +3,14 @@ import os
 import traceback
 from PyQt6.QtWidgets import QApplication
 from ui.main_window import ListenMoePlayer
+from ui.wayland_csd import configure_wayland_csd
 
 _IS_WIN32 = sys.platform == "win32"
 
 if not _IS_WIN32 and "QT_QPA_PLATFORM" not in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
+
+configure_wayland_csd()
 
 
 def _write_crash_log(exc: BaseException) -> str:
