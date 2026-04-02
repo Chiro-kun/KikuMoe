@@ -2,7 +2,9 @@
 name = "kikumoe"
 version = "1.9.0"
 description = "LISTEN.moe desktop radio player"
-authors = []
+authors = ["Chiro", "alsog"]
+homepage = "https://git.alsogamer.com/chiro/KikuMoe"
+repository = "https://git.alsogamer.com/chiro/kikumoe.git"
 license = "MIT"
 readme = "README.md"
 package-mode = false
