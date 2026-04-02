@@ -1005,7 +1005,9 @@ class ListenMoePlayer(QWidget):
                     self._skip_session_reset_once = True
                     if getattr(self, "_ui_paused", False):
                         try:
-                            self.log.info("[UI] Ignored 'ended' event because player is intentionally paused.")
+                            self.log.info(
+                                "[UI] Ignored 'ended' event because player is intentionally paused."
+                            )
                         except Exception:
                             pass
                     elif not getattr(self, "_retry_pending", False):
@@ -1033,22 +1035,29 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(self.t("status_error"))
                 self.buffering_visible.emit(False)
                 self._skip_session_reset_once = True
-                
+
                 if not getattr(self, "_retry_pending", False):
                     self._retry_count += 1
                     if self._retry_count <= self._max_retries:
                         self._retry_pending = True
                         # Exponential backoff: 1.2s * 1.5 ^ retry_count (cap at 30s)
-                        delay = int(min(30000, 1200 * (1.5 ** self._retry_count)))
+                        delay = int(min(30000, 1200 * (1.5**self._retry_count)))
                         self.schedule_play.emit(delay)
-                        self.log.info(f"[UI] Playback restart scheduled in {delay}ms (retry {self._retry_count})")
+                        self.log.info(
+                            f"[UI] Playback restart scheduled in {delay}ms"
+                            f" (retry {self._retry_count})"
+                        )
                         # Only notify on the first failure to avoid toast spam
                         if self._retry_count == 1:
                             self.notify_tray.emit("Listen.moe", self.t("status_restarting"))
                     else:
-                        self.log.error(f"[UI] Maximum retries ({self._retry_count}) reached. Giving up.")
+                        self.log.error(
+                            f"[UI] Maximum retries ({self._retry_count}) reached. Giving up."
+                        )
                         # Always notify when we stop permanently
-                        self.notify_tray.emit("Listen.moe", "Errore persistente: ricarica interrotta.")
+                        self.notify_tray.emit(
+                            "Listen.moe", "Errore persistente: ricarica interrotta."
+                        )
             self._refresh_play_button_text()
         except Exception:
             pass
@@ -2805,7 +2814,7 @@ class ListenMoePlayer(QWidget):
                         self.tray_mgr.update_controls_state(not new_paused, new_paused, is_muted)
                 except Exception:
                     pass
-                
+
                 if not new_paused:
                     try:
                         is_playing = getattr(self.player, "is_playing", lambda: False)()
@@ -2814,18 +2823,18 @@ class ListenMoePlayer(QWidget):
                             needs_play = True
                     except Exception:
                         pass
-                
+
                 if not needs_play:
                     # Esegui il toggle del backend
                     self.player.pause_toggle()
-                
+
                 # Gestisci il session timer e aggiorna solo il tooltip
                 try:
                     self._apply_session_timer_running_state(not new_paused)
                 except Exception:
                     pass
                 self._refresh_play_button_text(not new_paused)
-                
+
             if needs_play:
                 try:
                     self.log.info("[UI] Backend stopped during pause, restarting stream.")

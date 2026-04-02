@@ -49,7 +49,8 @@ _found_libmpv = _find_libmpv_path()
 if _found_libmpv:
     _dll_dir = str(Path(_found_libmpv).parent)
     if _IS_WIN32:
-        # Forza python-mpv a usare questa specifica DLL (utile per nomi non standard come libmpv-2.dll)
+        # Forza python-mpv a usare questa specifica DLL
+        # (utile per nomi non standard come libmpv-2.dll)
         os.environ["MPV_PATH"] = _found_libmpv
         # Aggiungi al PATH per sicurezza
         os.environ["PATH"] = _dll_dir + os.pathsep + os.environ.get("PATH", "")
@@ -161,7 +162,9 @@ class PlayerMPV:
 
             self._ready = True
             try:
-                self.log.info("[BACKEND] PlayerMPV: backend initialized (version: %s)", self.get_version())
+                self.log.info(
+                    "[BACKEND] PlayerMPV: backend initialized (version: %s)", self.get_version()
+                )
             except Exception:
                 pass
         except Exception as e:
