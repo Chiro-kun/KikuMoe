@@ -1,8 +1,9 @@
 from __future__ import annotations
-from typing import Optional, Tuple
+
 import time
 
 # Utilities to compute and format mm:ss strings for display
+
 
 def _format_mmss(total_seconds: int) -> str:
     if total_seconds < 0:
@@ -11,7 +12,7 @@ def _format_mmss(total_seconds: int) -> str:
     return f"{m:02d}:{s:02d}"
 
 
-def compute_remaining(duration_seconds: Optional[int], start_epoch: Optional[float]) -> Optional[int]:
+def compute_remaining(duration_seconds: int | None, start_epoch: float | None) -> int | None:
     """Compute remaining seconds given duration and start epoch seconds.
     Returns None if cannot compute.
     """
@@ -25,7 +26,9 @@ def compute_remaining(duration_seconds: Optional[int], start_epoch: Optional[flo
     return remaining
 
 
-def compute_display_mmss(duration_seconds: Optional[int], start_epoch: Optional[float]) -> Tuple[str, bool]:
+def compute_display_mmss(
+    duration_seconds: int | None, start_epoch: float | None
+) -> tuple[str, bool]:
     """Return (mm:ss, is_remaining) where is_remaining indicates whether the value
     represents remaining time (True) or total duration (False) when remaining
     is unavailable.

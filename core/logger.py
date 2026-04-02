@@ -4,7 +4,7 @@ import os
 import sys
 from typing import Optional
 
-_DEFAULT_FORMAT = '[%(levelname)s] %(message)s'
+_DEFAULT_FORMAT = "[%(levelname)s] %(message)s"
 _DEFAULT_LEVEL = logging.INFO
 
 _debug_enabled = False
@@ -19,11 +19,13 @@ class _SafeTextStream:
 
     def write(self, text: str) -> int:
         try:
-            return self._stream.write(text)
+            return int(self._stream.write(text))
         except UnicodeEncodeError:
             encoding = getattr(self._stream, "encoding", None) or "utf-8"
-            safe = text.encode(encoding, errors="backslashreplace").decode(encoding, errors="ignore")
-            return self._stream.write(safe)
+            safe = text.encode(encoding, errors="backslashreplace").decode(
+                encoding, errors="ignore"
+            )
+            return int(self._stream.write(safe))
 
     def flush(self) -> None:
         try:
@@ -99,7 +101,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     The effective level is DEBUG when debug mode is active (see set_debug()),
     and INFO otherwise.  Duplicate handlers are never added on repeated calls.
     """
-    lname = name or 'KikuMoe'
+    lname = name or "KikuMoe"
     logger = logging.getLogger(lname)
     if not logger.handlers:
         handler = logging.StreamHandler(_SafeTextStream(sys.stdout))

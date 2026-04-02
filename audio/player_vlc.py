@@ -1,7 +1,8 @@
 from __future__ import annotations
-from typing import Optional, Callable
+
 import os
 import sys
+from typing import Callable
 
 from core.constants import APP_NAME, APP_VERSION
 from core.logger import get_logger, silence_stderr
@@ -15,12 +16,19 @@ except Exception:
 
 
 class PlayerVLC:
-    def __init__(self, libvlc_path: Optional[str] = None, on_event: Optional[Callable[[str, Optional[int]], None]] = None, network_caching_ms: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        libvlc_path: str | None = None,
+        on_event: Callable[[str, int | None], None] | None = None,
+        network_caching_ms: int | None = None,
+    ) -> None:
         self._vlc_path = libvlc_path
         self._on_event = on_event
-        self._network_caching_ms: Optional[int] = int(network_caching_ms) if network_caching_ms is not None else None
-        self.instance: Optional['vlc.Instance'] = None
-        self.player: Optional['vlc.MediaPlayer'] = None
+        self._network_caching_ms: int | None = (
+            int(network_caching_ms) if network_caching_ms is not None else None
+        )
+        self.instance: vlc.Instance | None = None
+        self.player: vlc.MediaPlayer | None = None
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
@@ -28,7 +36,7 @@ class PlayerVLC:
         # (EndReached, EncounteredError) fired during teardown do not trigger
         # restart logic in the main window.
         self._stopping: bool = False
-        self.log = get_logger('PlayerVLC')
+        self.log = get_logger("PlayerVLC")
         # Build dynamic User-Agent similar to ffmpeg backend
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -45,7 +53,7 @@ class PlayerVLC:
         if self._vlc_path and os.path.isdir(self._vlc_path):
             try:
                 if _IS_WIN32:
-                    os.add_dll_directory(self._vlc_path)
+                    os.add_dll_directory(self._vlc_path)  # type: ignore[attr-defined]
                 else:
                     plugins_path = os.path.join(self._vlc_path, "plugins")
                     if os.path.isdir(plugins_path):
@@ -98,7 +106,7 @@ class PlayerVLC:
     def is_ready(self) -> bool:
         return bool(self._ready and self.instance is not None and self.player is not None)
 
-    def reinitialize(self, libvlc_path: Optional[str], network_caching_ms: Optional[int] = None) -> bool:
+    def reinitialize(self, libvlc_path: str | None, network_caching_ms: int | None = None) -> bool:
         self._vlc_path = libvlc_path
         if network_caching_ms is not None:
             try:
@@ -108,7 +116,7 @@ class PlayerVLC:
         self._init_vlc()
         return self.is_ready()
 
-    def _emit(self, code: str, value: Optional[int] = None) -> None:
+    def _emit(self, code: str, value: int | None = None) -> None:
         if self._on_event:
             try:
                 self._on_event(code, value)
@@ -119,7 +127,7 @@ class PlayerVLC:
         self.log.debug("[DEBUG] play_url: url=%s", url)
         if not self.is_ready():
             self.log.debug("[DEBUG] play_url: not ready, emitting libvlc_init_failed")
-            self._emit('libvlc_init_failed', None)
+            self._emit("libvlc_init_failed", None)
             return False
         try:
             assert self.instance is not None and self.player is not None
@@ -150,7 +158,7 @@ class PlayerVLC:
             if media is None:
                 self.log.debug("[DEBUG] play_url: media_new returned None")
                 self._stopping = False
-                self._emit('error', None)
+                self._emit("error", None)
                 return False
             try:
                 if getattr(self, "_user_agent", None):
@@ -164,19 +172,19 @@ class PlayerVLC:
             self.log.debug("[DEBUG] play_url: play() returned %s", ret)
             if ret != 0:
                 self.log.debug("[DEBUG] play_url: play() returned error code %s", ret)
-                self._emit('error', None)
+                self._emit("error", None)
                 return False
             return True
         except Exception as e:
             self.log.debug("[DEBUG] play_url: exception: %s", e)
             self._stopping = False
-            self._emit('error', None)
+            self._emit("error", None)
             return False
 
     def stop(self) -> None:
         self.log.debug("[DEBUG] stop: called")
         if not self.is_ready():
-            self._emit('libvlc_init_failed', None)
+            self._emit("libvlc_init_failed", None)
             return
         try:
             assert self.player is not None
@@ -184,22 +192,22 @@ class PlayerVLC:
             self.player.stop()
             self.force_kill_all_vlc()
             self._stopping = False
-            self._emit('stopped', None)
+            self._emit("stopped", None)
             self.log.debug("[DEBUG] stop: done")
         except Exception as e:
             self.log.debug("[DEBUG] stop: exception: %s", e)
             self._stopping = False
-            self._emit('error', None)
+            self._emit("error", None)
 
     def pause_toggle(self) -> None:
         if not self.is_ready():
-            self._emit('libvlc_init_failed', None)
+            self._emit("libvlc_init_failed", None)
             return
         try:
             assert self.player is not None
             self.player.pause()
         except Exception:
-            self._emit('error', None)
+            self._emit("error", None)
 
     def set_volume(self, vol: int) -> None:
         self._volume = max(0, min(100, int(vol)))
@@ -209,7 +217,7 @@ class PlayerVLC:
             assert self.player is not None
             self.player.audio_set_volume(self._volume)
         except Exception:
-            self._emit('error', None)
+            self._emit("error", None)
 
     def set_mute(self, mute: bool) -> None:
         self._muted = bool(mute)
@@ -219,7 +227,7 @@ class PlayerVLC:
             assert self.player is not None
             self.player.audio_set_mute(self._muted)
         except Exception:
-            self._emit('error', None)
+            self._emit("error", None)
 
     def get_volume(self) -> int:
         return self._volume
@@ -231,6 +239,7 @@ class PlayerVLC:
         if not self.is_ready():
             return False
         try:
+            assert self.player is not None
             st = self.player.get_state()
             return st in (vlc.State.Playing, vlc.State.Buffering, vlc.State.Opening)
         except Exception:
@@ -243,52 +252,52 @@ class PlayerVLC:
         et = event.type
         self.log.debug("[DEBUG] _handle_event: type=%s stopping=%s", et, self._stopping)
         if et == vlc.EventType.MediaPlayerOpening:
-            self._emit('opening', None)
+            self._emit("opening", None)
         elif et == vlc.EventType.MediaPlayerBuffering:
             # Try to extract percentage
             pct = None
             try:
-                pct = int(getattr(getattr(event, 'u', None), 'new_cache', 0))
+                pct = int(getattr(getattr(event, "u", None), "new_cache", 0))
             except Exception:
                 pct = None
-            self._emit('buffering', pct)
+            self._emit("buffering", pct)
         elif et == vlc.EventType.MediaPlayerPlaying:
-            self._emit('playing', None)
+            self._emit("playing", None)
         elif et == vlc.EventType.MediaPlayerPaused:
-            self._emit('paused', None)
+            self._emit("paused", None)
         elif et == vlc.EventType.MediaPlayerStopped:
             # stop() / play_url() already emit 'stopped' manually; suppress
             # the duplicate event from VLC's callback thread.
             if self._stopping:
                 return
-            self._emit('stopped', None)
+            self._emit("stopped", None)
         elif et == vlc.EventType.MediaPlayerEndReached:
             # Absorb stale EndReached fired while we are tearing down the
             # previous stream (same guard as PlayerMPV._stopping).
             if self._stopping:
                 return
-            self._emit('ended', None)
+            self._emit("ended", None)
         elif et == vlc.EventType.MediaPlayerEncounteredError:
             # Absorb errors fired during intentional stop/restart teardown so
             # that they do not schedule a spurious extra restart in the UI.
             if self._stopping:
                 return
-            self._emit('error', None)
+            self._emit("error", None)
 
     # -------- Dettagli/diagnostica VLC --------
-    def get_version(self) -> Optional[str]:
+    def get_version(self) -> str | None:
         """Return libVLC version string if available, otherwise None."""
         if vlc is None:
             return None
         try:
             ver = vlc.libvlc_get_version()  # type: ignore[attr-defined]
             if isinstance(ver, bytes):
-                ver = ver.decode(errors='ignore')
+                ver = ver.decode(errors="ignore")
             return str(ver)
         except Exception:
             return None
 
-    def get_configured_path(self) -> Optional[str]:
+    def get_configured_path(self) -> str | None:
         """Return configured libvlc path (folder) or None if using system/PATH."""
         return self._vlc_path
 
@@ -296,13 +305,20 @@ class PlayerVLC:
         """Force kill all VLC processes as last resort."""
         try:
             import subprocess
+
             if _IS_WIN32:
-                subprocess.run(["taskkill", "/f", "/im", "vlc.exe"],
-                               capture_output=True, check=False,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-                subprocess.run(["taskkill", "/f", "/im", "libvlc.dll"],
-                               capture_output=True, check=False,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(
+                    ["taskkill", "/f", "/im", "vlc.exe"],
+                    capture_output=True,
+                    check=False,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                )
+                subprocess.run(
+                    ["taskkill", "/f", "/im", "libvlc.dll"],
+                    capture_output=True,
+                    check=False,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                )
             else:
                 subprocess.run(["pkill", "-f", "vlc"], capture_output=True, check=False)
                 subprocess.run(["pkill", "-f", "libvlc"], capture_output=True, check=False)
@@ -332,7 +348,7 @@ class PlayerVLC:
             # Save current volume and mute state
             current_volume = self._volume
             current_mute = self._muted
-            
+
             # Stop and release current player
             if self.player:
                 try:
@@ -340,26 +356,27 @@ class PlayerVLC:
                     self.player.set_media(None)
                 except Exception:
                     pass
-            
+
             # Release the instance completely
             if self.instance:
                 try:
                     self.instance.release()
                 except Exception:
                     pass
-            
+
             # Clear references
             self.player = None
             self.instance = None
             self._ready = False
-            
+
             # Wait longer for complete cleanup
             import time
+
             time.sleep(0.5)
-            
+
             # Reinitialize VLC
             self._init_vlc()
-            
+
             # Restore volume and mute state
             if self.is_ready():
                 self.set_volume(current_volume)
