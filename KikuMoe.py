@@ -37,11 +37,13 @@ def main() -> int:
         window = ListenMoePlayer()
         window.show()
         return app.exec()
-    except Exception as exc:
+    except BaseException as exc:
         log_path = _write_crash_log(exc)
         try:
-            print("Startup crash:", exc)
-            print("Dettagli in:", log_path)
+            print(f"\n--- CRITICAL STARTUP ERROR ---")
+            print(f"Type: {type(exc).__name__}")
+            print(f"Error: {exc}")
+            print(f"Details written to: {log_path}\n")
         except Exception:
             pass
         return 1
