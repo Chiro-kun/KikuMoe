@@ -266,3 +266,16 @@ apply_windows_titlebar_dark_mode(hwnd)
 ```
 
 Calls `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` via `ctypes`. No-op on non-Windows platforms.
+
+---
+
+### `wayland_csd.py`
+
+```python
+from ui.wayland_csd import configure_wayland_csd
+configure_wayland_csd()   # must be called before QApplication is created
+```
+
+Configures client-side decorations for Wayland sessions. Must be called **before** `QApplication` is instantiated (called at module level in `KikuMoe.py`).
+
+On compositors that do not advertise `xdg-decoration-unstable-v1` (server-side decorations), Qt6 may render the window without a title bar or window management buttons. `configure_wayland_csd()` sets `QT_WAYLAND_DECORATION=adwaita` when the variable is not already set by the user, instructing Qt's Wayland backend to use the Adwaita CSD plugin. If the plugin is absent, Qt silently falls back to its own built-in generic CSD. No-op on non-Wayland sessions and on Windows.
