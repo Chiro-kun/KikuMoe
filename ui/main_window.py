@@ -21,6 +21,8 @@ from audio.player_vlc import PlayerVLC
 from core.config import STREAMS
 from ui.settings_dialog import SettingsDialog
 from core.constants import (
+    APP_NAME,
+    APP_VERSION,
     APP_TITLE,
     ORG_NAME,
     APP_SETTINGS,
