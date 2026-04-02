@@ -27,6 +27,7 @@ I18N: Dict[str, Dict[str, str]] = {
         'ws_closed_reconnect': 'In riproduzione: WS chiuso, riconnessione...',
         'ws_error_prefix': 'In riproduzione: errore WS: ',
         'unknown': 'Sconosciuto',
+        'live_mode': 'LIVE',
         # Timer di sessione
         'session_timer': 'Sessione: {time}',
         'settings_session_timer_enable': 'Mostra timer di sessione',
@@ -150,6 +151,7 @@ I18N: Dict[str, Dict[str, str]] = {
         'ws_closed_reconnect': 'Now Playing: WS closed, reconnecting...',
         'ws_error_prefix': 'Now Playing: WS error: ',
         'unknown': 'Unknown',
+        'live_mode': 'LIVE',
         # Session timer
         'session_timer': 'Session: {time}',
         'settings_session_timer_enable': 'Show session timer',
