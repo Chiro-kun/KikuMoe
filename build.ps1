@@ -12,4 +12,4 @@ Write-Host "Running: poetry run python -m PyInstaller --noconfirm --clean $specP
 poetry run python -m PyInstaller --noconfirm --clean $specPath
 
 Write-Host "Done. Output:" -ForegroundColor Cyan
-Write-Host "  dist\KikuMoe-1.9.0.exe"
+Write-Host "  dist\KikuMoe-1.10.0.exe"

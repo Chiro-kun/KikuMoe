@@ -39,11 +39,11 @@ class PlayerFFmpeg:
         # Track pause state explicitly
         self._paused: bool = False
         self.log = get_logger('PlayerFFmpeg')
-        # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.9.0")
+        # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.10.0")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
         except Exception:
-            self._user_agent = "KikuMoe/1.9.0"
+            self._user_agent = "KikuMoe/1.10.0"
         self._init_audio()
 
     # PortAudio host API type constants (from portaudio.h)

@@ -39,7 +39,7 @@ KEY_AUDIO_BACKEND         = "audio_backend"   # 'auto' | 'ffmpeg' | 'mpv' | 'vlc
 Version is resolved in order from:
 1. `version.yml` (key `version:`) at the repo root or inside `_MEIPASS` (onefile)
 2. `packaging/windows/version_info.txt` (`FileVersion` field or `filevers` tuple)
-3. Hardcoded fallback `"1.9.0"`
+3. Hardcoded fallback `"1.10.0"`
 
 ---
 
@@ -51,11 +51,13 @@ Stream URL dictionary. Single source of truth for LISTEN.moe endpoints.
 STREAMS = {
     "J-POP": {
         "Vorbis": "https://listen.moe/stream",
-        "MP3":    "https://listen.moe/mp3",
+        "Opus":   "https://listen.moe/opus",
+        "MP3":    "https://listen.moe/fallback",
     },
     "K-POP": {
         "Vorbis": "https://listen.moe/kpop/stream",
-        "MP3":    "https://listen.moe/kpop/mp3",
+        "Opus":   "https://listen.moe/kpop/opus",
+        "MP3":    "https://listen.moe/kpop/fallback",
     },
 }
 ```
@@ -95,7 +97,7 @@ log.info("backend selected") # always visible
 
 - `get_logger(name)` — returns a `logging.Logger` writing to `stdout`. Default level is `INFO`; `DEBUG` traces are hidden unless the app is started with `--debug`.
 - `set_debug(enabled)` — switches all created loggers between `DEBUG` and `INFO`. Called once at startup by `KikuMoe.py` when `--debug` is detected.
-- `silence_stderr()` — context manager that redirects C-level fd 2 to `/dev/null` for the duration of the block. Used around `PyAudio()` and `vlc.Instance()` to suppress ALSA/JACK/libVLC probe noise. No-op when debug mode is active so `--debug` exposes those messages too.
+- `silence_stderr()` — context manager that redirects C-level fd 2 to `/dev/null` for the duration of the block. Used around `PyAudio()` and `vlc.Instance()` to suppress ALSA/JACK/libVLC probe noise. **No-op when debug mode is active** so `--debug` exposes those messages too.
 
 On Windows, `stdout` is wrapped in `_SafeTextStream` to prevent `UnicodeEncodeError` with codepage cp1252.
 
@@ -241,7 +243,9 @@ Non-modal window. Reads and writes directly to `QSettings`. On close, emits `set
 
 ### `tray_manager.py`
 
-Manages `QSystemTrayIcon` and its `QMenu`. The menu is built dynamically on each open to reflect current state. Dark mode applied via inline Qt stylesheet.
+Manages `QSystemTrayIcon` and its `QMenu`. The menu is built dynamically on each open to reflect current state. Includes:
+- **Custom Styling**: Dark mode applied via inline QSS (Qt Style Sheets) with magenta accents.
+- **Screen Awareness**: Logic to "nudge" the menu and submenus to the left if they would overflow the right edge of the screen (typically when the tray is on the right).
 
 ---
 

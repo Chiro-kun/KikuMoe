@@ -1,4 +1,4 @@
-# KikuMoe
+# KikuMoe v1.10.0
 
 Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt6.  
 Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).
@@ -31,7 +31,7 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 | MPV | qualsiasi | Secondo fallback; richiede `libmpv` installato nel sistema |
 | VLC Desktop | 3.x | Ultimo fallback se FFmpeg e MPV non sono disponibili |
 
-**Dipendenze Python** (installate automaticamente con `pip`):
+**Dipendenze Python** (gestite via `poetry`):
 
 ```
 PyQt6 >= 6.4.0
@@ -51,8 +51,8 @@ pyaudio >= 0.2.11
 ### 1. Clona o scarica il repository
 
 ```bash
-git clone https://git.alsogamer.com/chiro/KikuMoe.git
-cd KikuMoe
+git clone https://git.alsogamer.com/chiro/kikumoe.git
+cd kikumoe
 ```
 
 ### 2. Installa FFmpeg (se non è già nel PATH)
@@ -92,7 +92,11 @@ poetry install
 Dalla root del repository:
 
 ```bash
-python KikuMoe/KikuMoe.py
+python KikuMoe.py
+
+# Per avviare in modalità debug (mostra i log interni)
+# Nota: in questa modalità i log di sistema (ALSA, VLC) non vengono silenziati
+python KikuMoe.py --debug
 ```
 
 ---
@@ -116,9 +120,11 @@ La finestra principale è composta da tre sezioni:
 | Canale | Formato | URL stream |
 |---|---|---|
 | J-POP | Vorbis | `https://listen.moe/stream` |
-| J-POP | MP3 | `https://listen.moe/mp3` |
+| J-POP | Opus | `https://listen.moe/opus` |
+| J-POP | MP3 | `https://listen.moe/fallback` |
 | K-POP | Vorbis | `https://listen.moe/kpop/stream` |
-| K-POP | MP3 | `https://listen.moe/kpop/mp3` |
+| K-POP | Opus | `https://listen.moe/kpop/opus` |
+| K-POP | MP3 | `https://listen.moe/kpop/fallback` |
 
 Cambiare canale o formato riavvia automaticamente lo stream.
 
@@ -148,7 +154,7 @@ Apri le Impostazioni dal menu del tray o dal pulsante nella finestra principale.
 |---|---|
 | Lingua | Italiano o English |
 | Canale predefinito | J-POP o K-POP |
-| Formato predefinito | Vorbis o MP3 |
+| Formato predefinito | Vorbis, Opus o MP3 |
 | Riproduzione automatica | Avvia lo stream all'apertura dell'app |
 | Backend audio | `Automatico` (FFmpeg → MPV → VLC), `FFmpeg`, `MPV` o `VLC` |
 | Uscita audio | Dispositivo di output (enumerato da PyAudio) |
@@ -173,7 +179,7 @@ Le impostazioni vengono salvate tramite `QSettings` (registro di sistema su Wind
 | `Space` | Play / Pausa |
 | `S` | Stop |
 | `M` | Muto / Unmute |
-| `↑` oppure `+` | Volume +5% |
+| `↑` oppure `+` oppure `=` | Volume +5% |
 | `↓` oppure `-` | Volume −5% |
 
 ---
@@ -248,11 +254,16 @@ Apri le Impostazioni e seleziona il dispositivo di uscita corretto dall'elenco.
 - Aumenta il **Network caching** nelle Impostazioni (es. 2000–3000 ms).
 - Usa il pulsante **Stop forzato** per resettare il processo audio, poi riprova.
 
-**Log di crash**
-
 In caso di errore fatale l'applicazione scrive un log in:
+
+**Windows:**
 ```
 %LOCALAPPDATA%\KikuMoe\crash.log
+```
+
+**Linux:**
+```
+~/.local/share/KikuMoe/crash.log
 ```
 
 ---
@@ -278,6 +289,20 @@ $env:VLC_DIR = "C:\Percorso\A\VLC"
 .\build.ps1
 ```
 
-La configurazione PyInstaller si trova in `packaging/windows/kikumoe.spec`.
+La configurazione PyInstaller si trova in `kikumoe.spec`.
 
 > Il build è supportato **solo su Windows**. Per eseguire l'applicazione da sorgente su Linux o macOS, vedi [Installazione](#installazione).
+
+---
+
+## Crediti
+
+Sviluppato da:
+- **Chiro**
+- **alsog**
+
+Homepage del progetto: [git.alsogamer.com/chiro/KikuMoe](https://git.alsogamer.com/chiro/KikuMoe)
+
+## Licenza
+
+Questo progetto è distribuito sotto licenza **MIT**. Consulta il file `LICENSE` per i dettagli.

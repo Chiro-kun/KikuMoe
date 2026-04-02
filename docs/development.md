@@ -6,8 +6,8 @@ Dependencies are managed with [Poetry](https://python-poetry.org/).
 
 ```bash
 # Clone the repository
-git clone https://git.alsogamer.com/chiro/KikuMoe.git
-cd KikuMoe
+git clone https://git.alsogamer.com/chiro/kikumoe.git
+cd kikumoe
 
 # Install all dependencies (runtime + dev: pyinstaller, mypy, ruff)
 poetry install --with dev
@@ -104,7 +104,7 @@ Strings are accessed everywhere via `self._i18n.t("key")`. A runtime language sw
 The version is defined in `version.yml` at the repository root:
 
 ```yaml
-version: 1.9.0
+version: 1.10.0
 ```
 
 To release a new version:
@@ -134,7 +134,7 @@ poetry run ruff format .
 poetry run mypy .
 ```
 
-Configuration for both tools lives in `pyproject.toml` under `[tool.ruff]` and `[tool.mypy]`.
+Configuration for both tools lives in `pyproject.toml` (requires `mypy >= 1.0` and `ruff >= 0.4`).
 
 ---
 
