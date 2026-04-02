@@ -11,4 +11,4 @@ cd "$PROJECT_ROOT"
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
 echo "Done. Output:"
-echo "  dist/KikuMoe-1.9.0"
+echo "  dist/KikuMoe-1.10.0"

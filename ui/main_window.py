@@ -1445,7 +1445,7 @@ class ListenMoePlayer(QWidget):
         try:
             req = urllib.request.Request(
                 cover_url,
-                headers={"User-Agent": "KikuMoe/1.9.0"}
+                headers={"User-Agent": "KikuMoe/1.10.0"}
             )
             with urllib.request.urlopen(req, timeout=8) as res:
                 chunk = res.read((4 * 1024 * 1024) + 1)

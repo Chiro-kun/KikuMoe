@@ -109,7 +109,7 @@ Synchronization uses an `RLock` inside the player and Qt signals for marshaling 
 ```
 1.  User → clicks Play
 2.  ListenMoePlayer._play_stream()
-3.  Selects URL from STREAMS[channel][format]
+3.  Selects URL from STREAMS[channel][format] (Vorbis, Opus, or MP3)
 4.  player.play(url)
 5.  Backend starts FFmpeg / MPV / VLC
 6.  Callback on_event("opening")       → status_changed.emit("Opening…")
