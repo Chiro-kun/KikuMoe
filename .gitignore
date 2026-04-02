@@ -1,0 +1,77 @@
+# Ignora file non necessari per gli utenti esterni
+
+# Python bytecode e cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Ambienti virtuali
+.venv/
+venv/
+env/
+ENV/
+.venv*/
+venv*/
+.conda/
+
+# Dipendenze/packaging e build
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+.wheelhouse/
+
+# Log installer Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test/coverage
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache/
+.pytest_cache/
+hypothesis/
+.hypothesis/
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Tipizzazione/analisi statica
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+# File di sistema
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Log e backup temporanei
+*.log
+*.bak
+*.swp
+*.swo
+
+# Artefatti Qt/QML (se generati)
+*.qmlc
+*.jsc
+
+# Binari nativi (non versionare librerie locali come VLC)
+*.dll
+*.so
+*.dylib
