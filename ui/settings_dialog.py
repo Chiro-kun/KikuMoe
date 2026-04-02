@@ -9,7 +9,7 @@ from core.i18n import I18n
 
 _IS_WIN32 = sys.platform == "win32"
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
-from ui.custom_titlebar import CustomTitleBar
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from core.logger import silence_stderr
 from core.constants import (
     ORG_NAME,
@@ -54,6 +54,7 @@ class SettingsDialog(QDialog):
         self._title_bar = CustomTitleBar(self)
         self._title_bar.set_title(self.i18n.t('settings_title'))
         root_layout.addWidget(self._title_bar)
+        install_size_grip(self)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(16, 16, 16, 16)

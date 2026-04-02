@@ -54,7 +54,7 @@ from core.now_playing import compute_display_mmss
 from ui.tray_manager import TrayManager
 from ui.dev_console import DevConsole
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
-from ui.custom_titlebar import CustomTitleBar
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 
 # Custom Progress Bar for Pixel-Perfect Fluidity
 class SmoothProgressBar(QWidget):
@@ -294,6 +294,7 @@ class ListenMoePlayer(QWidget):
             self, icon=getattr(self, "_icon_app", None)
         )
         self._root_layout.addWidget(self._title_bar)
+        install_size_grip(self)
 
         # Content layout: regular inner spacing for the rest of the UI
         self._content_widget = QWidget()

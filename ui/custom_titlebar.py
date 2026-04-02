@@ -12,41 +12,40 @@ also works on X11 and Windows.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizeGrip, QWidget
 
 _TITLE_BAR_HEIGHT = 32
 _BTN_SIZE = QSize(40, _TITLE_BAR_HEIGHT)
 
-# Stylesheet uses the owning widget's object-name as the root selector so
-# these rules are scoped to the title bar and never leak to the rest of the UI.
+# Plain string (not an f-string) — single braces are literal CSS braces.
 _STYLE = """
-    #customTitleBar {{
+    #customTitleBar {
         background-color: #2a2a2a;
         border-bottom: 1px solid #3a3a3a;
-    }}
-    #customTitleBar QLabel#titleBarTitle {{
+    }
+    #customTitleBar QLabel#titleBarTitle {
         color: #cccccc;
         font-size: 12px;
         padding-left: 4px;
-    }}
-    #customTitleBar QPushButton {{
+    }
+    #customTitleBar QPushButton {
         background-color: transparent;
         color: #aaaaaa;
         border: none;
         border-radius: 0px;
         padding: 0px;
         font-size: 14px;
-    }}
-    #customTitleBar QPushButton:hover {{
+    }
+    #customTitleBar QPushButton:hover {
         background-color: #3a3a3a;
         color: #ffffff;
-    }}
-    #customTitleBar QPushButton#titleBarBtnClose:hover {{
+    }
+    #customTitleBar QPushButton#titleBarBtnClose:hover {
         background-color: #c0392b;
         color: #ffffff;
-    }}
+    }
 """
 
 
@@ -145,3 +144,41 @@ class CustomTitleBar(QWidget):
             self._window.showNormal()
         else:
             self._window.showMaximized()
+
+
+# ---------------------------------------------------------------------------
+# Resize grip
+# ---------------------------------------------------------------------------
+
+
+class _GripPositioner(QObject):
+    """Event filter that keeps a QSizeGrip anchored to its window's bottom-right."""
+
+    def __init__(self, window: QWidget, grip: QSizeGrip) -> None:
+        super().__init__(window)
+        self._grip = grip
+        window.installEventFilter(self)
+        self._reposition(window)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Resize:
+            self._reposition(obj)
+        return False
+
+    def _reposition(self, window: QObject) -> None:
+        g = self._grip
+        w = window  # type: ignore[assignment]
+        g.move(w.width() - g.width(), w.height() - g.height())
+
+
+def install_size_grip(window: QWidget) -> None:
+    """Attach a QSizeGrip overlay to the bottom-right corner of a frameless window.
+
+    Qt6's QSizeGrip uses QWindow::startSystemResize() on Wayland, so it works
+    correctly without any compositor-specific code.  On X11 and Windows it uses
+    the platform's native resize mechanism.
+    """
+    grip = QSizeGrip(window)
+    grip.setFixedSize(QSize(16, 16))
+    grip.show()
+    _GripPositioner(window, grip)
