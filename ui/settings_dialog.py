@@ -129,7 +129,7 @@ class SettingsDialog(QDialog):
         fmt_row.addWidget(lab_fmt)
         self.cmb_format = QComboBox()
         try:
-            self.cmb_format.addItems(['Vorbis', 'MP3'])
+            self.cmb_format.addItems(['Vorbis', 'Opus', 'MP3'])
         except Exception:
             pass
         try:
