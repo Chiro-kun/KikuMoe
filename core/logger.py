@@ -46,16 +46,21 @@ class _SafeTextStream:
 def silence_stderr():
     """Temporarily redirect C-level stderr (fd 2) to /dev/null.
 
-    Use this around PyAudio initialisation to suppress the flood of ALSA/JACK
-    probe errors emitted by PortAudio when it enumerates audio devices.  Those
-    messages are written directly by the C library and cannot be filtered
-    through Python's logging system.
+    Use this around PyAudio/libVLC initialisation to suppress the flood of
+    ALSA/JACK/libVLC probe messages emitted directly by the C library.  Those
+    messages bypass Python's logging and cannot be filtered any other way.
+
+    No-op when debug mode is active (see set_debug()), so that --debug exposes
+    all C-level output alongside the Python DEBUG traces.
 
     Example::
 
         with silence_stderr():
             pa = pyaudio.PyAudio()
     """
+    if _debug_enabled:
+        yield
+        return
     try:
         devnull_fd = os.open(os.devnull, os.O_WRONLY)
         saved_fd = os.dup(2)
