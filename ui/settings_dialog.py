@@ -9,6 +9,7 @@ from core.i18n import I18n
 
 _IS_WIN32 = sys.platform == "win32"
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+from ui.custom_titlebar import CustomTitleBar
 from core.logger import silence_stderr
 from core.constants import (
     ORG_NAME,
@@ -36,13 +37,23 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         # Rendi il dialogo non modale per permettere interazione con altre finestre (es. DevConsole)
         self.setModal(False)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, 'it'))
         self.setWindowTitle(self.i18n.t('settings_title'))
         try:
-            self.setMinimumSize(560, 360)
+            self.setMinimumSize(560, 360 + CustomTitleBar.HEIGHT)
         except Exception:
             pass
+
+        # Root layout: title bar (no margins) + content (with margins)
+        root_layout = QVBoxLayout()
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        self._title_bar = CustomTitleBar(self)
+        self._title_bar.set_title(self.i18n.t('settings_title'))
+        root_layout.addWidget(self._title_bar)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(16, 16, 16, 16)
@@ -261,7 +272,8 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(self.btn_ok)
         layout.addLayout(btn_row)
 
-        self.setLayout(layout)
+        root_layout.addLayout(layout)
+        self.setLayout(root_layout)
 
     def _browse_vlc_path(self):
         start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
