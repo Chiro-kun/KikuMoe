@@ -1,10 +1,12 @@
 STREAMS = {
     "J-POP": {
         "Vorbis": "https://listen.moe/stream",
-        "MP3": "https://listen.moe/mp3",
+        "Opus": "https://listen.moe/opus",
+        "MP3": "https://listen.moe/fallback",
     },
     "K-POP": {
         "Vorbis": "https://listen.moe/kpop/stream",
-        "MP3": "https://listen.moe/kpop/mp3",
+        "Opus": "https://listen.moe/kpop/opus",
+        "MP3": "https://listen.moe/kpop/fallback",
     },
 }

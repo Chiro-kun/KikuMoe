@@ -64,6 +64,8 @@ The script runs in order:
 
 VLC is not bundled on Linux; it must be installed system-wide (`python-vlc` will find it automatically). The FFmpeg backend is used by default and requires `ffmpeg` to be in `PATH`.
 
+> **Note:** PyInstaller's ctypes analysis auto-detects `libvlc.so.5` / `libvlccore.so.9` and would bundle them, but without the full VLC plugin tree (audio outputs, codecs…) and transitive runtime dependencies those copies cannot initialize audio output. `kikumoe.spec` explicitly removes them from `a.binaries` on Linux so the system-installed VLC is used end-to-end.
+
 ### Manual build
 
 ```bash

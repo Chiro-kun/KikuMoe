@@ -39,7 +39,7 @@ KEY_AUDIO_BACKEND         = "audio_backend"   # 'auto' | 'ffmpeg' | 'mpv' | 'vlc
 Version is resolved in order from:
 1. `version.yml` (key `version:`) at the repo root or inside `_MEIPASS` (onefile)
 2. `packaging/windows/version_info.txt` (`FileVersion` field or `filevers` tuple)
-3. Hardcoded fallback `"1.9.0"`
+3. Hardcoded fallback `"1.10.0"`
 
 ---
 
@@ -51,11 +51,13 @@ Stream URL dictionary. Single source of truth for LISTEN.moe endpoints.
 STREAMS = {
     "J-POP": {
         "Vorbis": "https://listen.moe/stream",
-        "MP3":    "https://listen.moe/mp3",
+        "Opus":   "https://listen.moe/opus",
+        "MP3":    "https://listen.moe/fallback",
     },
     "K-POP": {
         "Vorbis": "https://listen.moe/kpop/stream",
-        "MP3":    "https://listen.moe/kpop/mp3",
+        "Opus":   "https://listen.moe/kpop/opus",
+        "MP3":    "https://listen.moe/kpop/fallback",
     },
 }
 ```
@@ -86,13 +88,18 @@ A runtime language switch calls `retranslateUi()` on the main window without res
 ### `logger.py`
 
 ```python
-from core.logger import get_logger
+from core.logger import get_logger, silence_stderr, set_debug
 
 log = get_logger(__name__)
-log.debug("debug message")
+log.debug("verbose trace")   # suppressed by default
+log.info("backend selected") # always visible
 ```
 
-Returns a `logging.Logger` set to `DEBUG` level writing to `stdout`. On Windows, `stdout` is wrapped in `_SafeTextStream` to prevent `UnicodeEncodeError` with codepage cp1252.
+- `get_logger(name)` — returns a `logging.Logger` writing to `stdout`. Default level is `INFO`; `DEBUG` traces are hidden unless the app is started with `--debug`.
+- `set_debug(enabled)` — switches all created loggers between `DEBUG` and `INFO`. Called once at startup by `KikuMoe.py` when `--debug` is detected.
+- `silence_stderr()` — context manager that redirects C-level fd 2 to `/dev/null` for the duration of the block. Used around `PyAudio()` and `vlc.Instance()` to suppress ALSA/JACK/libVLC probe noise. **No-op when debug mode is active** so `--debug` exposes those messages too.
+
+On Windows, `stdout` is wrapped in `_SafeTextStream` to prevent `UnicodeEncodeError` with codepage cp1252.
 
 ---
 
@@ -100,8 +107,8 @@ Returns a `logging.Logger` set to `DEBUG` level writing to `stdout`. On Windows,
 
 Time formatting utilities:
 
-- `compute_display_mmss(elapsed_s)` → `"mm:ss"` of elapsed time
-- `compute_remaining(duration_s, start_epoch)` → remaining seconds from a Unix timestamp
+- `compute_remaining(duration_seconds, start_epoch)` → remaining seconds (`int | None`); returns `None` if either argument is `None`
+- `compute_display_mmss(duration_seconds, start_epoch)` → `tuple[str, bool]` where the string is `"mm:ss"` and the bool is `True` when the value is remaining time, `False` when it falls back to total duration (or `"--:--"` if neither is available)
 
 ---
 
@@ -112,14 +119,15 @@ All backends expose the same callback interface, letting the main window treat t
 ### Common interface
 
 ```python
-player.play(url: str)         -> None
-player.pause()                -> None
-player.resume()               -> None
+player.is_ready()             -> bool   # False if the required library is missing
+player.play_url(url: str)     -> bool   # True on success
+player.pause_toggle()         -> None   # toggles pause/resume
 player.stop()                 -> None
-player.force_stop()           -> None
-player.set_volume(v: int)     -> None   # 0–100
-player.set_mute(muted: bool)  -> None
-player.set_device(index: int) -> None   # PyAudio device index
+player.force_cleanup()        -> None   # emergency teardown
+player.set_volume(vol: int)   -> None   # 0–100
+player.set_mute(mute: bool)   -> None
+player.get_volume()           -> int
+player.get_mute()             -> bool
 ```
 
 Callback set by `main_window.py`:
@@ -176,26 +184,27 @@ Manages the WebSocket connection to the LISTEN.moe gateway (`wss://listen.moe/ga
 
 | Sent message | Purpose |
 |---|---|
-| `{"op": 9}` | Heartbeat (interval received in the welcome message) |
-| `{"op": 2, "d": {"channel": "..."}}` | Channel subscription |
+| `{"op": 2}` | Initial acknowledgement (sent on open and on welcome) |
+| `{"op": 9}` | Periodic heartbeat (sent at the interval received in the welcome message) |
 
 | Received event (`op`) | Meaning |
 |---|---|
-| `0` | Welcome / heartbeat interval |
-| `1` | `TRACK_UPDATE`: current track metadata |
+| `0` | Welcome — contains `d.heartbeat` interval in ms |
+| `1` | Dispatch — `TRACK_UPDATE` / `TRACK_UPDATE_REQUEST`: current track metadata |
 
-`TRACK_UPDATE` payload: `title`, `artists[].name`, `duration` (s), `albums[].image` (relative filename, CDN base: `https://cdn.listen.moe/covers/`), `startTime` (ISO 8601).
+`TRACK_UPDATE` payload: `song.title`, `song.artists[].name`, `song.duration` (s), `song.albums[].image` (relative filename, CDN base: `https://cdn.listen.moe/covers/`), `startTime` (ISO 8601).
 
-Auto-reconnects with a 5 s delay on socket close.
+Channel filtering is applied client-side via the `channel_filter` callback passed to the constructor. Auto-reconnects with a 5 s delay on socket close.
 
 ```python
 ws = NowPlayingWS(
-    on_now_playing=fn,    # fn(title, artist, duration_s, cover_url, start_epoch)
-    on_error_text=fn,     # fn(msg: str)
-    on_closed_text=fn,    # fn(msg: str)
+    on_now_playing=fn,       # fn(title, artist, duration_s, start_epoch, cover_filename)
+    on_error_text=fn,        # fn(msg: str)
+    on_closed_text=fn,       # fn(msg: str)
+    channel_filter=fn,       # optional fn(d: dict) -> bool
 )
-ws.start(channel="J-POP")
-ws.stop()
+ws.start()
+ws.shutdown()
 ```
 
 ---
@@ -221,7 +230,7 @@ Signals are the only safe channel for updating the UI from non-main threads.
 
 **Custom widget:** `SmoothProgressBar(QProgressBar)` — rounded corners, custom colors.
 
-**Backend initialization:** tries `PlayerFFmpeg` first; falls back to `PlayerVLC` if FFmpeg is not found. Active backend stored in `self._player`.
+**Backend initialization:** `_create_player()` tries backends in order — `PlayerFFmpeg` → `PlayerMPV` → `PlayerVLC` — stopping at the first one whose `is_ready()` returns `True`. Manual selection via `KEY_AUDIO_BACKEND` bypasses the chain. Active backend stored in `self.player`.
 
 ---
 
@@ -233,7 +242,9 @@ Non-modal window. Reads and writes directly to `QSettings`. On close, emits `set
 
 ### `tray_manager.py`
 
-Manages `QSystemTrayIcon` and its `QMenu`. The menu is built dynamically on each open to reflect current state. Dark mode applied via inline Qt stylesheet.
+Manages `QSystemTrayIcon` and its `QMenu`. The menu is built dynamically on each open to reflect current state. Includes:
+- **Custom Styling**: Dark mode applied via inline QSS (Qt Style Sheets) with magenta accents.
+- **Screen Awareness**: Logic to "nudge" the menu and submenus to the left if they would overflow the right edge of the screen (typically when the tray is on the right).
 
 ---
 

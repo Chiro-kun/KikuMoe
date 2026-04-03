@@ -41,7 +41,7 @@ def _read_version_from_files() -> str:
             pass
         for path in search_paths:
             if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     for line in f:
                         if line.strip().lower().startswith("version:"):
                             ver = line.split(":", 1)[1].strip()
@@ -67,11 +67,11 @@ def _read_version_from_files() -> str:
         data = ""
         for path in candidate_paths:
             if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, encoding="utf-8") as f:
                     data = f.read()
                 break
         if data:
-            # Prefer StringStruct 'FileVersion', e.g. 1.9.0.0
+            # Prefer StringStruct 'FileVersion', e.g. 1.10.0.0
             m = re.search(r"FileVersion\'\s*,\s*u?\'([^\']+)\'", data)
             if m:
                 return m.group(1).strip()
@@ -83,7 +83,7 @@ def _read_version_from_files() -> str:
         pass
 
     # 3) Fallback to default
-    return "1.9.0"
+    return "1.10.0"
 
 
 APP_VERSION = _read_version_from_files()
