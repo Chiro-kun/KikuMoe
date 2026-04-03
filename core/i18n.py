@@ -97,7 +97,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "settings_audio_backend_vlc": "VLC",
         # Audio device selection
         "settings_audio_output": "Uscita audio",
-        "settings_audio_default": "Sistema (predefinito di Windows)",
+        "settings_audio_default": "Sistema (predefinito)",
         "settings_audio_refresh": "Aggiorna",
         # Sleep Timer
         "sleep_timer": "Sleeptimer",
@@ -228,7 +228,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "settings_audio_backend_vlc": "VLC",
         # Audio device selection
         "settings_audio_output": "Audio output",
-        "settings_audio_default": "System (Windows default device)",
+        "settings_audio_default": "System (default device)",
         "settings_audio_refresh": "Refresh",
         # Sleep Timer
         "sleep_timer": "Sleep timer",
