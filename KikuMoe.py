@@ -1,7 +1,9 @@
 import os
+import signal
 import sys
 import traceback
 
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication
 
 from ui.main_window import ListenMoePlayer
@@ -44,8 +46,29 @@ def main() -> int:
     try:
         app = QApplication(sys.argv)
         window = ListenMoePlayer()
+
+        def _quit_gracefully(*_: object) -> None:
+            try:
+                window._cleanup_before_close()
+            except Exception:
+                pass
+            app.exit(0)
+
+        signal.signal(signal.SIGINT, _quit_gracefully)
+        if _IS_WIN32:
+            # SIGBREAK is Ctrl+Break on Windows; only defined on win32.
+            signal.signal(signal.SIGBREAK, _quit_gracefully)  # type: ignore[attr-defined]
+
+        # Qt's C event loop does not yield to Python between iterations, so the
+        # signal handler above would never fire without a periodic wakeup.
+        _sigint_timer = QTimer()
+        _sigint_timer.start(200)
+        _sigint_timer.timeout.connect(lambda: None)
+
         window.show()
         return app.exec_()
+    except KeyboardInterrupt:
+        return 0
     except Exception as exc:
         log_path = _write_crash_log(exc)
         try:
