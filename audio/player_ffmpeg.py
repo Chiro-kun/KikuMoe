@@ -444,7 +444,7 @@ class PlayerFFmpeg:
                             try:
                                 self.log.debug(
                                     "[DEBUG] _stream_worker: failed to open with device "
-                                    "%s, retrying with Windows default: %s",
+                                    "%s, retrying with system default: %s",
                                     device_idx,
                                     oe,
                                 )
