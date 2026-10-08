@@ -675,7 +675,15 @@ class ListenMoePlayer(QWidget):
             return PlayerFFmpeg(on_event=on_event)
         if backend == "mpv":
             self.log.info("[BACKEND] Using MPV (user setting).")
-            return PlayerMPV(on_event=on_event)
+            player = PlayerMPV(on_event=on_event)
+            if player.is_ready():
+                self.log.info("[BACKEND] MPV backend ready.")
+            else:
+                self.log.error(
+                    "[BACKEND] MPV selected but unavailable: %s",
+                    player.get_init_error() or "libmpv did not initialize",
+                )
+            return player
         if backend == "vlc":
             self.log.info("[BACKEND] Using VLC (user setting).")
             return PlayerVLC(
@@ -2745,6 +2753,12 @@ class ListenMoePlayer(QWidget):
                     return
                 try:
                     self.log.info(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
+                    if isinstance(self.player, PlayerMPV):
+                        self.log.info(
+                            "[UI] MPV diagnostics: ready=%s; init_error=%s",
+                            self.player.is_ready(),
+                            self.player.get_init_error(),
+                        )
                     # Sanitizza URL prima di log e play
                     try:
                         m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or "")

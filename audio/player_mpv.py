@@ -62,10 +62,12 @@ if _found_libmpv:
                 pass
 
 
+_mpv_import_error: Exception | None = None
 try:
     import mpv
-except Exception:
+except Exception as e:
     mpv = None  # type: ignore
+    _mpv_import_error = e
 
 # MPV end-file reason integers (MPV_END_FILE_REASON_*)
 _MPV_END_STOP = 2
@@ -79,6 +81,7 @@ class PlayerMPV:
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
+        self._init_error: str | None = None
         self._player: Any | None = None
         # Set when stop()/force_cleanup() is called so the end-file callback
         # doesn't mis-classify the resulting event as a natural 'ended'.
@@ -148,6 +151,11 @@ class PlayerMPV:
     def _init_mpv(self) -> None:
         self._ready = False
         if mpv is None:
+            self._init_error = str(_mpv_import_error or "unknown import error")
+            self.log.error(
+                "[BACKEND] PlayerMPV: python-mpv import unavailable: %s",
+                self._init_error,
+            )
             return
         try:
             # libmpv requires LC_NUMERIC="C"; set it before creating the instance
@@ -239,6 +247,7 @@ class PlayerMPV:
             except Exception:
                 pass
         except Exception as e:
+            self._init_error = str(e)
             self.log.error("[BACKEND] PlayerMPV: init failed: %s", e)
             # If we specified an ao and it caused the failure, retry without it
             if linux_ao and "ao" in kwargs:
@@ -250,6 +259,7 @@ class PlayerMPV:
                     self._player.mute = self._muted
                     self._ready = True
                 except Exception as e2:
+                    self._init_error = str(e2)
                     self.log.debug("[DEBUG] PlayerMPV: retry also failed: %s", e2)
                     self._player = None
                     self._ready = False
@@ -259,6 +269,9 @@ class PlayerMPV:
 
     def is_ready(self) -> bool:
         return bool(self._ready and self._player is not None)
+
+    def get_init_error(self) -> str | None:
+        return self._init_error
 
     def reinitialize(
         self, libvlc_path: str | None = None, network_caching_ms: int | None = None
