@@ -1,6 +1,7 @@
 import email.utils
 import os
 import re
+import sys
 import threading
 import time
 import urllib.parse
@@ -65,6 +66,8 @@ from ui.dev_console import DevConsole
 from ui.settings_dialog import SettingsDialog
 from ui.tray_manager import TrayManager
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+
+_IS_WIN32 = sys.platform == "win32"
 
 
 # Custom Progress Bar for Pixel-Perfect Fluidity
@@ -287,11 +290,13 @@ class ListenMoePlayer(QWidget):
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        # FramelessWindowHint removes compositor/WM decorations; our CustomTitleBar
-        # provides cross-platform CSD instead (Wayland, X11, Windows).
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        # Keep Windows' native frame/title bar; retain custom chrome on Linux.
+        if _IS_WIN32:
+            self.setWindowFlags(Qt.WindowType.Window)
+        else:
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 500, 652  # 620 + 32 (CustomTitleBar.HEIGHT)
+        fixed_w, fixed_h = 500, 620 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT)
         self.setMinimumSize(fixed_w, fixed_h)
         self.resize(fixed_w, fixed_h)
         self._apply_window_title("")
@@ -318,11 +323,12 @@ class ListenMoePlayer(QWidget):
         self._root_layout.setSpacing(0)
         self.setLayout(self._root_layout)
 
-        # Custom title bar at index 0 — must come before _init_header_section
-        # inserts the settings bar at index 1.
-        self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
-        self._root_layout.addWidget(self._title_bar)
-        install_size_grip(self)
+        # Windows uses the native title bar and resize frame.
+        self._title_bar = None
+        if not _IS_WIN32:
+            self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
+            self._root_layout.addWidget(self._title_bar)
+            install_size_grip(self)
 
         # Content layout: regular inner spacing for the rest of the UI
         self._content_widget = QWidget()
@@ -353,8 +359,8 @@ class ListenMoePlayer(QWidget):
         self.menu_bar_layout.addStretch(1)
         # 1. Settings header at the very top (under the Windows title bar)
         if hasattr(self, "_root_layout"):
-            # index 0 is the CustomTitleBar; settings bar goes directly below it
-            self._root_layout.insertWidget(1, self.settings_header_bar)
+            # The custom title bar occupies index 0 only on Linux.
+            self._root_layout.insertWidget(0 if _IS_WIN32 else 1, self.settings_header_bar)
         else:
             self._layout.addWidget(self.settings_header_bar)
 
@@ -834,8 +840,9 @@ class ListenMoePlayer(QWidget):
         try:
             title = self._build_window_title(song_title)
             self.setWindowTitle(title)
-            if hasattr(self, "_title_bar"):
-                self._title_bar.set_title(title)
+            title_bar = getattr(self, "_title_bar", None)
+            if title_bar is not None:
+                title_bar.set_title(title)
         except Exception:
             pass
 
@@ -973,8 +980,9 @@ class ListenMoePlayer(QWidget):
         event = a0
         try:
             if event.type() == QEvent.Type.WindowStateChange:
-                if hasattr(self, "_title_bar"):
-                    self._title_bar.sync_maximize_button()
+                title_bar = getattr(self, "_title_bar", None)
+                if title_bar is not None:
+                    title_bar.sync_maximize_button()
                 if (
                     self.isMinimized()
                     and self._get_bool(KEY_TRAY_ENABLED, True)
@@ -1600,8 +1608,9 @@ class ListenMoePlayer(QWidget):
     @staticmethod
     def _make_frameless_msg(msg: QMessageBox) -> None:
         """Remove compositor decorations from a QMessageBox and add a visible border."""
-        msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
+        if not _IS_WIN32:
+            msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+            msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
 
     def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:

@@ -49,39 +49,48 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         # Rendi il dialogo non modale per permettere interazione con altre finestre (es. DevConsole)
         self.setModal(False)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        if not _IS_WIN32:
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, "it"))
         self.setWindowTitle(self.i18n.t("settings_title"))
         try:
-            self.setMinimumSize(560, 360 + CustomTitleBar.HEIGHT)
+            self.setMinimumSize(560, 360 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT))
         except Exception:
             pass
 
-        # Root layout: title bar (no margins) + content (with margins)
+        # Use the Windows-native dialog title bar; Linux keeps the custom one.
         root_layout = QVBoxLayout()
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
+        if _IS_WIN32:
+            root_layout.setContentsMargins(16, 16, 16, 16)
+            root_layout.setSpacing(8)
+            self._title_bar = None
+        else:
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            root_layout.setSpacing(0)
+            self._title_bar = CustomTitleBar(self)
+            self._title_bar.set_title(self.i18n.t("settings_title"))
 
-        self._title_bar = CustomTitleBar(self)
-        self._title_bar.set_title(self.i18n.t("settings_title"))
+            # Adjust close button alignment specifically for the settings window
+            self._title_bar.setStyleSheet(
+                self._title_bar.styleSheet()
+                + """
+                #customTitleBar QPushButton#titleBarBtnClose {
+                    padding-top: 1px;
+                }
+            """
+            )
 
-        # Adjust close button alignment specifically for the settings window
-        self._title_bar.setStyleSheet(
-            self._title_bar.styleSheet()
-            + """
-            #customTitleBar QPushButton#titleBarBtnClose {
-                padding-top: 1px;
-            }
-        """
-        )
-
-        root_layout.addWidget(self._title_bar)
-        install_size_grip(self)
+            root_layout.addWidget(self._title_bar)
+            install_size_grip(self)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        if _IS_WIN32:
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(8)
+        else:
+            layout.setContentsMargins(16, 16, 16, 16)
+            layout.setSpacing(8)
 
         # Autoplay
         self.chk_autoplay = QCheckBox(self.i18n.t("settings_autoplay"))
