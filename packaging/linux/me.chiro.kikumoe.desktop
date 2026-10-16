@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=KikuMoe
+GenericName=Internet Radio Player
+Comment=LISTEN.moe desktop radio player
+Exec=KikuMoe
+Icon=kikumoe
+Categories=Audio;Music;Player;Qt;
+Keywords=radio;listen;moe;jpop;kpop;stream;
+StartupWMClass=kikumoe
+Terminal=false
+

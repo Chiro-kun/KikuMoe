@@ -56,7 +56,7 @@ dist\KikuMoe-<version>.exe
 
 ## Linux
 
-### Build script
+### Build script (bare binary)
 
 ```bash
 # From the repository root
@@ -73,17 +73,40 @@ VLC is not bundled on Linux; it must be installed system-wide (`python-vlc` will
 
 > **Note:** PyInstaller's ctypes analysis auto-detects `libvlc.so.5` / `libvlccore.so.9` and would bundle them, but without the full VLC plugin tree (audio outputs, codecs…) and transitive runtime dependencies those copies cannot initialize audio output. `kikumoe.spec` explicitly removes them from `a.binaries` on Linux so the system-installed VLC is used end-to-end.
 
+### AppImage (recommended for distribution)
+
+After building the bare binary, wrap it in an AppImage:
+
+```bash
+./build.sh
+bash packaging/linux/build-appimage.sh
+```
+
+The script:
+
+1. Creates an `AppDir` with the binary, `.desktop` file, icon, and AppStream metadata
+2. Downloads `appimagetool` automatically if not cached in `dist/`
+3. Produces `dist/KikuMoe-<version>-x86_64.AppImage`
+
+The AppImage is the recommended distribution format — it bundles the binary with desktop integration and avoids glibc linking issues on end-user systems.
+
 ### Manual build
 
 ```bash
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
+bash packaging/linux/build-appimage.sh          # optional: wrap in AppImage
 ```
 
 ### Output
 
 ```
-dist/KikuMoe-<version>
+dist/KikuMoe-<version>                          # bare binary
+dist/KikuMoe-<version>-x86_64.AppImage          # AppImage (if built)
 ```
+
+### CI/CD
+
+Builds are automated via Forgejo Actions (`.forgejo/workflows/build.yml`). Pushing a `v*` tag triggers a build that produces the AppImage and creates a release with the artifact attached.
 
 ---
 

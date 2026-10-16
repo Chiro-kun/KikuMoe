@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>me.chiro.kikumoe</id>
+  <name>KikuMoe</name>
+  <summary>LISTEN.moe desktop radio player</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      KikuMoe is a desktop radio player for LISTEN.moe, supporting J-POP and
+      K-POP streams in Vorbis or MP3 format. It features multiple audio backends
+      (FFmpeg, MPV, VLC), system tray integration, sleep timer, and a developer
+      console.
+    </p>
+  </description>
+  <launchable type="desktop-id">me.chiro.kikumoe.desktop</launchable>
+  <url type="homepage">https://git.alsogamer.com/chiro/KikuMoe</url>
+  <url type="bugtracker">https://git.alsogamer.com/chiro/KikuMoe/issues</url>
+  <url type="vcs-browser">https://git.alsogamer.com/chiro/KikuMoe</url>
+  <provides>
+    <binary>KikuMoe</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+</component>
+

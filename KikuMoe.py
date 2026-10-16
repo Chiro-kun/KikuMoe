@@ -48,6 +48,8 @@ def main() -> int:
 
     try:
         app = QApplication(sys.argv)
+        app.setApplicationName("KikuMoe")
+        app.setDesktopFileName("me.chiro.kikumoe")
         window = ListenMoePlayer()
 
         def _quit_gracefully(*_: object) -> None:

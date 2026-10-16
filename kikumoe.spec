@@ -61,6 +61,13 @@ version_yml = repo_root / "version.yml"
 if version_yml.exists():
     datas.append((str(version_yml), "."))
 
+# On Linux, include the desktop integration icon for runtime use (e.g. fallback
+# for setWindowIcon when the icons/ directory lookup fails in frozen builds).
+if not _IS_WIN32:
+    _linux_icon = repo_root / "packaging" / "linux" / "kikumoe.png"
+    if _linux_icon.exists():
+        datas.append((str(_linux_icon), "icons"))
+
 # VLC bundling (Windows: bundle DLLs; Linux: system-installed VLC is used directly)
 vlc_binaries = []
 if _IS_WIN32:
