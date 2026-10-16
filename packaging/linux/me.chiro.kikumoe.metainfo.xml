@@ -17,6 +17,9 @@
   <url type="homepage">https://git.alsogamer.com/chiro/KikuMoe</url>
   <url type="bugtracker">https://git.alsogamer.com/chiro/KikuMoe/issues</url>
   <url type="vcs-browser">https://git.alsogamer.com/chiro/KikuMoe</url>
+  <developer id="me.chiro">
+    <name>Chiro</name>
+  </developer>
   <provides>
     <binary>KikuMoe</binary>
   </provides>

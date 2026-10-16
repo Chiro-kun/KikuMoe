@@ -61,9 +61,16 @@ cp "$LINUX_PKG/kikumoe.png" "$APPDIR/kikumoe.png"
 cp "$LINUX_PKG/me.chiro.kikumoe.desktop" "$APPDIR/usr/share/applications/"
 cp "$LINUX_PKG/kikumoe.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/"
 
-# AppStream metadata
+# AppStream metadata (appimagetool looks for .appdata.xml; AppStream spec uses .metainfo.xml)
+mkdir -p "$APPDIR/usr/share/appdata"
 if [[ -f "$LINUX_PKG/me.chiro.kikumoe.metainfo.xml" ]]; then
-    cp "$LINUX_PKG/me.chiro.kikumoe.metainfo.xml" "$APPDIR/usr/share/metainfo/"
+    cp "$LINUX_PKG/me.chiro.kikumoe.metainfo.xml" "$APPDIR/usr/share/metainfo/me.chiro.kikumoe.metainfo.xml"
+    cp "$LINUX_PKG/me.chiro.kikumoe.metainfo.xml" "$APPDIR/usr/share/metainfo/me.chiro.kikumoe.appdata.xml"
+    cp "$LINUX_PKG/me.chiro.kikumoe.metainfo.xml" "$APPDIR/usr/share/appdata/me.chiro.kikumoe.appdata.xml"
+elif [[ -f "$LINUX_PKG/me.chiro.kikumoe.appdata.xml" ]]; then
+    cp "$LINUX_PKG/me.chiro.kikumoe.appdata.xml" "$APPDIR/usr/share/metainfo/me.chiro.kikumoe.appdata.xml"
+    cp "$LINUX_PKG/me.chiro.kikumoe.appdata.xml" "$APPDIR/usr/share/metainfo/me.chiro.kikumoe.metainfo.xml"
+    cp "$LINUX_PKG/me.chiro.kikumoe.appdata.xml" "$APPDIR/usr/share/appdata/me.chiro.kikumoe.appdata.xml"
 fi
 
 # Create AppRun
