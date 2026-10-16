@@ -15,9 +15,16 @@ Produces a single-file executable (`onefile`) via PyInstaller. Both Windows and 
 
 The script runs in order:
 
-1. Runs `poetry install --with dev` (installs runtime + dev dependencies)
-2. Runs `pyinstaller --noconfirm --clean kikumoe.spec` via `poetry run`
-3. Produces `dist\KikuMoe-<version>.exe`
+1. Checks that `packaging/windows/` contains `KikuMoe.ico`, `KikuMoe.manifest`, `version_info.txt`, and `libmpv-2.dll`.
+2. Runs `poetry install --with dev` (installs runtime + dev dependencies)
+3. Runs `pyinstaller --noconfirm --clean kikumoe.spec` via `poetry run`
+4. Produces `dist\KikuMoe-<version>.exe`
+
+The build stops with a list of missing files if the prerequisites are absent.
+The spec also checks that `libmpv-2.dll` can load on the build machine and
+bundles the DLLs found beside it, including its runtime dependencies. Get the
+matching Windows `mpv-dev` package and place `libmpv-2.dll` plus its dependent
+DLLs in `packaging/windows/` before building.
 
 ### VLC bundling
 

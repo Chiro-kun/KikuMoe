@@ -8,6 +8,43 @@ _IS_WIN32 = sys.platform == "win32"
 
 # Spec lives at the repo root — all paths resolve from here
 repo_root = Path(globals().get("SPECPATH", os.path.abspath("."))).resolve()
+packaging_win = repo_root / "packaging" / "windows"
+
+# Windows builds must include the native MPV runtime and Windows metadata.
+# Fail before PyInstaller starts instead of producing an executable with a
+# silently unavailable MPV backend or missing executable resources.
+if _IS_WIN32:
+    required_windows_files = [
+        packaging_win / "KikuMoe.ico",
+        packaging_win / "KikuMoe.manifest",
+        packaging_win / "version_info.txt",
+        packaging_win / "libmpv-2.dll",
+    ]
+    missing_windows_files = [path for path in required_windows_files if not path.is_file()]
+    if missing_windows_files:
+        missing_list = "\n".join(f"  - {path}" for path in missing_windows_files)
+        raise SystemExit(
+            "Windows build prerequisites are missing:\n"
+            f"{missing_list}\n"
+            "Add the required assets to packaging/windows and retry."
+        )
+
+    # Catch missing transitive DLLs and architecture mismatches on the build
+    # machine rather than shipping an MPV DLL that cannot be loaded at runtime.
+    dll_dir_cookie = os.add_dll_directory(str(packaging_win))
+    try:
+        import ctypes
+
+        mpv_probe = ctypes.WinDLL(str(packaging_win / "libmpv-2.dll"))
+        del mpv_probe
+    except OSError as exc:
+        raise SystemExit(
+            "Windows build cannot load packaging/windows/libmpv-2.dll. "
+            "Check its architecture and include its dependent DLLs in the same "
+            f"folder. Loader error: {exc}"
+        ) from exc
+    finally:
+        dll_dir_cookie.close()
 
 # Collect icons folder
 datas = []
@@ -38,9 +75,8 @@ if _IS_WIN32:
         if plugins_dir.is_dir():
             datas.append((str(plugins_dir), "plugins"))
             
-    mpv_dll = repo_root / "packaging" / "windows" / "libmpv-2.dll"
-    if mpv_dll.exists():
-        vlc_binaries.append((str(mpv_dll), "."))
+    # Include the MPV DLL and its sibling runtime dependencies.
+    vlc_binaries.extend((str(dll), ".") for dll in sorted(packaging_win.glob("*.dll")))
 
 block_cipher = None
 
@@ -71,7 +107,6 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 # Windows-only EXE metadata (icon, version resource, manifest)
 exe_kwargs = {}
 if _IS_WIN32:
-    packaging_win = (repo_root / "packaging" / "windows").resolve()
     ico = packaging_win / "KikuMoe.ico"
     ver = packaging_win / "version_info.txt"
     mfst = packaging_win / "KikuMoe.manifest"

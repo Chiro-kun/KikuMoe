@@ -5,10 +5,11 @@
 | Component | Technology |
 |---|---|
 | Language | Python 3.8+ |
-| GUI | PyQt5 (Qt5) |
-| Audio | FFmpeg (subprocess) + PyAudio, or python-mpv, or python-vlc |
+| GUI | PyQt6 (Qt6) — Wayland-first on Linux, XCB (X11) fallback |
+| Window decorations | Custom CSD (`CustomTitleBar`) — frameless window, works on Wayland, X11, Windows |
+| Audio | FFmpeg + PyAudio/PortAudio → PipeWire · PulseAudio · ALSA (Linux), WASAPI/MME (Windows); MPV and VLC as fallbacks |
 | Metadata | WebSocket (`websocket-client`) → `wss://listen.moe/gateway_v2` |
-| Settings persistence | `QSettings` (Windows registry, INI file on other OS) |
+| Settings persistence | `QSettings` (Windows registry, INI file on Linux) |
 | Build / packaging | PyInstaller (onefile) — Windows and Linux |
 
 ---
@@ -43,12 +44,13 @@ KikuMoe/                     # Repository root
 ├── network/                 # Network client
 │   └── ws_client.py         # NowPlayingWS: LISTEN.moe Gateway v2 WebSocket
 │
-├── ui/                      # PyQt5 GUI
+├── ui/                      # PyQt6 GUI
 │   ├── main_window.py       # ListenMoePlayer (main window)
 │   ├── settings_dialog.py   # Settings window
 │   ├── tray_manager.py      # System tray icon and menu
 │   ├── dev_console.py       # Developer console (log viewer)
-│   └── windows_titlebar.py  # Dark mode titlebar for Windows
+│   ├── windows_titlebar.py  # Dark mode DWM attribute for Windows
+│   └── custom_titlebar.py   # CustomTitleBar: cross-platform CSD widget
 │
 ├── icons/                   # Graphic assets (PNG, ICO)
 └── docs/                    # Developer documentation

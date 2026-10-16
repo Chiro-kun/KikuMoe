@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from core.constants import APP_NAME, APP_VERSION
+from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import get_logger
 
 _IS_WIN32 = sys.platform == "win32"
@@ -62,10 +62,12 @@ if _found_libmpv:
                 pass
 
 
+_mpv_import_error: Exception | None = None
 try:
     import mpv
-except Exception:
+except Exception as e:
     mpv = None  # type: ignore
+    _mpv_import_error = e
 
 # MPV end-file reason integers (MPV_END_FILE_REASON_*)
 _MPV_END_STOP = 2
@@ -79,6 +81,7 @@ class PlayerMPV:
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
+        self._init_error: str | None = None
         self._player: Any | None = None
         # Set when stop()/force_cleanup() is called so the end-file callback
         # doesn't mis-classify the resulting event as a natural 'ended'.
@@ -90,9 +93,69 @@ class PlayerMPV:
             self._user_agent = "KikuMoe/1.10.0"
         self._init_mpv()
 
+    def _get_stored_device_name(self) -> str | None:
+        """Return the human-readable name of the user-configured PortAudio output device,
+        or None when the setting is absent or unresolvable."""
+        try:
+            from PyQt6.QtCore import QSettings
+
+            settings = QSettings(ORG_NAME, APP_SETTINGS)
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            if val in (None, ""):
+                return None
+            import pyaudio
+
+            pa = pyaudio.PyAudio()
+            try:
+                info = pa.get_device_info_by_index(int(val))
+                return str(info.get("name", "")) if isinstance(info, dict) else None
+            finally:
+                pa.terminate()
+        except Exception:
+            return None
+
+    def _apply_linux_audio_device(self) -> None:
+        """On Linux, match the stored PortAudio device name against MPV's
+        audio-device-list and set audio_device when a match is found."""
+        if _IS_WIN32 or not self.is_ready():
+            return
+        device_name = self._get_stored_device_name()
+        if not device_name:
+            return
+        try:
+            assert self._player is not None
+            device_list = getattr(self._player, "audio_device_list", None)
+            if not device_list:
+                return
+            needle = device_name.lower()
+            for dev in device_list:
+                try:
+                    desc = str(dev.get("description", "")).lower()
+                    name = str(dev.get("name", "")).lower()
+                except Exception:
+                    try:
+                        desc = str(getattr(dev, "description", "")).lower()
+                        name = str(getattr(dev, "name", "")).lower()
+                    except Exception:
+                        continue
+                if needle in desc or needle in name or desc in needle:
+                    try:
+                        self._player.audio_device = dev.get("name") or getattr(dev, "name", None)
+                        self.log.debug("[MPV] audio_device set to: %s", self._player.audio_device)
+                    except Exception as e:
+                        self.log.debug("[MPV] Could not set audio_device: %s", e)
+                    return
+        except Exception as e:
+            self.log.debug("[MPV] _apply_linux_audio_device error: %s", e)
+
     def _init_mpv(self) -> None:
         self._ready = False
         if mpv is None:
+            self._init_error = str(_mpv_import_error or "unknown import error")
+            self.log.error(
+                "[BACKEND] PlayerMPV: python-mpv import unavailable: %s",
+                self._init_error,
+            )
             return
         try:
             # libmpv requires LC_NUMERIC="C"; set it before creating the instance
@@ -100,17 +163,33 @@ class PlayerMPV:
             locale.setlocale(locale.LC_NUMERIC, "C")
         except Exception:
             pass
+        # On Linux, prefer PipeWire → PulseAudio → ALSA in that order.
+        # MPV processes the comma-separated list and uses the first driver that works.
+        linux_ao: str | None = None
+        if not _IS_WIN32:
+            try:
+                uid = os.getuid()
+                pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR", f"/run/user/{uid}")
+                if os.path.exists(os.path.join(pw_sock, "pipewire-0")):
+                    linux_ao = "pipewire,pulse,alsa"
+                else:
+                    linux_ao = "pulse,alsa"
+            except Exception:
+                linux_ao = "pulse,alsa"
         try:
             lib_path = _found_libmpv
             if lib_path:
                 self.log.info("[BACKEND] PlayerMPV: using libmpv at %s", lib_path)
 
-            self._player = mpv.MPV(
+            kwargs: dict = dict(
                 vid="no",
                 terminal=False,
                 quiet=True,
                 user_agent=self._user_agent,
             )
+            if linux_ao:
+                kwargs["ao"] = linux_ao
+            self._player = mpv.MPV(**kwargs)
             self._player.volume = float(self._volume)
             self._player.mute = self._muted
 
@@ -168,12 +247,31 @@ class PlayerMPV:
             except Exception:
                 pass
         except Exception as e:
+            self._init_error = str(e)
             self.log.error("[BACKEND] PlayerMPV: init failed: %s", e)
-            self._player = None
-            self._ready = False
+            # If we specified an ao and it caused the failure, retry without it
+            if linux_ao and "ao" in kwargs:
+                try:
+                    self.log.debug("[DEBUG] PlayerMPV: retrying without ao preference")
+                    kwargs.pop("ao")
+                    self._player = mpv.MPV(**kwargs)
+                    self._player.volume = float(self._volume)
+                    self._player.mute = self._muted
+                    self._ready = True
+                except Exception as e2:
+                    self._init_error = str(e2)
+                    self.log.debug("[DEBUG] PlayerMPV: retry also failed: %s", e2)
+                    self._player = None
+                    self._ready = False
+            else:
+                self._player = None
+                self._ready = False
 
     def is_ready(self) -> bool:
         return bool(self._ready and self._player is not None)
+
+    def get_init_error(self) -> str | None:
+        return self._init_error
 
     def reinitialize(
         self, libvlc_path: str | None = None, network_caching_ms: int | None = None
@@ -194,6 +292,7 @@ class PlayerMPV:
         try:
             assert self._player is not None
             self._stopping = False
+            self._apply_linux_audio_device()
             self._player.pause = False
             self._player.play(url)
             return True

@@ -1,8 +1,8 @@
 from typing import Callable, Optional
 
-from PyQt5.QtCore import QObject, QTimer
-from PyQt5.QtGui import QFont, QIcon
-from PyQt5.QtWidgets import QAction, QActionGroup, QApplication, QMenu, QSystemTrayIcon
+from PyQt6.QtCore import QObject, QTimer
+from PyQt6.QtGui import QAction, QActionGroup, QFont, QIcon
+from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from core.constants import KEY_CHANNEL, KEY_FORMAT
 
