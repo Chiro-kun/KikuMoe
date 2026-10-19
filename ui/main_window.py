@@ -678,7 +678,13 @@ class ListenMoePlayer(QWidget):
 
         if backend == "ffmpeg":
             self.log.info("[BACKEND] Using FFmpeg (user setting).")
-            return PlayerFFmpeg(on_event=on_event)
+            player = PlayerFFmpeg(on_event=on_event)
+            if not player.is_ready():
+                self.log.error(
+                    "[BACKEND] FFmpeg selected but unavailable: %s",
+                    player.get_init_error() or "pyaudio / ffmpeg not ready",
+                )
+            return player
         if backend == "mpv":
             self.log.info("[BACKEND] Using MPV (user setting).")
             player = PlayerMPV(on_event=on_event)
@@ -692,19 +698,38 @@ class ListenMoePlayer(QWidget):
             return player
         if backend == "vlc":
             self.log.info("[BACKEND] Using VLC (user setting).")
-            return PlayerVLC(
+            player = PlayerVLC(
                 on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching
             )
+            if not player.is_ready():
+                self.log.error(
+                    "[BACKEND] VLC selected but unavailable: %s",
+                    player.get_init_error() or "libvlc not ready",
+                )
+            return player
 
         # 'auto': FFmpeg → MPV → VLC
         player = PlayerFFmpeg(on_event=on_event)
+        ffmpeg_err = None
         if not player.is_ready():
-            self.log.info("[BACKEND] FFmpeg not available, trying MPV.")
+            ffmpeg_err = getattr(player, "get_init_error", lambda: None)()
+            self.log.info(f"[BACKEND] FFmpeg not available ({ffmpeg_err}), trying MPV.")
             player = PlayerMPV(on_event=on_event)
+        mpv_err = None
         if not player.is_ready():
-            self.log.info("[BACKEND] MPV not available, using VLC fallback.")
+            mpv_err = getattr(player, "get_init_error", lambda: None)()
+            self.log.info(f"[BACKEND] MPV not available ({mpv_err}), using VLC fallback.")
             player = PlayerVLC(
                 on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching
+            )
+        if not player.is_ready():
+            vlc_err = getattr(player, "get_init_error", lambda: None)()
+            self.log.error(
+                "[BACKEND] All audio backends failed to initialize! "
+                "FFmpeg: %s | MPV: %s | VLC: %s",
+                ffmpeg_err or "unavailable",
+                mpv_err or "unavailable",
+                vlc_err or "unavailable",
             )
         return player
 
@@ -715,6 +740,11 @@ class ListenMoePlayer(QWidget):
         Also synchronizes initial volume and mute states.
         """
         self.player = self._create_player(on_event=self._on_player_event)
+
+        if not getattr(self.player, "is_ready", lambda: False)():
+            err = getattr(self.player, "get_init_error", lambda: None)()
+            self.log.warning("[BACKEND] Audio backend is not ready at startup: %s", err)
+            self.status_changed.emit(self.t("status_no_backend"))
 
         # Set initial audio state
         try:
@@ -1067,8 +1097,20 @@ class ListenMoePlayer(QWidget):
                 self._update_session_label()
                 self._ui_paused = False
                 self._update_tray_controls()
-                self.tray_icon_refresh.emit()
             elif c in ("error", "libvlc_init_failed"):
+                # Se il backend audio non e' pronto, non e' un errore di rete transitorio:
+                # non ritentare.
+                if (
+                    hasattr(self, "player")
+                    and self.player is not None
+                    and not getattr(self.player, "is_ready", lambda: True)()
+                ):
+                    self.status_changed.emit(self.t("status_no_backend"))
+                    self.buffering_visible.emit(False)
+                    self._retry_pending = False
+                    self._refresh_play_button_text(False)
+                    return
+
                 self.status_changed.emit(self.t("status_error"))
                 self.buffering_visible.emit(False)
                 self._skip_session_reset_once = True
@@ -2760,14 +2802,25 @@ class ListenMoePlayer(QWidget):
                         pass
                     self.status_changed.emit(self.t("status_error"))
                     return
+                if not getattr(self.player, "is_ready", lambda: False)():
+                    init_err = getattr(self.player, "get_init_error", lambda: "sconosciuto")()
+                    self.log.error(
+                        "[UI] play_stream aborted: backend %s is not ready: %s",
+                        type(self.player).__name__,
+                        init_err,
+                    )
+                    self.status_changed.emit(self.t("status_no_backend"))
+                    self._retry_pending = False
+                    self._refresh_play_button_text(False)
+                    return
                 try:
                     self.log.info(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
-                    if isinstance(self.player, PlayerMPV):
-                        self.log.info(
-                            "[UI] MPV diagnostics: ready=%s; init_error=%s",
-                            self.player.is_ready(),
-                            self.player.get_init_error(),
-                        )
+                    self.log.info(
+                        "[UI] %s diagnostics: ready=%s; init_error=%s",
+                        type(self.player).__name__,
+                        self.player.is_ready(),
+                        getattr(self.player, "get_init_error", lambda: None)(),
+                    )
                     # Sanitizza URL prima di log e play
                     try:
                         m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or "")

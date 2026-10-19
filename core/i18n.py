@@ -24,6 +24,11 @@ I18N: Dict[str, Dict[str, str]] = {
         "status_ended": "Stream terminato.",
         "status_error": "Errore di riproduzione.",
         "status_restarting": "Riavvio dello stream…",
+        "status_no_backend": "Nessun backend audio disponibile",
+        "backend_missing_detail": (
+            "Nessun backend audio pronto (MPV, VLC o FFmpeg). "
+            "Avvia tramite run.ps1 o verifica le dipendenze."
+        ),
         "ws_closed_reconnect": "In riproduzione: WS chiuso, riconnessione...",
         "ws_error_prefix": "In riproduzione: errore WS: ",
         "unknown": "Sconosciuto",
@@ -159,6 +164,11 @@ I18N: Dict[str, Dict[str, str]] = {
         "status_ended": "Stream ended.",
         "status_error": "Playback error.",
         "status_restarting": "Restarting stream…",
+        "status_no_backend": "No audio backend available",
+        "backend_missing_detail": (
+            "No audio backend ready (MPV, VLC, or FFmpeg). "
+            "Launch via run.ps1 or check dependencies."
+        ),
         "ws_closed_reconnect": "Now Playing: WS closed, reconnecting...",
         "ws_error_prefix": "Now Playing: WS error: ",
         "unknown": "Unknown",
