@@ -142,13 +142,14 @@ Emitted events: `"opening"`, `"buffering"`, `"playing"`, `"paused"`, `"stopped"`
 
 ### `player_ffmpeg.py`
 
-Primary backend. Launches FFmpeg as a subprocess and writes PCM output to a PyAudio device.
+Primary backend. Launches FFmpeg as a subprocess and writes PCM output to a PyAudio/PortAudio device.
 
 - `subprocess.Popen(stdout=PIPE)`; a reader thread consumes PCM chunks.
 - `_playback_lock` (RLock) protects shared state across threads.
 - `User-Agent` header: `KikuMoe/<version>`.
 - URL is sanitized before being passed to FFmpeg.
 - Device selection via `pa.open(output_device_index=...)`.
+- **Linux audio routing:** on startup, `_detect_linux_output_device()` probes PortAudio host APIs in priority order — PulseAudio/PipeWire (type 18, covers `pipewire-pulse`) → ALSA (type 8) — and selects the default output device of the best available API. An explicit user selection in Settings always takes precedence.
 
 ---
 
@@ -161,6 +162,7 @@ Second fallback backend via `python-mpv` bindings (wraps libmpv).
 - Events via `@player.event_callback`: `start-file` → `opening`, `file-loaded` → `playing`, `end-file` → `ended`/`error`.
 - Cache buffering progress via `@player.property_observer('cache-buffering-state')`.
 - If libmpv is not found at startup, `is_ready()` returns `False` and the main window falls through to VLC.
+- **Linux audio routing:** passes `ao='pipewire,pulse,alsa'` to libmpv when a PipeWire socket is detected (`/run/user/<uid>/pipewire-0`), otherwise `ao='pulse,alsa'`. Falls back to MPV's own default if the preferred driver fails to initialize. For explicit device selection, `_apply_linux_audio_device()` matches the stored PortAudio device name against MPV's `audio-device-list` and sets `audio_device`.
 
 ---
 
@@ -171,6 +173,7 @@ Last fallback backend via `python-vlc` bindings.
 - VLC instance options: `--network-caching`, `--http-reconnect`, `--quiet`.
 - Custom VLC library path via `KEY_LIBVLC_PATH`: on Windows, adds the directory via `os.add_dll_directory`; on Linux, sets `VLC_PLUGIN_PATH` to the `plugins/` subdirectory.
 - If libVLC is not found at startup, the error is caught by the main window and the backend is marked unavailable.
+- **Linux audio routing:** adds `--aout=pulse` to the VLC instance options, routing audio through PulseAudio — which on modern systems is served by `pipewire-pulse`. For explicit device selection, `_apply_linux_audio_device()` enumerates the pulse output device list (`audio_output_device_enum`) and calls `audio_output_device_set` for the entry whose description matches the stored PortAudio device name.
 
 ---
 
@@ -236,7 +239,7 @@ Signals are the only safe channel for updating the UI from non-main threads.
 
 ### `settings_dialog.py`
 
-Non-modal window. Reads and writes directly to `QSettings`. On close, emits `settings_changed`, triggering re-initialization of dependent components (language, audio device, backend).
+Non-modal, frameless window with a `CustomTitleBar` at the top. The title bar's close button receives a scoped CSS tweak (font size reduced to 20px with a 1px top padding) specifically for this dialog to ensure perfect vertical alignment of the `×` glyph. Reads and writes directly to `QSettings`. On close, emits `settings_changed`, triggering re-initialization of dependent components (language, audio device, backend).
 
 ---
 
@@ -269,3 +272,32 @@ apply_windows_titlebar_dark_mode(hwnd)
 ```
 
 Calls `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` via `ctypes`. No-op on non-Windows platforms.
+
+---
+
+### `custom_titlebar.py`
+
+```python
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
+
+bar = CustomTitleBar(window, icon=app_icon)
+root_layout.addWidget(bar)
+install_size_grip(window)   # call once after the title bar is added
+```
+
+`CustomTitleBar(QWidget)` — a minimal CSD title bar drawn entirely by the application. The owning window must have `Qt.WindowType.FramelessWindowHint` set before it is shown. `ListenMoePlayer._init_ui_base()` and `SettingsDialog.__init__()` both set that flag and insert the title bar at index 0 of a zero-margin root layout, with the regular content layout nested below.
+
+**Public API — `CustomTitleBar`:**
+
+| Method | Description |
+|---|---|
+| `set_title(title: str)` | Update the text shown in the bar (called by `_apply_window_title`) |
+| `sync_maximize_button()` | Refresh the □ / ❐ button; call from `changeEvent` |
+
+**Drag:** mouse press on the bar calls `QWindow.startSystemMove()`, which delegates the move to the compositor or WM. This is the only correct approach on Wayland and works identically on X11 and Windows. Double-clicking the bar toggles maximize.
+
+**Buttons:** minimize (`—`), maximize/restore (`□` / `❐`), close (`×`). All three buttons use 16 px bold weight; the close button uses 24 px so the `×` glyph matches the visual weight of `—` and `□` (though `SettingsDialog` overrides this to 20 px with a top padding for specific vertical alignment). The close button turns red on hover. All styling is scoped to `#customTitleBar` and never leaks to the global application stylesheet.
+
+**`install_size_grip(window)`** — attaches a `QSizeGrip` overlay anchored to the bottom-right corner of a frameless window. A `_GripPositioner` event filter repositions it on every `Resize` event. Qt6's `QSizeGrip` calls `QWindow::startSystemResize()` on Wayland, so resize works correctly without any compositor-specific code.
+
+**Frameless `QMessageBox`:** `ListenMoePlayer._make_frameless_msg(msg)` is a static helper that applies `FramelessWindowHint` and a dark background + border to any `QMessageBox`, keeping dialogs visually consistent with the rest of the app.

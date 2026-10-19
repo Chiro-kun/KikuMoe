@@ -3,12 +3,15 @@ import signal
 import sys
 import traceback
 
-from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 
 from ui.main_window import ListenMoePlayer
 
 _IS_WIN32 = sys.platform == "win32"
+
+if not _IS_WIN32 and "QT_QPA_PLATFORM" not in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
 
 
 def _write_crash_log(exc: BaseException) -> str:
@@ -66,14 +69,16 @@ def main() -> int:
         _sigint_timer.timeout.connect(lambda: None)
 
         window.show()
-        return app.exec_()
+        return app.exec()
     except KeyboardInterrupt:
         return 0
-    except Exception as exc:
+    except BaseException as exc:
         log_path = _write_crash_log(exc)
         try:
-            print("Startup crash:", exc)
-            print("Dettagli in:", log_path)
+            print("\n--- CRITICAL STARTUP ERROR ---")
+            print(f"Type: {type(exc).__name__}")
+            print(f"Error: {exc}")
+            print(f"Details written to: {log_path}\n")
         except Exception:
             pass
         return 1

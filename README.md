@@ -1,6 +1,6 @@
 # KikuMoe v1.10.0
 
-Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt5.  
+Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt6.  
 Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).
 
 ---
@@ -34,7 +34,7 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 **Dipendenze Python** (gestite via `poetry`):
 
 ```
-PyQt5 >= 5.15.4
+PyQt6 >= 6.4.0
 websocket-client >= 1.6.0
 python-vlc >= 3.0.0
 python-mpv >= 1.0.0

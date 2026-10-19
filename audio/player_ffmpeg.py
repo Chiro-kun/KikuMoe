@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any, Callable
 
-from PyQt5.QtCore import QSettings
+from PyQt6.QtCore import QSettings
 
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import get_logger, silence_stderr
@@ -48,6 +48,10 @@ class PlayerFFmpeg:
             self._user_agent = "KikuMoe/1.10.0"
         self._init_audio()
 
+    # PortAudio host API type constants (from portaudio.h)
+    _PA_ALSA = 8
+    _PA_PULSE_AUDIO = 18  # also covers PipeWire-pulse
+
     def _init_audio(self) -> None:
         self._ready = False
         if pyaudio is None:
@@ -56,8 +60,69 @@ class PlayerFFmpeg:
             with silence_stderr():
                 self._pyaudio_instance = pyaudio.PyAudio()
             self._ready = True
+            if not _IS_WIN32:
+                self._linux_preferred_device = self._detect_linux_output_device()
+            else:
+                self._linux_preferred_device = None
         except Exception:
             self._ready = False
+
+    def _detect_linux_output_device(self) -> int | None:
+        """On Linux, pick the best default output device from the highest-priority
+        host API available: PulseAudio/PipeWire (type 18) > ALSA (type 8).
+        Returns a PortAudio device index, or None to fall back to PortAudio's own default.
+        """
+        if pyaudio is None or self._pyaudio_instance is None:
+            return None
+        pa = self._pyaudio_instance
+        for api_type in (self._PA_PULSE_AUDIO, self._PA_ALSA):
+            try:
+                api_info = pa.get_host_api_info_by_type(api_type)
+            except Exception:
+                continue
+            device_count = api_info.get("deviceCount", 0) if isinstance(api_info, dict) else 0
+            if not device_count:
+                continue
+            # Use the default output device reported by this host API
+            default_out = (
+                api_info.get("defaultOutputDevice", -1) if isinstance(api_info, dict) else -1
+            )
+            if default_out is not None and default_out >= 0:
+                try:
+                    dev_info = pa.get_device_info_by_index(default_out)
+                    if isinstance(dev_info, dict) and int(dev_info.get("maxOutputChannels", 0)) > 0:
+                        label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
+                        self.log.debug(
+                            "[FFmpeg] Linux audio: using %s device index=%d (%s)",
+                            label,
+                            default_out,
+                            dev_info.get("name", ""),
+                        )
+                        return default_out
+                except Exception:
+                    pass
+            # No explicit default; take the first output-capable device on this API
+            api_idx = api_info.get("index", -1) if isinstance(api_info, dict) else -1
+            for i in range(pa.get_device_count()):
+                try:
+                    d = pa.get_device_info_by_index(i)
+                    if (
+                        isinstance(d, dict)
+                        and d.get("hostApi") == api_idx
+                        and int(d.get("maxOutputChannels", 0)) > 0
+                    ):
+                        label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
+                        self.log.debug(
+                            "[FFmpeg] Linux audio: using first %s device index=%d (%s)",
+                            label,
+                            i,
+                            d.get("name", ""),
+                        )
+                        return i
+                except Exception:
+                    pass
+        self.log.debug("[FFmpeg] Linux audio: no preferred host API found, using PortAudio default")
+        return None
 
     def is_ready(self) -> bool:
         return bool(self._ready and pyaudio is not None)
@@ -92,20 +157,24 @@ class PlayerFFmpeg:
             return False
 
     def _get_output_device_index(self) -> int | None:
-        """Legge l'indice del dispositivo di output da QSettings;
-        None => dispositivo predefinito di sistema.
+        """Returns the PyAudio output device index to use.
+
+        Priority:
+          1. Explicit user selection from QSettings.
+          2. On Linux: auto-detected PipeWire/Pulse/ALSA device (_linux_preferred_device).
+          3. None → PortAudio's own global default.
         """
         try:
             settings = QSettings(ORG_NAME, APP_SETTINGS)
             val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-            if val in (None, ""):
-                return None
-            try:
+            if val not in (None, ""):
                 return int(val)
-            except Exception:
-                return None
         except Exception:
-            return None
+            pass
+        # On Linux, use the pre-detected preferred device if available
+        if not _IS_WIN32:
+            return getattr(self, "_linux_preferred_device", None)
+        return None
 
     def _sanitize_stream_url(self, raw: str) -> str:
         """Estrae e sanifica un URL di streaming, rimuovendo in modo aggressivo

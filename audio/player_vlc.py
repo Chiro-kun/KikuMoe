@@ -4,7 +4,7 @@ import os
 import sys
 from typing import Callable
 
-from core.constants import APP_NAME, APP_VERSION
+from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
@@ -68,6 +68,25 @@ class PlayerVLC:
                     inst_opts.append(f"--network-caching={nc}")
                 except Exception:
                     pass
+            # Add options to reduce verbose output and improve stream handling
+            inst_opts.extend(
+                [
+                    "--intf",
+                    "dummy",  # No interface
+                    "--quiet",  # Reduce output
+                    "--no-video-title-show",  # No video title
+                    "--no-stats",  # No statistics
+                    "--no-plugins-cache",  # No plugins cache
+                    "--http-reconnect",  # Reconnect on HTTP errors
+                    "--http-continuous",  # Continuous HTTP streaming
+                    "--live-caching=1000",  # Small live caching for smooth playback
+                ]
+            )
+            # On Linux, route audio through PulseAudio (covers PipeWire via pipewire-pulse).
+            # This ensures VLC uses PipeWire when pipewire-pulse is active.
+            if not _IS_WIN32:
+                inst_opts.append("--aout=pulse")
+            # Set HTTP User-Agent globally for VLC instance
             if getattr(self, "_user_agent", None):
                 inst_opts.append(f"--http-user-agent={self._user_agent}")
             self.log.debug("[DEBUG] _init_vlc: creating Instance with opts=%s", inst_opts)
@@ -96,12 +115,72 @@ class PlayerVLC:
             self.player.audio_set_volume(self._volume)
             self.player.audio_set_mute(self._muted)
             self._ready = True
+            # Apply explicit device selection (Linux/pulse only, best-effort)
+            self._apply_linux_audio_device()
             self.log.debug("[DEBUG] _init_vlc: ready")
         except Exception as e:
             self.log.debug("[DEBUG] _init_vlc: exception: %s", e)
             self.instance = None
             self.player = None
             self._ready = False
+
+    def _get_stored_device_name(self) -> str | None:
+        """Return the human-readable PortAudio name of the user-configured output device,
+        or None when the setting is absent or unresolvable."""
+        try:
+            from PyQt6.QtCore import QSettings
+
+            settings = QSettings(ORG_NAME, APP_SETTINGS)
+            val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            if val in (None, ""):
+                return None
+            import pyaudio
+
+            pa = pyaudio.PyAudio()
+            try:
+                info = pa.get_device_info_by_index(int(val))
+                return str(info.get("name", "")) if isinstance(info, dict) else None
+            finally:
+                pa.terminate()
+        except Exception:
+            return None
+
+    def _apply_linux_audio_device(self) -> None:
+        """On Linux with --aout=pulse, enumerate VLC audio output devices and select
+        the one whose description best matches the stored PortAudio device name."""
+        if _IS_WIN32 or not self.is_ready():
+            return
+        device_name = self._get_stored_device_name()
+        if not device_name:
+            return
+        try:
+            assert self.player is not None
+            devices = self.player.audio_output_device_enum()
+            if not devices:
+                return
+            needle = device_name.lower()
+            dev = devices
+            while dev:
+                try:
+                    desc = dev.description
+                    dev_id = dev.device
+                    if isinstance(desc, bytes):
+                        desc = desc.decode(errors="ignore")
+                    if isinstance(dev_id, bytes):
+                        dev_id = dev_id.decode(errors="ignore")
+                    desc_lc = str(desc).lower()
+                    if needle in desc_lc or desc_lc in needle:
+                        self.player.audio_output_device_set(None, dev_id)
+                        self.log.debug("[VLC] audio output device set to: %s (%s)", dev_id, desc)
+                        return
+                except Exception:
+                    pass
+                try:
+                    dev = dev.next
+                except Exception:
+                    break
+        except Exception as e:
+            self.log.debug("[VLC] _apply_linux_audio_device error: %s", e)
 
     def is_ready(self) -> bool:
         return bool(self._ready and self.instance is not None and self.player is not None)
@@ -167,6 +246,7 @@ class PlayerVLC:
                 self.log.debug("[DEBUG] play_url: add_option failed: %s", e)
             self.log.debug("[DEBUG] play_url: set_media + play")
             self.player.set_media(media)
+            self._apply_linux_audio_device()
             self._stopping = False
             ret = self.player.play()
             self.log.debug("[DEBUG] play_url: play() returned %s", ret)

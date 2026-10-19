@@ -1,8 +1,8 @@
 import os
 import sys
 
-from PyQt5.QtCore import QSettings, pyqtSignal
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import QSettings, Qt, pyqtSignal
+from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
@@ -36,6 +36,7 @@ from core.constants import (
 )
 from core.i18n import I18n
 from core.logger import silence_stderr
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
@@ -48,17 +49,48 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         # Rendi il dialogo non modale per permettere interazione con altre finestre (es. DevConsole)
         self.setModal(False)
+        if not _IS_WIN32:
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, "it"))
         self.setWindowTitle(self.i18n.t("settings_title"))
         try:
-            self.setMinimumSize(560, 360)
+            self.setMinimumSize(560, 360 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT))
         except Exception:
             pass
 
+        # Use the Windows-native dialog title bar; Linux keeps the custom one.
+        root_layout = QVBoxLayout()
+        if _IS_WIN32:
+            root_layout.setContentsMargins(16, 16, 16, 16)
+            root_layout.setSpacing(8)
+            self._title_bar = None
+        else:
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            root_layout.setSpacing(0)
+            self._title_bar = CustomTitleBar(self)
+            self._title_bar.set_title(self.i18n.t("settings_title"))
+
+            # Adjust close button alignment specifically for the settings window
+            self._title_bar.setStyleSheet(
+                self._title_bar.styleSheet()
+                + """
+                #customTitleBar QPushButton#titleBarBtnClose {
+                    padding-top: 1px;
+                }
+            """
+            )
+
+            root_layout.addWidget(self._title_bar)
+            install_size_grip(self)
+
         layout = QVBoxLayout()
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        if _IS_WIN32:
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(8)
+        else:
+            layout.setContentsMargins(16, 16, 16, 16)
+            layout.setSpacing(8)
 
         # Autoplay
         self.chk_autoplay = QCheckBox(self.i18n.t("settings_autoplay"))
@@ -293,7 +325,9 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(self.btn_ok)
         layout.addLayout(btn_row)
 
-        self.setLayout(layout)
+        root_layout.addLayout(layout)
+        self.setLayout(root_layout)
+        self.adjustSize()
 
     def _browse_vlc_path(self):
         start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
@@ -326,7 +360,7 @@ class SettingsDialog(QDialog):
             parent = self.parent()
             if parent and hasattr(parent, "open_dev_console"):
                 # Apri la console con parent = finestra principale
-                from PyQt5.QtCore import QTimer
+                from PyQt6.QtCore import QTimer
 
                 QTimer.singleShot(0, lambda: parent.open_dev_console(parent))
         except Exception:
@@ -402,9 +436,20 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
-    def _populate_audio_devices(self):
+    # PortAudio host API type → display tag (same constants as player_ffmpeg.py)
+    _PA_API_TAGS = {
+        8: "ALSA",
+        18: "PipeWire/Pulse",  # paPulseAudio — also used by pipewire-pulse
+        12: "JACK",
+        2: "MME",
+        13: "WASAPI",
+        1: "DirectSound",
+    }
+
+    def _populate_audio_devices(self) -> None:
         """Enumerate PortAudio devices via PyAudio and fill combo box.
-        Keeps first entry as 'System default'; lists output-capable devices with index.
+        Keeps first entry as 'System default'; on Linux annotates each device
+        with its host API (PipeWire/Pulse, ALSA, JACK …).
         """
         try:
             import pyaudio
@@ -412,7 +457,6 @@ class SettingsDialog(QDialog):
             pyaudio = None
         # Keep 'System default' as index 0
         try:
-            # Clear all except first
             for i in range(self.cmb_audio_device.count() - 1, 0, -1):
                 self.cmb_audio_device.removeItem(i)
         except Exception:
@@ -423,16 +467,17 @@ class SettingsDialog(QDialog):
         try:
             with silence_stderr():
                 pa = pyaudio.PyAudio()
-            host_info = (
-                pa.get_host_api_info_by_index(0)
-                if hasattr(pa, "get_host_api_info_by_index")
-                else None
-            )
-            device_count = (
-                host_info.get("deviceCount", 0)
-                if isinstance(host_info, dict)
-                else (pa.get_device_count() if hasattr(pa, "get_device_count") else 0)
-            )
+            # Build host API index → type map for annotation
+            api_type_map: dict = {}
+            try:
+                for api_idx in range(pa.get_host_api_count()):
+                    ai = pa.get_host_api_info_by_index(api_idx)
+                    if isinstance(ai, dict):
+                        api_type_map[api_idx] = ai.get("type", -1)
+            except Exception:
+                pass
+
+            device_count = pa.get_device_count() if hasattr(pa, "get_device_count") else 0
             for i in range(device_count):
                 try:
                     info = pa.get_device_info_by_index(i)
@@ -444,9 +489,14 @@ class SettingsDialog(QDialog):
                 name = str(info.get("name", f"Device {i}"))
                 # Include only devices that can output
                 if max_output > 0:
-                    # Show name and index in label
-                    label = f"{name} (#{i})"
-                    self.cmb_audio_device.addItem(label, userData=i)
+                    if not _IS_WIN32:
+                        api_idx = info.get("hostApi", -1)
+                        api_type = api_type_map.get(api_idx, -1)
+                        tag = self._PA_API_TAGS.get(api_type, "")
+                        label = f"[{tag}] {name} (#{i})" if tag else f"{name} (#{i})"
+                    else:
+                        label = f"{name} (#{i})"
+                    self.cmb_audio_device.addItem(label, i)
             # Restore persisted selection if available
             persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
             if persisted != "" and persisted is not None:

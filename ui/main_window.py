@@ -1,6 +1,7 @@
 import email.utils
 import os
 import re
+import sys
 import threading
 import time
 import urllib.parse
@@ -8,9 +9,9 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, Optional, Set
 
-from PyQt5.QtCore import QEvent, QSettings, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import QEvent, QSettings, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QHBoxLayout,
@@ -18,7 +19,6 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QShortcut,
     QSizePolicy,
     QSlider,
     QSpinBox,
@@ -61,10 +61,13 @@ from core.constants import (
 from core.i18n import I18n
 from core.logger import get_logger
 from network.ws_client import NowPlayingWS
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
 from ui.settings_dialog import SettingsDialog
 from ui.tray_manager import TrayManager
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+
+_IS_WIN32 = sys.platform == "win32"
 
 
 # Custom Progress Bar for Pixel-Perfect Fluidity
@@ -75,7 +78,7 @@ class SmoothProgressBar(QWidget):
         self._max = 100
         self._accent_color = QColor("#c2185b")  # Match app default accent color
         self.setFixedHeight(4)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def setAccentColor(self, color_str):
         self._accent_color = QColor(color_str)
@@ -95,7 +98,7 @@ class SmoothProgressBar(QWidget):
 
     def paintEvent(self, a0):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Background track
         painter.setPen(Qt.PenStyle.NoPen)
@@ -287,7 +290,13 @@ class ListenMoePlayer(QWidget):
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        fixed_w, fixed_h = 500, 620
+        # Keep Windows' native frame/title bar; retain custom chrome on Linux.
+        if _IS_WIN32:
+            self.setWindowFlags(Qt.WindowType.Window)
+        else:
+            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+
+        fixed_w, fixed_h = 500, 620 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT)
         self.setMinimumSize(fixed_w, fixed_h)
         self.resize(fixed_w, fixed_h)
         self._apply_window_title("")
@@ -308,11 +317,18 @@ class ListenMoePlayer(QWidget):
         except Exception:
             self.resize(fixed_w, fixed_h)
 
-        # Root layout: no margins so top header can be edge-to-edge and attached to title bar
+        # Root layout: no margins so title bar and header can be edge-to-edge
         self._root_layout = QVBoxLayout()
         self._root_layout.setContentsMargins(0, 0, 0, 0)
         self._root_layout.setSpacing(0)
         self.setLayout(self._root_layout)
+
+        # Windows uses the native title bar and resize frame.
+        self._title_bar = None
+        if not _IS_WIN32:
+            self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
+            self._root_layout.addWidget(self._title_bar)
+            install_size_grip(self)
 
         # Content layout: regular inner spacing for the rest of the UI
         self._content_widget = QWidget()
@@ -343,7 +359,8 @@ class ListenMoePlayer(QWidget):
         self.menu_bar_layout.addStretch(1)
         # 1. Settings header at the very top (under the Windows title bar)
         if hasattr(self, "_root_layout"):
-            self._root_layout.insertWidget(0, self.settings_header_bar)
+            # The custom title bar occupies index 0 only on Linux.
+            self._root_layout.insertWidget(0 if _IS_WIN32 else 1, self.settings_header_bar)
         else:
             self._layout.addWidget(self.settings_header_bar)
 
@@ -371,7 +388,7 @@ class ListenMoePlayer(QWidget):
         self.media_ambient_block.setObjectName("mediaAmbientBlock")
         self.media_ambient_block.setMinimumHeight(240)
         self.media_stack = QStackedLayout(self.media_ambient_block)
-        self.media_stack.setStackingMode(QStackedLayout.StackAll)
+        self.media_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         self.media_stack.setContentsMargins(0, 0, 0, 0)
 
         self.media_ambient_bg = QLabel("")
@@ -664,7 +681,15 @@ class ListenMoePlayer(QWidget):
             return PlayerFFmpeg(on_event=on_event)
         if backend == "mpv":
             self.log.info("[BACKEND] Using MPV (user setting).")
-            return PlayerMPV(on_event=on_event)
+            player = PlayerMPV(on_event=on_event)
+            if player.is_ready():
+                self.log.info("[BACKEND] MPV backend ready.")
+            else:
+                self.log.error(
+                    "[BACKEND] MPV selected but unavailable: %s",
+                    player.get_init_error() or "libmpv did not initialize",
+                )
+            return player
         if backend == "vlc":
             self.log.info("[BACKEND] Using VLC (user setting).")
             return PlayerVLC(
@@ -790,16 +815,16 @@ class ListenMoePlayer(QWidget):
                 QTimer.singleShot(1000, self.play_stream)
 
             # Global Keyboard Shortcuts (Class scope)
-            QShortcut(QKeySequence(Qt.Key.Key_Up), self, self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Down), self, self._vol_down)
-            QShortcut(QKeySequence(Qt.Key.Key_Plus), self, self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Minus), self, self._vol_down)
-            QShortcut(QKeySequence("="), self, self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._vol_down)
+            QShortcut(QKeySequence(Qt.Key.Key_Plus), self).activated.connect(self._vol_up)
+            QShortcut(QKeySequence(Qt.Key.Key_Minus), self).activated.connect(self._vol_down)
+            QShortcut(QKeySequence("="), self).activated.connect(self._vol_up)
 
             # Legacy/Specific Shortcuts
-            QShortcut(QKeySequence("Space"), self, self.pause_resume)
-            QShortcut(QKeySequence("S"), self, self.stop_stream)
-            QShortcut(QKeySequence("M"), self, self.toggle_mute_shortcut)
+            QShortcut(QKeySequence("Space"), self).activated.connect(self.pause_resume)
+            QShortcut(QKeySequence("S"), self).activated.connect(self.stop_stream)
+            QShortcut(QKeySequence("M"), self).activated.connect(self.toggle_mute_shortcut)
         except Exception:
             pass
 
@@ -813,7 +838,11 @@ class ListenMoePlayer(QWidget):
 
     def _apply_window_title(self, song_title: Optional[str] = None) -> None:
         try:
-            self.setWindowTitle(self._build_window_title(song_title))
+            title = self._build_window_title(song_title)
+            self.setWindowTitle(title)
+            title_bar = getattr(self, "_title_bar", None)
+            if title_bar is not None:
+                title_bar.set_title(title)
         except Exception:
             pass
 
@@ -868,22 +897,27 @@ class ListenMoePlayer(QWidget):
             msg = QMessageBox(self)
             msg.setWindowTitle(self.i18n.t("close_dialog_title"))
             msg.setText(self.i18n.t("close_dialog_text"))
-            msg.setIcon(QMessageBox.Question)
+            msg.setIcon(QMessageBox.Icon.Question)
 
-            tray_btn = msg.addButton(self.i18n.t("close_option_tray"), QMessageBox.AcceptRole)
-            msg.addButton(self.i18n.t("close_option_quit"), QMessageBox.DestructiveRole)
-            cancel_btn = msg.addButton(self.i18n.t("settings_cancel"), QMessageBox.RejectRole)
+            tray_btn = msg.addButton(
+                self.i18n.t("close_option_tray"), QMessageBox.ButtonRole.AcceptRole
+            )
+            msg.addButton(self.i18n.t("close_option_quit"), QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = msg.addButton(
+                self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole
+            )
             msg.setEscapeButton(cancel_btn)
 
             cb = QCheckBox(self.i18n.t("close_remember"))
             msg.setCheckBox(cb)
 
+            self._make_frameless_msg(msg)
             try:
                 apply_windows_titlebar_dark_mode(msg, True)
             except Exception:
                 pass
 
-            msg.exec_()
+            msg.exec()
             clicked = msg.clickedButton()
             if clicked is None or clicked == cancel_btn:
                 # User cancelled close action (Cancel button, Esc, or window X on the dialog)
@@ -946,6 +980,9 @@ class ListenMoePlayer(QWidget):
         event = a0
         try:
             if event.type() == QEvent.Type.WindowStateChange:
+                title_bar = getattr(self, "_title_bar", None)
+                if title_bar is not None:
+                    title_bar.sync_maximize_button()
                 if (
                     self.isMinimized()
                     and self._get_bool(KEY_TRAY_ENABLED, True)
@@ -1568,6 +1605,13 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    @staticmethod
+    def _make_frameless_msg(msg: QMessageBox) -> None:
+        """Remove compositor decorations from a QMessageBox and add a visible border."""
+        if not _IS_WIN32:
+            msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+            msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
+
     def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:
             if icon is None or icon.isNull():
@@ -1579,12 +1623,15 @@ class ListenMoePlayer(QWidget):
                 return icon
             dst = QPixmap(src.size())
             dst.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(dst)
-            painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.drawPixmap(0, 0, src)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-            painter.fillRect(dst.rect(), color)
-            painter.end()
+            painter = QPainter()
+            if painter.begin(dst):
+                try:
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+                    painter.drawPixmap(0, 0, src)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    painter.fillRect(dst.rect(), color)
+                finally:
+                    painter.end()
             return QIcon(dst)
         except Exception:
             return icon
@@ -1729,7 +1776,7 @@ class ListenMoePlayer(QWidget):
             canvas = QPixmap(target_w, target_h)
             canvas.fill(Qt.GlobalColor.transparent)
             painter = QPainter(canvas)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             painter.drawPixmap(0, 0, blurred)
             # Dark overlay keeps controls/text readable.
             painter.fillRect(canvas.rect(), QColor(12, 12, 12, 190))
@@ -1764,7 +1811,7 @@ class ListenMoePlayer(QWidget):
 
                 if fallback_pm is not None and not fallback_pm.isNull():
                     painter = QPainter(canvas)
-                    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                     x = (side - fallback_pm.width()) // 2
                     y = (side - fallback_pm.height()) // 2
                     painter.drawPixmap(x, y, fallback_pm)
@@ -1829,14 +1876,18 @@ class ListenMoePlayer(QWidget):
                     continue
                 canvas = QPixmap(sz, sz)
                 canvas.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(canvas)
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.setRenderHint(QPainter.SmoothPixmapTransform)
-                x = (sz - fitted.width()) // 2
-                y = (sz - fitted.height()) // 2
-                painter.drawPixmap(x, y, fitted)
-                painter.end()
-                tray_icon.addPixmap(canvas)
+                painter = QPainter()
+                if painter.begin(canvas):
+                    try:
+                        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                        x = (sz - fitted.width()) // 2
+                        y = (sz - fitted.height()) // 2
+                        painter.drawPixmap(x, y, fitted)
+                    finally:
+                        painter.end()
+                if not canvas.isNull():
+                    tray_icon.addPixmap(canvas)
 
             return tray_icon if not tray_icon.isNull() else icon
         except Exception:
@@ -1915,11 +1966,13 @@ class ListenMoePlayer(QWidget):
                     # Fallback to manual check if logic is tricky,
                     # but mask().boundingRect() is usually reliable
                     mask = img.createAlphaMask()
-                    rect = (
-                        QPixmap.fromImage(mask).mask().boundingRect()
-                        if not mask.isNull()
-                        else img.rect()
-                    )
+                    if not mask.isNull():
+                        from PyQt6.QtGui import QRegion
+
+                        mask_pm = QPixmap.fromImage(mask).mask()
+                        rect = QRegion(mask_pm).boundingRect() if mask_pm else img.rect()
+                    else:
+                        rect = img.rect()
 
                     if not rect.isEmpty() and rect != img.rect():
                         pixmap = pixmap.copy(rect)
@@ -1937,8 +1990,8 @@ class ListenMoePlayer(QWidget):
 
             # Center the original (now cropped) pixmap onto the square canvas
             painter = QPainter(square_pm)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             x = (max_side - w) // 2
             y = (max_side - h) // 2
             painter.drawPixmap(x, y, pixmap)
@@ -2663,7 +2716,7 @@ class ListenMoePlayer(QWidget):
             ok = bool(self.player and self.player.is_ready())
             # Aggiorna pallino colore
             try:
-                self.vlc_status_icon.setStyleSheet(
+                self.vlc_status_icon.setStyleSheet(  # type: ignore[attr-defined]
                     "background-color: #2e7d32; border-radius: 5px;"
                     if ok
                     else "background-color: #c62828; border-radius: 5px;"
@@ -2679,9 +2732,9 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 txt = None
             if not ok:
-                self.vlc_status.setText(self.i18n.t("vlc_not_found"))
+                self.vlc_status.setText(self.i18n.t("vlc_not_found"))  # type: ignore[attr-defined]
             else:
-                self.vlc_status.setText(txt or "Audio backend OK")
+                self.vlc_status.setText(txt or "Audio backend OK")  # type: ignore[attr-defined]
         except Exception:
             pass
 
@@ -2709,6 +2762,12 @@ class ListenMoePlayer(QWidget):
                     return
                 try:
                     self.log.info(f"[UI] play_stream clicked; backend={type(self.player).__name__}")
+                    if isinstance(self.player, PlayerMPV):
+                        self.log.info(
+                            "[UI] MPV diagnostics: ready=%s; init_error=%s",
+                            self.player.is_ready(),
+                            self.player.get_init_error(),
+                        )
                     # Sanitizza URL prima di log e play
                     try:
                         m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or "")
@@ -2985,15 +3044,19 @@ class ListenMoePlayer(QWidget):
                         msg = QMessageBox(self)
                         msg.setWindowTitle(self.i18n.t("volume_zero_title"))
                         msg.setText(self.i18n.t("volume_zero_text"))
-                        restore_btn = msg.addButton(self.i18n.t("restore"), QMessageBox.AcceptRole)
-                        msg.addButton(self.i18n.t("settings_cancel"), QMessageBox.RejectRole)
-                        msg.setIcon(QMessageBox.Question)
-                        # Forza titlebar scura su Windows per il QMessageBox
+                        restore_btn = msg.addButton(
+                            self.i18n.t("restore"), QMessageBox.ButtonRole.AcceptRole
+                        )
+                        msg.addButton(
+                            self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole
+                        )
+                        msg.setIcon(QMessageBox.Icon.Question)
+                        self._make_frameless_msg(msg)
                         try:
                             apply_windows_titlebar_dark_mode(msg, True)
                         except Exception:
                             pass
-                        msg.exec_()
+                        msg.exec()
                         if msg.clickedButton() == restore_btn:
                             if hasattr(self, "volume_slider"):
                                 self.volume_slider.setValue(60)

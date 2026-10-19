@@ -22,12 +22,57 @@ poetry run python KikuMoe.py --debug
 
 ---
 
+## Linux platform notes
+
+### Display (Wayland / X11)
+
+`KikuMoe.py` sets `QT_QPA_PLATFORM=wayland;xcb` before creating `QApplication` when running on Linux and the variable is not already set. Qt will try Wayland first and fall back to XCB (X11) automatically. To force X11, run:
+
+```bash
+QT_QPA_PLATFORM=xcb poetry run python KikuMoe.py
+```
+
+### Window decorations (CSD)
+
+All windows (`ListenMoePlayer`, `SettingsDialog`, `QMessageBox` dialogs) use `Qt.WindowType.FramelessWindowHint` — compositor/WM decorations are intentionally suppressed. `CustomTitleBar` (`ui/custom_titlebar.py`) draws the title bar, window buttons, and drag surface entirely within Qt. This works identically on Wayland, XCB, and Windows and eliminates any dependence on the compositor's decoration protocol (`xdg-decoration-unstable-v1`).
+
+A `QSizeGrip` overlay (bottom-right corner) provides resize. On Wayland, Qt6's `QSizeGrip` uses `QWindow::startSystemResize()` internally.
+
+### Audio (PipeWire / PulseAudio / ALSA)
+
+Each backend routes audio on Linux without requiring manual configuration:
+
+**FFmpeg / PyAudio (`PlayerFFmpeg`)** — probes PortAudio host APIs at startup and selects the default output device of the first available backend:
+
+| Priority | PortAudio host API | Typical provider |
+|---|---|---|
+| 1 | PulseAudio (type 18) | PipeWire-pulse **or** PulseAudio |
+| 2 | ALSA (type 8) | Direct ALSA |
+
+The **Audio output** selector in Settings lists each device with its host API tag (`[PipeWire/Pulse]`, `[ALSA]`, etc.) so the user can override the auto-detected device.
+
+**MPV (`PlayerMPV`)** — passes `ao='pipewire,pulse,alsa'` to libmpv when a PipeWire socket is detected at `/run/user/<uid>/pipewire-0`, otherwise `ao='pulse,alsa'`. libmpv tries each driver in order and falls back automatically.
+
+**VLC (`PlayerVLC`)** — passes `--aout=pulse` to the VLC instance on Linux, routing audio through PulseAudio. On systems running PipeWire, `pipewire-pulse` transparently satisfies this.
+
+**System dependencies** (not installed by Poetry):
+
+```bash
+# Arch / CachyOS
+sudo pacman -S pipewire pipewire-pulse wireplumber ffmpeg
+
+# Debian / Ubuntu
+sudo apt install pipewire pipewire-pulse wireplumber ffmpeg libportaudio2
+```
+
+---
+
 ## Settings system
 
 All settings persist via `QSettings`:
 
 ```python
-from PyQt5.QtCore import QSettings
+from PyQt6.QtCore import QSettings
 from core.constants import ORG_NAME, APP_SETTINGS, KEY_VOLUME
 
 settings = QSettings(ORG_NAME, APP_SETTINGS)
