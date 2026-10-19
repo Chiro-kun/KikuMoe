@@ -32,6 +32,7 @@ class PlayerVLC:
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
+        self._init_error: str | None = None
         # Set when stop()/play_url() is in progress so that stale VLC events
         # (EndReached, EncounteredError) fired during teardown do not trigger
         # restart logic in the main window.
@@ -46,8 +47,10 @@ class PlayerVLC:
 
     def _init_vlc(self) -> None:
         self._ready = False
+        self._init_error = None
         if vlc is None:
-            self.log.debug("[DEBUG] _init_vlc: python-vlc not available")
+            self._init_error = "Modulo python-vlc non installato o non disponibile"
+            self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
             return
         # Setup plugin path if provided
         if self._vlc_path and os.path.isdir(self._vlc_path):
@@ -93,11 +96,15 @@ class PlayerVLC:
             with silence_stderr():
                 self.instance = vlc.Instance(inst_opts)
             if self.instance is None:
-                self.log.debug("[DEBUG] _init_vlc: vlc.Instance() returned None")
+                self._init_error = (
+                    "Creazione vlc.Instance() fallita (libvlc non trovata o non inizializzata)"
+                )
+                self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
                 return
             self.player = self.instance.media_player_new()
             if self.player is None:
-                self.log.debug("[DEBUG] _init_vlc: media_player_new() returned None")
+                self._init_error = "Creazione media_player_new() fallita"
+                self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
                 return
             self.log.debug("[DEBUG] _init_vlc: instance and player created OK")
             try:
@@ -119,6 +126,7 @@ class PlayerVLC:
             self._apply_linux_audio_device()
             self.log.debug("[DEBUG] _init_vlc: ready")
         except Exception as e:
+            self._init_error = f"Errore inizializzazione VLC: {e}"
             self.log.debug("[DEBUG] _init_vlc: exception: %s", e)
             self.instance = None
             self.player = None
@@ -194,6 +202,9 @@ class PlayerVLC:
                 pass
         self._init_vlc()
         return self.is_ready()
+
+    def get_init_error(self) -> str | None:
+        return self._init_error
 
     def _emit(self, code: str, value: int | None = None) -> None:
         if self._on_event:

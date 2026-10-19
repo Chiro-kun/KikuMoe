@@ -218,7 +218,7 @@ class PlayerMPV:
         linux_ao: str | None = None
         if not _IS_WIN32:
             try:
-                uid = os.getuid()
+                uid = os.getuid()  # type: ignore[attr-defined]
                 pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR", f"/run/user/{uid}")
                 if os.path.exists(os.path.join(pw_sock, "pipewire-0")):
                     linux_ao = "pipewire,pulse,alsa"
