@@ -563,21 +563,21 @@ class PlayerFFmpeg:
                 "[DEBUG] _stream_worker: sanitized url: %r from raw: %r", safe_url, raw_url
             )
 
-            # Costruisci lista di URL candidati con fallback automatici
+            # Costruisci lista di URL candidati con fallback automatici (solo endpoint HTTPS)
             candidates: list[str] = [safe_url]
             try:
                 u = safe_url.lower()
                 if "/kpop/" in u:
-                    # Preferisci HTTPS Vorbis prima di M3U/HTTP
                     candidates.append("https://listen.moe/kpop/stream")
                     candidates.append("https://listen.moe/kpop/stream.m3u")
-                    candidates.append("http://listen.moe:9999/kpop/stream")
                 else:
                     candidates.append("https://listen.moe/stream")
                     candidates.append("https://listen.moe/stream.m3u")
-                    candidates.append("http://listen.moe:9999/stream")
             except Exception:
                 pass
+
+            # Rimuovi eventuali endpoint non-HTTPS per prevenire stream in chiaro
+            candidates = [c for c in candidates if c.lower().startswith("https://")] or [safe_url]
 
             # Tenta in sequenza ogni URL candidato finché non si ricevono dati
             started_streaming = False
