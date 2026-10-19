@@ -6,40 +6,90 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
+from core.constants import (
+    APP_NAME,
+    APP_SETTINGS,
+    APP_VERSION,
+    KEY_AUDIO_DEVICE_INDEX,
+    ORG_NAME,
+    _get_project_root,
+)
 from core.logger import get_logger
 
 _IS_WIN32 = sys.platform == "win32"
 
 
 def _find_libmpv_path() -> str | None:
-    """Cerca la DLL di libmpv nelle posizioni comuni su Windows."""
+    """Cerca la DLL di libmpv nelle posizioni comuni su Windows in modo robusto."""
     if not _IS_WIN32:
         return None
+
+    # Se MPV_PATH punta direttamente a un file esistente, usalo subito
+    env_mpv_path = os.environ.get("MPV_PATH")
+    if env_mpv_path and os.path.isfile(env_mpv_path):
+        return str(Path(env_mpv_path).resolve())
 
     # Nomi comuni per libmpv su Windows
     names = ["libmpv-2.dll", "mpv-2.dll", "libmpv-1.dll", "mpv-1.dll", "mpv.dll"]
 
-    # Cerca nella root dell'app e nella cartella audio/
+    candidate_dirs: list[Path] = []
+
+    # 1. Directory da variabile d'ambiente MPV_DIR se specificata
+    env_mpv_dir = os.environ.get("MPV_DIR")
+    if env_mpv_dir:
+        candidate_dirs.append(Path(env_mpv_dir))
+
+    # 2. Se congelato (PyInstaller)
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate_dirs.append(Path(meipass))
+        candidate_dirs.append(Path(sys.executable).resolve().parent)
+    else:
+        # In sviluppo: radice del repository determinata dal file corrente
+        script_dir = Path(__file__).resolve().parent  # <repo>/audio
+        repo_root = script_dir.parent                 # <repo>
+        candidate_dirs.append(repo_root)
+        candidate_dirs.append(script_dir)
+        candidate_dirs.append(repo_root / "packaging" / "windows")
+
+        try:
+            proj_root = Path(_get_project_root()).resolve()
+            candidate_dirs.append(proj_root)
+            candidate_dirs.append(proj_root / "packaging" / "windows")
+        except Exception:
+            pass
+
+    # 3. Cartella di lavoro corrente (CWD) come fallback
     try:
-        # Percorso della root (dove solitamente sta l'eseguibile o lo script principale)
-        root_dir = Path(getattr(sys, "_MEIPASS", os.getcwd()))
-        # Percorso locale dello script audio/player_mpv.py
-        script_dir = Path(__file__).parent
-        # Percorso di packaging (sviluppo locale)
-        packaging_win_dir = root_dir / "packaging" / "windows"
-
-        search_dirs = [root_dir, script_dir, packaging_win_dir]
-
-        for d in search_dirs:
-            if not d.exists():
-                continue
-            for name in names:
-                dll_path = d / name
-                if dll_path.exists():
-                    return str(dll_path.resolve())
+        cwd = Path.cwd().resolve()
+        candidate_dirs.append(cwd)
+        candidate_dirs.append(cwd / "packaging" / "windows")
+        candidate_dirs.append(cwd / "audio")
     except Exception:
         pass
+
+    # 4. Rimuovi duplicati preservando l'ordine
+    unique_dirs: list[Path] = []
+    seen = set()
+    for d in candidate_dirs:
+        try:
+            resolved = d.resolve()
+            if resolved not in seen and resolved.is_dir():
+                seen.add(resolved)
+                unique_dirs.append(resolved)
+        except Exception:
+            pass
+
+    # 5. Cerca le DLL nelle directory individuate
+    for d in unique_dirs:
+        for name in names:
+            dll_path = d / name
+            try:
+                if dll_path.is_file():
+                    return str(dll_path.resolve())
+            except Exception:
+                pass
 
     return None
 
