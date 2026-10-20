@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libmpv-dev ffmpeg file wget \
+            libmpv-dev ffmpeg file wget portaudio19-dev \
             libglib2.0-0 libgl1 libegl1 \
             libxkbcommon0 libdbus-1-3 \
             libfontconfig1 libfreetype6
@@ -137,4 +137,3 @@ jobs:
             release-artifacts/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
