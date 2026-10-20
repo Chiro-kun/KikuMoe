@@ -982,7 +982,7 @@ class ListenMoePlayer(QWidget):
             if hasattr(self, "player") and self.player:
                 self.player.stop()
             if hasattr(self, "ws") and self.ws:
-                ws_stop = getattr(self.ws, "stop", None)
+                ws_stop = getattr(self.ws, "stop", None) or getattr(self.ws, "shutdown", None)
                 if callable(ws_stop):
                     ws_stop()
         except Exception:
