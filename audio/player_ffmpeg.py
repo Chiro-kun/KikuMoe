@@ -40,6 +40,7 @@ class PlayerFFmpeg:
         self._ffmpeg_process: subprocess.Popen | None = None
         # Track pause state explicitly
         self._paused: bool = False
+        self._init_error: str | None = None
         self.log = get_logger("PlayerFFmpeg")
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.10.0")
         try:
@@ -54,7 +55,9 @@ class PlayerFFmpeg:
 
     def _init_audio(self) -> None:
         self._ready = False
+        self._init_error = None
         if pyaudio is None:
+            self._init_error = "Modulo pyaudio non installato o non disponibile"
             return
         try:
             with silence_stderr():
@@ -64,7 +67,8 @@ class PlayerFFmpeg:
                 self._linux_preferred_device = self._detect_linux_output_device()
             else:
                 self._linux_preferred_device = None
-        except Exception:
+        except Exception as e:
+            self._init_error = f"Errore inizializzazione PyAudio: {e}"
             self._ready = False
 
     def _detect_linux_output_device(self) -> int | None:
@@ -131,6 +135,9 @@ class PlayerFFmpeg:
         self, libvlc_path: str | None = None, network_caching_ms: int | None = None
     ) -> bool:
         return self.is_ready()
+
+    def get_init_error(self) -> str | None:
+        return self._init_error
 
     def _emit(self, code: str, value: int | None = None) -> None:
         if self._on_event:
@@ -556,21 +563,21 @@ class PlayerFFmpeg:
                 "[DEBUG] _stream_worker: sanitized url: %r from raw: %r", safe_url, raw_url
             )
 
-            # Costruisci lista di URL candidati con fallback automatici
+            # Costruisci lista di URL candidati con fallback automatici (solo endpoint HTTPS)
             candidates: list[str] = [safe_url]
             try:
                 u = safe_url.lower()
                 if "/kpop/" in u:
-                    # Preferisci HTTPS Vorbis prima di M3U/HTTP
                     candidates.append("https://listen.moe/kpop/stream")
                     candidates.append("https://listen.moe/kpop/stream.m3u")
-                    candidates.append("http://listen.moe:9999/kpop/stream")
                 else:
                     candidates.append("https://listen.moe/stream")
                     candidates.append("https://listen.moe/stream.m3u")
-                    candidates.append("http://listen.moe:9999/stream")
             except Exception:
                 pass
+
+            # Rimuovi eventuali endpoint non-HTTPS per prevenire stream in chiaro
+            candidates = [c for c in candidates if c.lower().startswith("https://")] or [safe_url]
 
             # Tenta in sequenza ogni URL candidato finché non si ricevono dati
             started_streaming = False

@@ -2,6 +2,7 @@ import os
 import signal
 import sys
 import traceback
+from datetime import datetime
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
@@ -9,9 +10,23 @@ from PyQt6.QtWidgets import QApplication
 from ui.main_window import ListenMoePlayer
 
 _IS_WIN32 = sys.platform == "win32"
+_MAX_CRASH_LOG_SIZE = 512 * 1024  # 512 KB
 
 if not _IS_WIN32 and "QT_QPA_PLATFORM" not in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
+
+
+def _rotate_crash_log(log_path: str, max_bytes: int = _MAX_CRASH_LOG_SIZE) -> None:
+    try:
+        if os.path.isfile(log_path) and os.path.getsize(log_path) >= max_bytes:
+            backup_path = f"{log_path}.1"
+            try:
+                os.replace(log_path, backup_path)
+            except Exception:
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.truncate(0)
+    except Exception:
+        pass
 
 
 def _write_crash_log(exc: BaseException) -> str:
@@ -30,9 +45,11 @@ def _write_crash_log(exc: BaseException) -> str:
     except Exception:
         pass
     log_path = os.path.join(base_dir, "crash.log")
+    _rotate_crash_log(log_path)
     try:
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write("\n=== KikuMoe Crash ===\n")
+            f.write(f"\n=== KikuMoe Crash [{timestamp}] ===\n")
             f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
     except Exception:
         pass
