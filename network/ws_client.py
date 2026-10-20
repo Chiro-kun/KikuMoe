@@ -1,12 +1,12 @@
 import json
 import threading
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 try:
     from websocket import WebSocketApp
 except Exception:
     WebSocketApp = None  # type: ignore[assignment, misc]
-from datetime import datetime, timezone
 
 WS_URL = "wss://listen.moe/gateway_v2"
 
@@ -24,6 +24,7 @@ class NowPlayingWS:
         self.ws_thread: Optional[threading.Thread] = None
         self.ws_heartbeat_interval_ms: Optional[int] = None
         self.ws_heartbeat_timer: Optional[threading.Timer] = None
+        self._reconnect_timer: Optional[threading.Timer] = None
         self.ws_should_reconnect: bool = True
         self.on_now_playing = on_now_playing
         self.on_error_text = on_error_text
@@ -32,6 +33,15 @@ class NowPlayingWS:
         self.ws_url = ws_url or WS_URL
 
     def start(self):
+        if not self.ws_should_reconnect:
+            return
+        if self._reconnect_timer:
+            try:
+                self._reconnect_timer.cancel()
+            except Exception:
+                pass
+            self._reconnect_timer = None
+
         if WebSocketApp is None:
             try:
                 self.on_error_text(
@@ -118,7 +128,14 @@ class NowPlayingWS:
         def on_close(ws, code, msg):
             self.on_closed_text("")
             if self.ws_should_reconnect:
-                threading.Timer(5.0, self.start).start()
+                if self._reconnect_timer:
+                    try:
+                        self._reconnect_timer.cancel()
+                    except Exception:
+                        pass
+                self._reconnect_timer = threading.Timer(5.0, self.start)
+                self._reconnect_timer.daemon = True
+                self._reconnect_timer.start()
 
         self.ws_app = WebSocketApp(
             self.ws_url,
@@ -151,8 +168,15 @@ class NowPlayingWS:
     def shutdown(self):
         self.ws_should_reconnect = False
         try:
+            if self._reconnect_timer:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
+        except Exception:
+            pass
+        try:
             if self.ws_heartbeat_timer:
                 self.ws_heartbeat_timer.cancel()
+                self.ws_heartbeat_timer = None
         except Exception:
             pass
         try:
@@ -165,3 +189,6 @@ class NowPlayingWS:
                 self.ws_thread.join(timeout=1.0)
         except Exception:
             pass
+
+    def stop(self):
+        self.shutdown()
