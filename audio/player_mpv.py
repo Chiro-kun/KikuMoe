@@ -48,7 +48,7 @@ def _find_libmpv_path() -> str | None:
     else:
         # In sviluppo: radice del repository determinata dal file corrente
         script_dir = Path(__file__).resolve().parent  # <repo>/audio
-        repo_root = script_dir.parent                 # <repo>
+        repo_root = script_dir.parent  # <repo>
         candidate_dirs.append(repo_root)
         candidate_dirs.append(script_dir)
         candidate_dirs.append(repo_root / "packaging" / "windows")
