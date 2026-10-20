@@ -5,7 +5,8 @@ if %errorLevel% == 0 (
     echo Amministratore confermato.
 ) else (
     echo Richiesti privilegi di amministratore. Riavvio come amministratore...
-    powershell -Command "Start-Process -FilePath '%~f0' -ArgumentList 'elevated' -Verb RunAs"
+    set "SCRIPT_PATH=%~f0"
+    powershell -NoProfile -Command "Start-Process -FilePath $env:SCRIPT_PATH -ArgumentList 'elevated' -Verb RunAs"
     exit /b
 )
 
