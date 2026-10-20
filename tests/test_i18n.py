@@ -23,4 +23,3 @@ def test_i18n_lookup_and_fallback():
 
     # Non-existent key returns key itself
     assert i18n.t("non_existent_key_xyz") == "non_existent_key_xyz"
-
