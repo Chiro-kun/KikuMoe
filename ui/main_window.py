@@ -725,8 +725,7 @@ class ListenMoePlayer(QWidget):
         if not player.is_ready():
             vlc_err = getattr(player, "get_init_error", lambda: None)()
             self.log.error(
-                "[BACKEND] All audio backends failed to initialize! "
-                "FFmpeg: %s | MPV: %s | VLC: %s",
+                "[BACKEND] All audio backends failed to initialize! FFmpeg: %s | MPV: %s | VLC: %s",
                 ffmpeg_err or "unavailable",
                 mpv_err or "unavailable",
                 vlc_err or "unavailable",
