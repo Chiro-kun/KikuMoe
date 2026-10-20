@@ -1678,6 +1678,8 @@ class ListenMoePlayer(QWidget):
         except Exception:
             return icon
 
+    _ALLOWED_COVER_HOSTS = frozenset({"cdn.listen.moe", "listen.moe"})
+
     def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
         try:
             if not isinstance(cover_ref, str):
@@ -1686,19 +1688,34 @@ class ListenMoePlayer(QWidget):
             if not value:
                 return None
 
-            raw_url = value
             low = value.lower()
-            if not (low.startswith("http://") or low.startswith("https://")):
-                raw_url = f"https://cdn.listen.moe/covers/{value.lstrip('/')}"
+            if low.startswith("http://"):
+                # Rifiuta esplicitamente endpoint HTTP in chiaro
+                return None
+
+            if low.startswith("https://"):
+                raw_url = value
+            else:
+                clean_val = value.lstrip("/")
+                if clean_val.lower().startswith("covers/"):
+                    clean_val = clean_val[7:]
+                raw_url = f"https://cdn.listen.moe/covers/{clean_val}"
 
             parts = urllib.parse.urlsplit(raw_url)
-            if not parts.scheme or not parts.netloc:
+            if parts.scheme.lower() != "https" or not parts.netloc:
+                return None
+
+            host = (parts.hostname or "").lower()
+            if not host or host not in ListenMoePlayer._ALLOWED_COVER_HOSTS:
+                return None
+
+            if parts.port not in (None, 443):
                 return None
 
             # Encode non-ASCII and unsafe chars in path (preserve '/' and already-encoded '%xx')
             safe_path = urllib.parse.quote(parts.path, safe="/%")
             return urllib.parse.urlunsplit(
-                (parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment)
+                ("https", parts.netloc, safe_path, parts.query, parts.fragment)
             )
         except Exception:
             return None
@@ -1735,6 +1752,12 @@ class ListenMoePlayer(QWidget):
     def _download_album_cover_worker(self, cover_url: str) -> None:
         raw = b""
         try:
+            parts = urllib.parse.urlsplit(cover_url)
+            host = (parts.hostname or "").lower()
+            if parts.scheme.lower() != "https" or host not in self._ALLOWED_COVER_HOSTS:
+                return
+            if parts.port not in (None, 443):
+                return
             req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.10.0"})
             with urllib.request.urlopen(req, timeout=8) as res:
                 chunk = res.read((4 * 1024 * 1024) + 1)
