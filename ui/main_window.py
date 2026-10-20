@@ -1757,7 +1757,7 @@ class ListenMoePlayer(QWidget):
                 return
             if parts.port not in (None, 443):
                 return
-            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.10.0"})
+            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.11.0"})
             with urllib.request.urlopen(req, timeout=8) as res:
                 chunk = res.read((4 * 1024 * 1024) + 1)
                 if isinstance(chunk, (bytes, bytearray)) and 0 < len(chunk) <= (4 * 1024 * 1024):

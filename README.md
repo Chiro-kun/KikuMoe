@@ -1,4 +1,4 @@
-# KikuMoe v1.10.0
+# KikuMoe v1.11.0
 
 Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt6.  
 Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).

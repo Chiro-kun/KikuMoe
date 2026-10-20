@@ -42,11 +42,11 @@ class PlayerFFmpeg:
         self._paused: bool = False
         self._init_error: str | None = None
         self.log = get_logger("PlayerFFmpeg")
-        # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.10.0")
+        # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.11.0")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
         except Exception:
-            self._user_agent = "KikuMoe/1.10.0"
+            self._user_agent = "KikuMoe/1.11.0"
         self._init_audio()
 
     # PortAudio host API type constants (from portaudio.h)

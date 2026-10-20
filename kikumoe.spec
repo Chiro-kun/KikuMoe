@@ -58,8 +58,17 @@ if icon_dir.is_dir():
 
 # Include version.yml if present so the app can read it at runtime in onefile
 version_yml = repo_root / "version.yml"
+app_version = "1.11.0"
 if version_yml.exists():
     datas.append((str(version_yml), "."))
+    try:
+        import re
+
+        m = re.search(r"version:\s*([^\s]+)", version_yml.read_text(encoding="utf-8"))
+        if m:
+            app_version = m.group(1).strip()
+    except Exception:
+        pass
 
 # On Linux, include the desktop integration icon for runtime use (e.g. fallback
 # for setWindowIcon when the icons/ directory lookup fails in frozen builds).
@@ -134,7 +143,7 @@ exe = EXE(
     a.binaries,
     a.zipfiles,
     a.datas,
-    name="KikuMoe-1.10.0",
+    name=f"KikuMoe-{app_version}",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

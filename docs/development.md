@@ -110,7 +110,7 @@ Strings are accessed everywhere via `self._i18n.t("key")`. A runtime language sw
 The version is defined in `version.yml` at the repository root:
 
 ```yaml
-version: 1.10.0
+version: 1.11.0
 ```
 
 To release a new version:
