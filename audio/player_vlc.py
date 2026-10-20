@@ -281,7 +281,6 @@ class PlayerVLC:
             assert self.player is not None
             self._stopping = True
             self.player.stop()
-            self.force_kill_all_vlc()
             self._stopping = False
             self._emit("stopped", None)
             self.log.debug("[DEBUG] stop: done")
@@ -392,85 +391,47 @@ class PlayerVLC:
         """Return configured libvlc path (folder) or None if using system/PATH."""
         return self._vlc_path
 
-    def force_kill_all_vlc(self) -> None:
-        """Force kill all VLC processes as last resort."""
-        try:
-            import subprocess
-
-            if _IS_WIN32:
-                subprocess.run(
-                    ["taskkill", "/f", "/im", "vlc.exe"],
-                    capture_output=True,
-                    check=False,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-                )
-                subprocess.run(
-                    ["taskkill", "/f", "/im", "libvlc.dll"],
-                    capture_output=True,
-                    check=False,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-                )
-            else:
-                subprocess.run(["pkill", "-f", "vlc"], capture_output=True, check=False)
-                subprocess.run(["pkill", "-f", "libvlc"], capture_output=True, check=False)
-        except Exception:
-            pass
-
     def force_cleanup(self) -> None:
-        """Force cleanup of current media and connections."""
-        if not self.is_ready():
-            return
+        """Force cleanup of current media and connections using in-process release."""
+        self._stopping = True
         try:
-            assert self.player is not None
-            self._stopping = True
-            try:
-                self.player.stop()
-            except Exception:
-                pass
-            # Force kill any remaining VLC processes
-            self.force_kill_all_vlc()
-            self._stopping = False
-        except Exception:
-            self._stopping = False
-
-    def _force_complete_cleanup(self) -> None:
-        """Force complete cleanup by recreating VLC instance."""
-        try:
-            # Save current volume and mute state
             current_volume = self._volume
             current_mute = self._muted
 
-            # Stop and release current player
-            if self.player:
+            if self.player is not None:
                 try:
                     self.player.stop()
+                except Exception:
+                    pass
+                try:
                     self.player.set_media(None)
                 except Exception:
                     pass
+                try:
+                    self.player.release()
+                except Exception:
+                    pass
+                self.player = None
 
-            # Release the instance completely
-            if self.instance:
+            if self.instance is not None:
                 try:
                     self.instance.release()
                 except Exception:
                     pass
+                self.instance = None
 
-            # Clear references
-            self.player = None
-            self.instance = None
             self._ready = False
 
-            # Wait longer for complete cleanup
-            import time
-
-            time.sleep(0.5)
-
-            # Reinitialize VLC
+            # Reinitialize VLC so backend is ready for subsequent playback
             self._init_vlc()
-
-            # Restore volume and mute state
             if self.is_ready():
                 self.set_volume(current_volume)
                 self.set_mute(current_mute)
         except Exception:
             pass
+        finally:
+            self._stopping = False
+
+    def _force_complete_cleanup(self) -> None:
+        """Alias for force_cleanup for backward compatibility."""
+        self.force_cleanup()
