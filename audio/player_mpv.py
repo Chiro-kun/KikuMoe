@@ -60,16 +60,7 @@ def _find_libmpv_path() -> str | None:
         except Exception:
             pass
 
-    # 3. Cartella di lavoro corrente (CWD) come fallback
-    try:
-        cwd = Path.cwd().resolve()
-        candidate_dirs.append(cwd)
-        candidate_dirs.append(cwd / "packaging" / "windows")
-        candidate_dirs.append(cwd / "audio")
-    except Exception:
-        pass
-
-    # 4. Rimuovi duplicati preservando l'ordine
+    # 3. Rimuovi duplicati preservando l'ordine (NO fallback su CWD per prevenire DLL hijacking)
     unique_dirs: list[Path] = []
     seen = set()
     for d in candidate_dirs:
