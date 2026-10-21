@@ -1244,9 +1244,7 @@ class ListenMoePlayer(QWidget):
                         self.schedule_play.emit(1000)
                         # Optionally only notify on unexpected end if not already retrying
                         if getattr(self, "_retry_count", 0) == 0:
-                            self.notify_tray.emit(
-                                "Listen.moe", "Audio riavviato: il timer di sessione continua"
-                            )
+                            self.notify_tray.emit("Listen.moe", self.t("tray_audio_restarted"))
                 else:
                     # Reset on explicit stop (unless skip flag is set)
                     if not getattr(self, "_skip_session_reset_once", False):
@@ -1296,9 +1294,7 @@ class ListenMoePlayer(QWidget):
                             f"[UI] Maximum retries ({self._retry_count}) reached. Giving up."
                         )
                         # Always notify when we stop permanently
-                        self.notify_tray.emit(
-                            "Listen.moe", "Errore persistente: ricarica interrotta."
-                        )
+                        self.notify_tray.emit("Listen.moe", self.t("tray_persistent_error"))
             self._refresh_play_button_text()
         except Exception:
             pass
@@ -1702,12 +1698,13 @@ class ListenMoePlayer(QWidget):
             self.autoplay_checkbox.setText(self.i18n.t("settings_autoplay"))
         if hasattr(self, "playback_controls"):
             self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
-        # Update dev console dialog texts if open
+        # Update dev console translator and dialog texts if open
         try:
-            if hasattr(self, "dev_console") and self.dev_console and self.dev_console.is_open():
+            if hasattr(self, "dev_console") and self.dev_console:
                 try:
                     self.dev_console.set_translator(self.i18n)
-                    self.dev_console.refresh_texts()
+                    if self.dev_console.is_open():
+                        self.dev_console.refresh_texts()
                 except Exception:
                     pass
         except Exception:
@@ -2333,9 +2330,7 @@ class ListenMoePlayer(QWidget):
                         if new_audio_idx != getattr(self, "_apply_prev_audio_idx", ""):
                             if was_playing:
                                 self._restart_playback_with_session_persistence(
-                                    notification_body=(
-                                        "Audio riavviato: il timer di sessione continua"
-                                    )
+                                    notification_body=self.t("tray_audio_restarted")
                                 )
                             self._apply_prev_audio_idx = new_audio_idx
                     except Exception:
@@ -2402,7 +2397,7 @@ class ListenMoePlayer(QWidget):
                     if new_audio_idx != prev_audio_idx:
                         if was_playing:
                             self._restart_playback_with_session_persistence(
-                                notification_body="Audio riavviato: il timer di sessione continua"
+                                notification_body=self.t("tray_audio_restarted")
                             )
                 except Exception:
                     pass
@@ -2533,9 +2528,10 @@ class ListenMoePlayer(QWidget):
                     self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
                 except Exception:
                     return
-            # Ensure the [DEV] filter is up-to-date with settings
+            # Ensure the [DEV] filter and translator are up-to-date with settings
             try:
                 if hasattr(self, "dev_console") and self.dev_console:
+                    self.dev_console.set_translator(self.i18n)
                     self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
             except Exception:
                 pass
@@ -3005,7 +3001,7 @@ class ListenMoePlayer(QWidget):
                 was_playing = False
             if was_playing:
                 self._restart_playback_with_session_persistence(
-                    notification_body="Audio riavviato: il timer di sessione continua"
+                    notification_body=self.t("tray_audio_restarted")
                 )
             else:
                 # Se non stava riproducendo, aggiorna comunque icona/tooltip
@@ -3079,7 +3075,7 @@ class ListenMoePlayer(QWidget):
                     self.status_changed.emit(self.t("status_error"))
                     return
                 if not getattr(self.player, "is_ready", lambda: False)():
-                    init_err = getattr(self.player, "get_init_error", lambda: "sconosciuto")()
+                    init_err = getattr(self.player, "get_init_error", lambda: "unknown")()
                     self.log.error(
                         "[UI] play_stream aborted: backend %s is not ready: %s",
                         type(self.player).__name__,

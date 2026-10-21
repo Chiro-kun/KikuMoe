@@ -49,7 +49,7 @@ class PlayerVLC:
         self._ready = False
         self._init_error = None
         if vlc is None:
-            self._init_error = "Modulo python-vlc non installato o non disponibile"
+            self._init_error = "python-vlc module not installed or unavailable"
             self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
             return
         # Setup plugin path if provided
@@ -97,13 +97,13 @@ class PlayerVLC:
                 self.instance = vlc.Instance(inst_opts)
             if self.instance is None:
                 self._init_error = (
-                    "Creazione vlc.Instance() fallita (libvlc non trovata o non inizializzata)"
+                    "vlc.Instance() creation failed (libvlc not found or not initialized)"
                 )
                 self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
                 return
             self.player = self.instance.media_player_new()
             if self.player is None:
-                self._init_error = "Creazione media_player_new() fallita"
+                self._init_error = "media_player_new() creation failed"
                 self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
                 return
             self.log.debug("[DEBUG] _init_vlc: instance and player created OK")
@@ -126,7 +126,7 @@ class PlayerVLC:
             self._apply_linux_audio_device()
             self.log.debug("[DEBUG] _init_vlc: ready")
         except Exception as e:
-            self._init_error = f"Errore inizializzazione VLC: {e}"
+            self._init_error = f"VLC initialization error: {e}"
             self.log.debug("[DEBUG] _init_vlc: exception: %s", e)
             self.instance = None
             self.player = None

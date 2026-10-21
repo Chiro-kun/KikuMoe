@@ -57,7 +57,7 @@ class PlayerFFmpeg:
         self._ready = False
         self._init_error = None
         if pyaudio is None:
-            self._init_error = "Modulo pyaudio non installato o non disponibile"
+            self._init_error = "pyaudio module not installed or unavailable"
             return
         try:
             with silence_stderr():
@@ -68,7 +68,7 @@ class PlayerFFmpeg:
             else:
                 self._linux_preferred_device = None
         except Exception as e:
-            self._init_error = f"Errore inizializzazione PyAudio: {e}"
+            self._init_error = f"PyAudio initialization error: {e}"
             self._ready = False
 
     def _detect_linux_output_device(self) -> int | None:

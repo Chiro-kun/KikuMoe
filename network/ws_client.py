@@ -44,9 +44,7 @@ class NowPlayingWS:
 
         if WebSocketApp is None:
             try:
-                self.on_error_text(
-                    "websocket-client non installato: impossibile avviare il websocket."
-                )
+                self.on_error_text("websocket-client not installed: unable to start WebSocket.")
             except Exception:
                 pass
             return

@@ -294,6 +294,8 @@ class DevConsole(QObject):
         self._console_dialog: Optional[QDialog] = None
         self._console_text: Optional[QTextEdit] = None
         self._title_bar: Optional[CustomTitleBar] = None
+        self._hdr_lbl: Optional[QLabel] = None
+        self._lvl_lbl: Optional[QLabel] = None
         self._status_badge: Optional[QLabel] = None
         self._old_print = None
         self._qt_stream = None
@@ -452,7 +454,9 @@ class DevConsole(QObject):
         if not self._status_badge:
             return
         if self._paused:
-            self._status_badge.setText("● IN PAUSA")
+            self._status_badge.setText(
+                f"● {self._t('dev_console_status_paused', 'PAUSED').upper()}"
+            )
             self._status_badge.setStyleSheet(
                 f"background-color: rgba(236, 24, 108, 0.24);"
                 f" border: 1px solid {PALETTE['accent']};"
@@ -460,7 +464,7 @@ class DevConsole(QObject):
                 " color: #ffffff; font-size: 10px; font-weight: 800; letter-spacing: 0.8px;"
             )
         else:
-            self._status_badge.setText("● LIVE")
+            self._status_badge.setText(f"● {self._t('dev_console_status_live', 'LIVE').upper()}")
             self._status_badge.setStyleSheet(
                 "background-color: rgba(0, 230, 118, 0.14);"
                 " border: 1px solid rgba(0, 230, 118, 0.45);"
@@ -517,6 +521,11 @@ class DevConsole(QObject):
                 self._console_dialog.setWindowTitle(
                     self._t("dev_console_title", "Developer Console")
                 )
+                if self._hdr_lbl:
+                    self._hdr_lbl.setText(self._t("dev_console_title", "Developer Console").upper())
+                if self._lvl_lbl:
+                    self._lvl_lbl.setText(self._t("dev_console_level_short", "LEVEL").upper())
+                self._update_status_badge()
                 if self._btn_clear:
                     self._btn_clear.setText(self._t("dev_console_clear", "Clear"))
                 if self._btn_copy:
@@ -535,6 +544,25 @@ class DevConsole(QObject):
                     self._cb_wrap.setText(self._t("dev_console_wrap", "Wrap"))
                 if self._level_combo:
                     self._level_combo.setToolTip(self._t("dev_console_level", "Level filter"))
+                if self._console_text:
+                    self._console_text.setPlaceholderText(
+                        self._t("dev_console_placeholder", "Logs will appear here...")
+                    )
+                    # Also localize the initial ready banner line if present
+                    cur_txt = self._console_text.toPlainText()
+                    ready_txt = self._t(
+                        "dev_console_ready", "Console ready. Logs will appear here."
+                    )
+                    new_banner = f">>> {ready_txt}"
+                    for old_b in (
+                        ">>> Console pronta. I log appariranno qui.",
+                        ">>> Console ready. Logs will appear here.",
+                    ):
+                        if cur_txt.startswith(old_b) and old_b != new_banner:
+                            self._console_text.setPlainText(new_banner + cur_txt[len(old_b) :])
+                            if self._autoscroll_enabled:
+                                self._console_text.moveCursor(QTextCursor.MoveOperation.End)
+                            break
         except Exception:
             pass
 
@@ -587,24 +615,24 @@ class DevConsole(QObject):
         tb_lay.setContentsMargins(12, 8, 12, 8)
         tb_lay.setSpacing(10)
 
-        hdr_lbl = QLabel(self._t("dev_console_title", "CONSOLE SVILUPPATORE").upper())
-        hdr_lbl.setStyleSheet(
+        self._hdr_lbl = QLabel(self._t("dev_console_title", "Developer Console").upper())
+        self._hdr_lbl.setStyleSheet(
             "font-size: 12px; font-weight: 800; letter-spacing: 1.2px; color: #f4f6fd;"
             " background: transparent; border: none;"
         )
-        tb_lay.addWidget(hdr_lbl)
+        tb_lay.addWidget(self._hdr_lbl)
 
-        self._status_badge = QLabel("● LIVE")
+        self._status_badge = QLabel(f"● {self._t('dev_console_status_live', 'LIVE').upper()}")
         tb_lay.addWidget(self._status_badge)
 
         tb_lay.addStretch(1)
 
-        lvl_lbl = QLabel("LIVELLO")
-        lvl_lbl.setStyleSheet(
+        self._lvl_lbl = QLabel(self._t("dev_console_level_short", "LEVEL").upper())
+        self._lvl_lbl.setStyleSheet(
             f"font-size: 10px; font-weight: 800; letter-spacing: 0.9px;"
             f" color: {PALETTE['accent_hover']}; background: transparent; border: none;"
         )
-        tb_lay.addWidget(lvl_lbl)
+        tb_lay.addWidget(self._lvl_lbl)
 
         self._level_combo = GlassComboBox()
         self._level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
@@ -688,7 +716,9 @@ class DevConsole(QObject):
             self._console_text.setPlaceholderText(
                 self._t("dev_console_placeholder", "Logs will appear here...")
             )
-            self._console_text.append(">>> Console pronta. I log appariranno qui.")
+            self._console_text.append(
+                f">>> {self._t('dev_console_ready', 'Console ready. Logs will appear here.')}"
+            )
         except Exception:
             pass
 
