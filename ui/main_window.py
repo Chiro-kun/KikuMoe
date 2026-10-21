@@ -2105,9 +2105,11 @@ class ListenMoePlayer(QWidget):
                 source_pm = icon.pixmap(512, 512)
             if source_pm.isNull():
                 return icon
+            source_pm.setDevicePixelRatio(1.0)
 
             trimmed = self._trim_transparent_margins(source_pm, alpha_threshold=8)
             if trimmed is not None and not trimmed.isNull():
+                trimmed.setDevicePixelRatio(1.0)
                 source_pm = trimmed
 
             tray_icon = QIcon()
@@ -2122,6 +2124,7 @@ class ListenMoePlayer(QWidget):
                 )
                 if fitted.isNull():
                     continue
+                fitted.setDevicePixelRatio(1.0)
                 canvas = QPixmap(sz, sz)
                 canvas.fill(Qt.GlobalColor.transparent)
                 painter = QPainter()
@@ -2146,6 +2149,7 @@ class ListenMoePlayer(QWidget):
         try:
             if pixmap is None or pixmap.isNull():
                 return pixmap
+            pixmap.setDevicePixelRatio(1.0)
             img = pixmap.toImage()
             if img.isNull():
                 return pixmap
@@ -2190,7 +2194,9 @@ class ListenMoePlayer(QWidget):
                 return pixmap
             if rect_w == w and rect_h == h:
                 return pixmap
-            return pixmap.copy(left, top, rect_w, rect_h)
+            cropped = pixmap.copy(left, top, rect_w, rect_h)
+            cropped.setDevicePixelRatio(1.0)
+            return cropped
         except Exception:
             return pixmap
 
@@ -2204,32 +2210,20 @@ class ListenMoePlayer(QWidget):
             pixmap = icon.pixmap(size, size)
             if pixmap.isNull():
                 return icon
+            pixmap.setDevicePixelRatio(1.0)
 
             # --- Autocrop transparent whitespace ---
             try:
-                # Convert to image to find the true bounding box of non-transparent pixels
-                img = pixmap.toImage()
-                if not img.isNull():
-                    # Get the alpha mask bounding rect if possible
-                    # Fallback to manual check if logic is tricky,
-                    # but mask().boundingRect() is usually reliable
-                    mask = img.createAlphaMask()
-                    if not mask.isNull():
-                        from PyQt6.QtGui import QRegion
-
-                        mask_pm = QPixmap.fromImage(mask).mask()
-                        rect = QRegion(mask_pm).boundingRect() if mask_pm else img.rect()
-                    else:
-                        rect = img.rect()
-
-                    if not rect.isEmpty() and rect != img.rect():
-                        pixmap = pixmap.copy(rect)
+                cropped = self._trim_transparent_margins(pixmap, alpha_threshold=8)
+                if cropped is not None and not cropped.isNull():
+                    pixmap = cropped
+                    pixmap.setDevicePixelRatio(1.0)
             except Exception:
                 pass
 
             w, h = pixmap.width(), pixmap.height()
             if w == h:
-                return icon
+                return QIcon(pixmap)
 
             # Create a square transparent canvas based on the largest dimension
             max_side = max(w, h)
