@@ -1,7 +1,12 @@
 import json
+import logging
 import threading
 from datetime import datetime, timezone
 from typing import Callable, Optional
+
+from core.ssl_compat import get_websocket_sslopt
+
+logger = logging.getLogger("kikumoe.ws")
 
 try:
     from websocket import WebSocketApp
@@ -121,7 +126,14 @@ class NowPlayingWS:
                     self.on_now_playing(title, artist_name, duration, start_ts, album_cover)
 
         def on_error(ws, error):
-            self.on_error_text(str(error))
+            err_str = str(error)
+            if "CERTIFICATE_VERIFY_FAILED" in err_str:
+                logger.error(
+                    "[WebSocket] SSL Certificate verification failed: %s. "
+                    "Check system CA certificates or local system clock.",
+                    err_str,
+                )
+            self.on_error_text(err_str)
 
         def on_close(ws, code, msg):
             self.on_closed_text("")
@@ -143,7 +155,12 @@ class NowPlayingWS:
             on_close=on_close,
         )
         self.ws_thread = threading.Thread(
-            target=self.ws_app.run_forever, kwargs={"ping_interval": None}, daemon=True
+            target=self.ws_app.run_forever,
+            kwargs={
+                "ping_interval": None,
+                "sslopt": get_websocket_sslopt() if self.ws_url.startswith("wss://") else None,
+            },
+            daemon=True,
         )
         self.ws_thread.start()
 

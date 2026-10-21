@@ -76,6 +76,7 @@ from core.constants import (
 )
 from core.i18n import I18n
 from core.logger import get_logger
+from core.ssl_compat import get_ssl_context
 from network.ws_client import NowPlayingWS
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
@@ -387,7 +388,12 @@ class ListenMoePlayer(QWidget):
             # We use a HEAD request to the main page which is faster
             # and guaranteed to have a Date header
             req = urllib.request.Request("https://listen.moe/", method="HEAD")
-            with urllib.request.urlopen(req, timeout=5) as res:
+            ssl_ctx = None
+            try:
+                ssl_ctx = get_ssl_context()
+            except Exception:
+                pass
+            with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as res:
                 server_date_str = res.headers.get("Date")
                 if server_date_str:
                     server_dt = email.utils.parsedate_to_datetime(server_date_str)
@@ -1922,7 +1928,12 @@ class ListenMoePlayer(QWidget):
             if parts.port not in (None, 443):
                 return
             req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/2.0.0-beta1"})
-            with urllib.request.urlopen(req, timeout=8) as res:
+            ssl_ctx = None
+            try:
+                ssl_ctx = get_ssl_context()
+            except Exception:
+                pass
+            with urllib.request.urlopen(req, timeout=8, context=ssl_ctx) as res:
                 chunk = res.read((4 * 1024 * 1024) + 1)
                 if isinstance(chunk, (bytes, bytearray)) and 0 < len(chunk) <= (4 * 1024 * 1024):
                     raw = bytes(chunk)
