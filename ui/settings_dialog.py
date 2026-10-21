@@ -12,7 +12,16 @@ import os
 import sys
 from typing import List, Optional
 
-from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QElapsedTimer,
+    QPoint,
+    QPointF,
+    QRectF,
+    QSettings,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QColor,
     QFont,
@@ -21,6 +30,8 @@ from PyQt6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
+    QRegion,
 )
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -71,34 +82,85 @@ _IS_WIN32 = sys.platform == "win32"
 
 class SlidingStackedWidget(QStackedWidget):
     """
-    QStackedWidget with 60 FPS cubic-out slide transitions that animate the
-    actual child widgets' positions without switching currentIndex early,
-    preventing any flash or transparent bleed-through.
+    QStackedWidget with 60 FPS time-based slide + crossfade transitions using
+    pre-rendered HiDPI QPixmap snapshots.
+    - Eliminates transparent tab overlap (outgoing and incoming snapshots slide
+      side-by-side without overlapping, while smoothly fading opacity).
+    - Hides live child widgets during the 190ms transition so QStackedLayout
+      never fights widget positions or flashes an unstyled UI skeleton.
     """
+
+    DURATION_MS = 190.0
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._anim_timer = QTimer(self)
-        self._anim_timer.setInterval(16)
+        self._anim_timer.setInterval(14)
         self._anim_timer.timeout.connect(self._tick_slide)
-        self._step = 0
-        self._total_steps = 13  # ~200ms silky 60 FPS transition
+        self._elapsed = QElapsedTimer()
+        self._progress: float = 1.0
+        self._pm_from: Optional[QPixmap] = None
+        self._pm_to: Optional[QPixmap] = None
         self._w_from: Optional[QWidget] = None
         self._w_to: Optional[QWidget] = None
         self._target_index: int = 0
         self._direction: int = 1
 
+    @staticmethod
+    def _activate_layouts(widget: QWidget) -> None:
+        lay = widget.layout()
+        if lay is not None:
+            lay.activate()
+        for child in widget.findChildren(QWidget):
+            c_lay = child.layout()
+            if c_lay is not None:
+                c_lay.activate()
+
+    def _render_snapshot(self, widget: QWidget) -> QPixmap:
+        w = max(1, self.width())
+        h = max(1, self.height())
+        widget.ensurePolished()
+        if widget.size() != self.size():
+            widget.setGeometry(0, 0, w, h)
+        self._activate_layouts(widget)
+
+        dpr = float(self.devicePixelRatioF()) if hasattr(self, "devicePixelRatioF") else 1.0
+        dpr = max(1.0, dpr)
+        pm = QPixmap(max(1, int(round(w * dpr))), max(1, int(round(h * dpr))))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        widget.render(
+            painter,
+            QPoint(0, 0),
+            QRegion(),
+            QWidget.RenderFlag.DrawChildren,
+        )
+        painter.end()
+        return pm
+
     def finish_active_slide(self) -> None:
         """Immediately complete any running slide transition."""
-        if self._anim_timer.isActive():
+        if self._anim_timer.isActive() or self._pm_from is not None or self._pm_to is not None:
             self._anim_timer.stop()
+            self._pm_from = None
+            self._pm_to = None
+            self._progress = 1.0
             if self._w_from is not None:
                 self._w_from.move(0, 0)
             if self._w_to is not None:
                 self._w_to.move(0, 0)
             super().setCurrentIndex(self._target_index)
+            cur = self.widget(self._target_index)
+            if cur is not None:
+                cur.move(0, 0)
+                cur.setVisible(True)
             self._w_from = None
             self._w_to = None
+            self.update()
 
     def slide_to_index(self, new_index: int, direction: Optional[int] = None) -> None:
         self.finish_active_slide()
@@ -119,43 +181,62 @@ class SlidingStackedWidget(QStackedWidget):
             super().setCurrentIndex(new_index)
             return
 
-        w = self.width()
-        h = self.height()
-
         self._w_from = w_from
         self._w_to = w_to
         self._target_index = new_index
-        self._direction = direction
-        self._step = 0
+        self._direction = 1 if direction >= 0 else -1
+        self._progress = 0.0
 
-        # Position incoming widget completely offscreen BEFORE showing it so it never flashes
-        if direction >= 0:
-            w_to.setGeometry(w, 0, w, h)
-            w_to.show()
-            w_to.raise_()
-        else:
-            w_to.setGeometry(-int(w * 0.24), 0, w, h)
-            w_to.show()
-            w_from.raise_()
+        # Capture crisp HiDPI snapshots of both outgoing and incoming pages
+        self._pm_from = self._render_snapshot(w_from)
+        self._pm_to = self._render_snapshot(w_to)
 
+        # Hide live outgoing widget during transition so only the GPU pixmaps are composited
+        w_from.setVisible(False)
+        w_to.setVisible(False)
+
+        self._elapsed.start()
         self._anim_timer.start()
+        self.update()
 
     def _tick_slide(self) -> None:
-        self._step += 1
-        w = float(self.width())
-        if self._step <= self._total_steps and self._w_from is not None and self._w_to is not None:
-            t = self._step / float(self._total_steps)
-            ease = 1.0 - ((1.0 - t) ** 3)
-            if self._direction >= 0:
-                # Incoming panel slides from x=w to x=0 over outgoing panel
-                self._w_from.move(int(-w * 0.24 * ease), 0)
-                self._w_to.move(int(w * (1.0 - ease)), 0)
-            else:
-                # Outgoing panel slides out from x=0 to x=w revealing incoming panel
-                self._w_to.move(int(-w * 0.24 * (1.0 - ease)), 0)
-                self._w_from.move(int(w * ease), 0)
-        else:
+        elapsed = float(self._elapsed.elapsed())
+        t = min(1.0, max(0.0, elapsed / self.DURATION_MS))
+        self._progress = t
+        if t >= 1.0:
             self.finish_active_slide()
+        else:
+            self.update()
+
+    def paintEvent(self, a0) -> None:
+        super().paintEvent(a0)
+        if self._pm_from is None or self._pm_to is None:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        w = float(self.width())
+        t = self._progress
+        # Cubic-out easing
+        ease = 1.0 - ((1.0 - t) ** 3)
+        d = float(self._direction)
+
+        # Non-overlapping side-by-side slide with smooth opacity crossfade
+        x_from = -d * w * ease
+        x_to = d * w * (1.0 - ease)
+
+        alpha_from = max(0.0, min(1.0, (1.0 - ease) ** 1.35))
+        alpha_to = max(0.0, min(1.0, 0.25 + 0.75 * ease))
+
+        if alpha_from > 0.01:
+            painter.setOpacity(alpha_from)
+            painter.drawPixmap(QPointF(x_from, 0.0), self._pm_from)
+
+        painter.setOpacity(alpha_to)
+        painter.drawPixmap(QPointF(x_to, 0.0), self._pm_to)
+        painter.end()
 
 
 class BackToPlayerButton(QPushButton):
@@ -1034,14 +1115,19 @@ class SettingsDialog(QDialog):
         body_layout.addWidget(footer_frame)
 
         outer_layout.addLayout(body_layout, 1)
+        QTimer.singleShot(140, self._ensure_devices_populated)
+
+    def _ensure_devices_populated(self) -> None:
+        if not self._devices_populated:
+            self._devices_populated = True
+            self._populate_audio_devices()
 
     def _on_tab_changed(self, idx: int) -> None:
         for cmb in self.findChildren(GlassComboBox):
             cmb.reset_visual_state()
-        if idx == 1 and not self._devices_populated:
-            self._devices_populated = True
-            self._populate_audio_devices()
         self.pages.slide_to_index(idx)
+        if idx == 1 and not self._devices_populated:
+            QTimer.singleShot(210, self._ensure_devices_populated)
 
     def reload_from_settings(self) -> None:
         """Fast non-blocking reload of widget values from QSettings."""
@@ -1075,8 +1161,7 @@ class SettingsDialog(QDialog):
             self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
         )
         if not self._devices_populated:
-            self._devices_populated = True
-            QTimer.singleShot(250, self._populate_audio_devices)
+            QTimer.singleShot(250, self._ensure_devices_populated)
 
     @staticmethod
     def _make_card(section_title: str):
