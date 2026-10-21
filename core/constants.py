@@ -83,7 +83,7 @@ def _read_version_from_files() -> str:
         pass
 
     # 3) Fallback to default
-    return "1.11.0"
+    return "2.0.0-beta1"
 
 
 APP_VERSION = _read_version_from_files()

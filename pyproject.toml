@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "kikumoe"
-version = "1.11.0"
+version = "2.0.0-beta1"
 description = "LISTEN.moe desktop radio player"
 authors = ["Chiro", "alsog"]
 homepage = "https://git.alsogamer.com/chiro/KikuMoe"

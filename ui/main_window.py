@@ -9,8 +9,28 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Dict, Optional, Set
 
-from PyQt6.QtCore import QEvent, QSettings, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PyQt6.QtCore import (
+    QEvent,
+    QPointF,
+    QRectF,
+    QSettings,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt6.QtGui import (
+    QColor,
+    QIcon,
+    QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -18,11 +38,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMessageBox,
     QProgressBar,
-    QPushButton,
     QSizePolicy,
-    QSlider,
-    QSpinBox,
-    QStackedLayout,
     QStyle,
     QVBoxLayout,
     QWidget,
@@ -63,22 +79,45 @@ from core.logger import get_logger
 from network.ws_client import NowPlayingWS
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
-from ui.settings_dialog import SettingsDialog
+from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.tray_manager import TrayManager
+from ui.widgets.ambient_cover import (
+    AmbientCoverCard,
+    AnimatedTrackLabel,
+    FullBleedCanvas,
+    LiveEqualizerBadge,
+)
+from ui.widgets.playback_controls import PlaybackControls
+from ui.widgets.segmented_switch import SegmentedSwitch, SettingsIconButton
+from ui.widgets.sleep_timer_widget import SleepTimerWidget
+from ui.widgets.status_footer import StatusFooter
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
 
 
-# Custom Progress Bar for Pixel-Perfect Fluidity
+# Custom Progress Bar with Scrubber Playhead, Gradient Fill & 60 FPS Play/Buffer Animation
 class SmoothProgressBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._value = 0
         self._max = 100
-        self._accent_color = QColor("#c2185b")  # Match app default accent color
-        self.setFixedHeight(4)
+        self._accent_color = QColor(PALETTE["accent"])
+        self._buffering_active = False
+        self._buffering_indeterminate = False
+        self._buffering_percent = 0
+        self._launch_progress = 1.0
+        self._pulse_ring = 1.0
+        self._shimmer_phase = 0.0
+        self._display_ratio: Optional[float] = None
+
+        self.setFixedHeight(16)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_anim)
 
     def setAccentColor(self, color_str):
         self._accent_color = QColor(color_str)
@@ -90,28 +129,184 @@ class SmoothProgressBar(QWidget):
 
     def setValue(self, val):
         if self._value != val:
+            old_ratio = max(0.0, min(1.0, self._value / max(1, self._max)))
             self._value = val
+            new_ratio = max(0.0, min(1.0, self._value / max(1, self._max)))
+            # Smoothly glide when the track position jumps (e.g. song or channel change)
+            if abs(new_ratio - old_ratio) > 0.03 and self.isVisible():
+                if self._display_ratio is None:
+                    self._display_ratio = old_ratio
+                if not self._anim_timer.isActive():
+                    self._anim_timer.start()
+            else:
+                self._display_ratio = new_ratio
             self.update()
 
     def value(self):
         return self._value
 
+    def trigger_play_launch(self) -> None:
+        """Trigger a 60 FPS sweep & glow pulse when Play is clicked."""
+        self._launch_progress = 0.0
+        self._pulse_ring = 0.0
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
+        self.update()
+
+    def set_buffering_active(self, active: bool) -> None:
+        self._buffering_active = bool(active)
+        if self._buffering_active:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+        self.update()
+
+    def set_buffering_indeterminate(self, indeterminate: bool) -> None:
+        self._buffering_indeterminate = bool(indeterminate)
+        if self._buffering_indeterminate and self._buffering_active:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+        self.update()
+
+    def set_buffering_percent(self, percent: int) -> None:
+        self._buffering_percent = max(0, min(100, int(percent)))
+        self.update()
+
+    def _tick_anim(self) -> None:
+        still_running = False
+        if self._launch_progress < 1.0:
+            self._launch_progress = min(1.0, self._launch_progress + 0.055)
+            still_running = True
+        if self._pulse_ring < 1.0:
+            self._pulse_ring = min(1.0, self._pulse_ring + 0.045)
+            still_running = True
+        if self._buffering_active:
+            self._shimmer_phase = (self._shimmer_phase + 0.032) % 1.0
+            still_running = True
+        if self._display_ratio is not None:
+            target_r = max(0.0, min(1.0, self._value / max(1, self._max)))
+            diff_r = target_r - self._display_ratio
+            if abs(diff_r) > 0.004:
+                self._display_ratio += diff_r * 0.26
+                still_running = True
+            else:
+                self._display_ratio = target_r
+
+        if not still_running:
+            self._anim_timer.stop()
+        self.update()
+
     def paintEvent(self, a0):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background track
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(200, 200, 200, 40))  # Translucent track
-        painter.drawRoundedRect(self.rect(), 2, 2)
+        w = float(self.width())
+        h = float(self.height())
+        track_h = 6.5
+        track_r = track_h / 2.0
+        track_y = (h - track_h) / 2.0
+        margin_x = 7.0
+        usable_w = max(1.0, w - 2 * margin_x)
 
-        # Progress chunk
+        # 1. Background track (slightly larger dark glass groove with subtle border)
+        track_rect = QRectF(margin_x, track_y, usable_w, track_h)
+        painter.setBrush(QColor(255, 255, 255, 36))
+        painter.setPen(QPen(QColor(255, 255, 255, 22), 0.8))
+        painter.drawRoundedRect(track_rect, track_r, track_r)
+
+        # Cubic-out easing for Play launch animation
+        launch_ease = 1.0 - ((1.0 - self._launch_progress) ** 3)
+
+        # 2. Buffering / Opening Shimmer Wave inside the main progress bar
+        if self._buffering_active and (
+            self._buffering_indeterminate or self._buffering_percent <= 0
+        ):
+            comet_w = max(44.0, usable_w * 0.34)
+            travel = usable_w + comet_w
+            cx = margin_x - comet_w + (self._shimmer_phase * travel)
+
+            painter.save()
+            clip_path = QPainterPath()
+            clip_path.addRoundedRect(track_rect, track_r, track_r)
+            painter.setClipPath(clip_path)
+
+            grad = QLinearGradient(cx, 0.0, cx + comet_w, 0.0)
+            c0 = QColor(self._accent_color)
+            c0.setAlpha(0)
+            c1 = QColor("#ff529a")
+            c1.setAlpha(235)
+            c2 = QColor(self._accent_color)
+            c2.setAlpha(0)
+            grad.setColorAt(0.0, c0)
+            grad.setColorAt(0.5, c1)
+            grad.setColorAt(1.0, c2)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(grad)
+            painter.drawRect(QRectF(cx, track_y, comet_w, track_h))
+            painter.restore()
+            painter.end()
+            return
+
+        # 3. Determinate Progress Fill & Scrubber Playhead Dot
         if self._max > 0:
-            w = (self._value / self._max) * self.width()
-            if w > 0:
-                painter.setBrush(self._accent_color)
-                # Clamp width to widget width
-                painter.drawRoundedRect(0, 0, int(min(w, self.width())), self.height(), 2, 2)
+            if self._buffering_active and self._buffering_percent > 0:
+                raw_ratio = max(0.0, min(1.0, self._buffering_percent / 100.0))
+            elif self._display_ratio is not None:
+                raw_ratio = max(0.0, min(1.0, self._display_ratio))
+            else:
+                raw_ratio = max(0.0, min(1.0, self._value / self._max))
+
+            ratio = raw_ratio * launch_ease
+            fill_w = ratio * usable_w
+            if fill_w > 0:
+                grad = QLinearGradient(margin_x, 0, margin_x + fill_w, 0)
+                grad.setColorAt(0.0, self._accent_color)
+                grad.setColorAt(0.7, QColor("#ff3d8b"))
+                grad.setColorAt(1.0, QColor("#ff7eb6"))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(grad)
+                painter.drawRoundedRect(
+                    QRectF(margin_x, track_y, fill_w, track_h), track_r, track_r
+                )
+
+                # Launch shimmer highlight sweeping along the filled bar
+                if self._launch_progress < 1.0:
+                    sheen_x = margin_x + fill_w * launch_ease
+                    sheen_grad = QLinearGradient(sheen_x - 28.0, 0, sheen_x + 8.0, 0)
+                    sheen_grad.setColorAt(0.0, QColor(255, 255, 255, 0))
+                    sheen_grad.setColorAt(
+                        0.7, QColor(255, 255, 255, int(140 * (1.0 - self._launch_progress)))
+                    )
+                    sheen_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+                    painter.setBrush(sheen_grad)
+                    painter.drawRoundedRect(
+                        QRectF(margin_x, track_y, fill_w, track_h), track_r, track_r
+                    )
+
+            dot_x = margin_x + fill_w
+            dot_y = h / 2.0
+
+            # Expanding pulse ring when Play is clicked
+            if self._pulse_ring < 1.0:
+                ring_r = 5.4 + 7.5 * self._pulse_ring
+                ring_col = QColor(self._accent_color)
+                ring_col.setAlpha(int(170 * (1.0 - self._pulse_ring)))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(ring_col, 1.8))
+                painter.drawEllipse(QPointF(dot_x, dot_y), ring_r, ring_r)
+
+            # Soft ambient halo around playhead dot
+            halo_col = QColor(self._accent_color)
+            halo_col.setAlpha(68)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(halo_col)
+            painter.drawEllipse(QPointF(dot_x, dot_y), 7.2, 7.2)
+
+            # Scrubber playhead dot
+            painter.setBrush(QColor("#ffffff"))
+            painter.setPen(QPen(self._accent_color, 2.2))
+            painter.drawEllipse(QPointF(dot_x, dot_y), 5.2, 5.2)
+        painter.end()
 
 
 class ListenMoePlayer(QWidget):
@@ -290,15 +485,13 @@ class ListenMoePlayer(QWidget):
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        # Keep Windows' native frame/title bar; retain custom chrome on Linux.
-        if _IS_WIN32:
-            self.setWindowFlags(Qt.WindowType.Window)
-        else:
-            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        # Use custom Cyber-Moe title bar with logo on all platforms (Windows & Linux)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 500, 620 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT)
-        self.setMinimumSize(fixed_w, fixed_h)
+        fixed_w, fixed_h = 405, 660
+        self.setMinimumSize(380, 520)
         self.resize(fixed_w, fixed_h)
+        self.setObjectName("mainWindowRoot")
         self._apply_window_title("")
         try:
             if hasattr(self, "_icon_app") and not self._icon_app.isNull():
@@ -309,11 +502,13 @@ class ListenMoePlayer(QWidget):
             geom = self.settings.value(KEY_WINDOW_GEOMETRY)
             if geom:
                 self.restoreGeometry(geom)
+                if self.height() < fixed_h:
+                    self.resize(self.width(), fixed_h)
             else:
                 self.resize(fixed_w, fixed_h)
 
             # --- Branding Colors ---
-            self.COLOR_ACCENT = "#c2185b"  # Magenta from KikuMoe Logo
+            self.COLOR_ACCENT = PALETTE["accent"]
         except Exception:
             self.resize(fixed_w, fixed_h)
 
@@ -323,132 +518,193 @@ class ListenMoePlayer(QWidget):
         self._root_layout.setSpacing(0)
         self.setLayout(self._root_layout)
 
-        # Windows uses the native title bar and resize frame.
-        self._title_bar = None
-        if not _IS_WIN32:
-            self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
-            self._root_layout.addWidget(self._title_bar)
-            install_size_grip(self)
+        # Full-bleed dynamic blurred cover canvas (covers the entire window including title bar)
+        self._content_widget = FullBleedCanvas()
+        self._content_widget.setObjectName("mainWindowRoot")
+        self._canvas_outer_layout = QVBoxLayout(self._content_widget)
+        self._canvas_outer_layout.setContentsMargins(0, 0, 0, 0)
+        self._canvas_outer_layout.setSpacing(0)
 
-        # Content layout: regular inner spacing for the rest of the UI
-        self._content_widget = QWidget()
-        self._layout = QVBoxLayout(self._content_widget)
-        self._layout.setContentsMargins(8, 8, 8, 16)
-        self._layout.setSpacing(8)
+        # Custom Cyber-Moe Translucent Title Bar inside the blurred canvas
+        self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
+        self._canvas_outer_layout.addWidget(self._title_bar)
+
+        self._body_container = QWidget()
+        self._outer_body_layout = QVBoxLayout(self._body_container)
+        self._outer_body_layout.setContentsMargins(16, 10, 16, 10)
+        self._outer_body_layout.setSpacing(7)
+
+        self._view_stack = SlidingStackedWidget()
+        self._player_stage = QWidget()
+        self._layout = QVBoxLayout(self._player_stage)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(7)
+        self._view_stack.addWidget(self._player_stage)
+
+        self._canvas_outer_layout.addWidget(self._body_container, 1)
+
         self._root_layout.addWidget(self._content_widget)
+        install_size_grip(self)
 
     def _init_header_section(self):
         """
-        Creates and adds the header section components to the UI, including
-        the channel logo, source indicators, and current broadcast information.
+        Creates and adds the station sub-header, framed artwork showcase, and track stage.
+        The J-POP / K-POP switch is only visible when the active station is 'listenmoe'.
         """
-        self.settings_header_bar = QWidget()
-        self.settings_header_bar.setObjectName("settingsHeaderBar")
-        self.settings_header_bar.setFixedHeight(30)
-        self.menu_bar_layout = QHBoxLayout(self.settings_header_bar)
-        self.menu_bar_layout.setContentsMargins(3, 2, 10, 2)
-        self.menu_bar_layout.setSpacing(6)
+        self._current_radio_provider = "listenmoe"
 
-        # Settings button in menu style at the very top (under the app bar)
-        self.settings_button = QPushButton(self.i18n.t("settings_button"))
-        self.settings_button.setObjectName("menuButton")
-        self.settings_button.setFixedHeight(24)
+        # 1. Sub-Header HUD Bar: [LIVE Badge] <--> [J-POP | K-POP] <--> [Settings]
+        top_bar = QWidget()
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        top_bar_layout.setSpacing(6)
+
+        left_wing = QWidget()
+        left_wing.setFixedWidth(86)
+        left_wing_layout = QHBoxLayout(left_wing)
+        left_wing_layout.setContentsMargins(0, 0, 0, 0)
+        left_wing_layout.setSpacing(0)
+
+        self.live_badge = LiveEqualizerBadge()
+        left_wing_layout.addWidget(self.live_badge)
+        left_wing_layout.addStretch(1)
+
+        # Keep brand_label attribute for backward compatibility (displayed in CustomTitleBar)
+        self.brand_label = QLabel("KIKUMOE")
+        self.brand_label.setVisible(False)
+
+        saved_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+        self.channel_switch = SegmentedSwitch(
+            items=["J-POP", "K-POP"],
+            default_index=1 if saved_channel == "K-POP" else 0,
+            height=28,
+        )
+        self.channel_switch.setFixedWidth(134)
+        self.channel_switch.selection_changed.connect(self._on_channel_switch_changed)
+        self.channel_switch.setVisible(self._current_radio_provider == "listenmoe")
+
+        right_wing = QWidget()
+        right_wing.setFixedWidth(86)
+        right_wing_layout = QHBoxLayout(right_wing)
+        right_wing_layout.setContentsMargins(0, 0, 0, 0)
+        right_wing_layout.setSpacing(0)
+
+        self.settings_button = SettingsIconButton()
+        self.settings_button.setToolTip(self.i18n.t("settings_button"))
         self.settings_button.clicked.connect(self.open_settings)
 
-        self.menu_bar_layout.addWidget(self.settings_button)
-        self.menu_bar_layout.addStretch(1)
-        # 1. Settings header at the very top (under the Windows title bar)
-        if hasattr(self, "_root_layout"):
-            # The custom title bar occupies index 0 only on Linux.
-            self._root_layout.insertWidget(0 if _IS_WIN32 else 1, self.settings_header_bar)
-        else:
-            self._layout.addWidget(self.settings_header_bar)
+        right_wing_layout.addStretch(1)
+        right_wing_layout.addWidget(self.settings_button)
 
-        # 2. Header Label (Title)
+        top_bar_layout.addWidget(left_wing)
+        top_bar_layout.addStretch(1)
+        top_bar_layout.addWidget(self.channel_switch)
+        top_bar_layout.addStretch(1)
+        top_bar_layout.addWidget(right_wing)
+        self._outer_body_layout.addWidget(top_bar)
+        self._outer_body_layout.addWidget(self._view_stack, 1)
+
+        # Backward compatibility placeholders
+        self.settings_header_bar = top_bar
         self.label = QLabel(self.i18n.t("header").format(channel="J-POP", format="Vorbis"))
-        self.label.setObjectName("headerLabel")
-        self.label.setStyleSheet("font-size: 16px; font-weight: 600;")
-        # Hidden in main UI: channel/format are already shown in the metadata row below.
         self.label.setVisible(False)
-
         self.status_label = QLabel("")
-        self.status_label.setObjectName("status_label_val")
         self.status_label.setVisible(False)
-
-        self.session_label = QLabel("")
-        self.session_label.setObjectName("sessionLabel")
-        self.session_label.setVisible(False)
-
         self.sleep_label = QLabel("")
-        self.sleep_label.setObjectName("sleepLabel")
         self.sleep_label.setVisible(False)
-        self._layout.addWidget(self.sleep_label)
 
-        self.media_ambient_block = QWidget()
-        self.media_ambient_block.setObjectName("mediaAmbientBlock")
-        self.media_ambient_block.setMinimumHeight(240)
-        self.media_stack = QStackedLayout(self.media_ambient_block)
-        self.media_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        self.media_stack.setContentsMargins(0, 0, 0, 0)
+        # 2. Central Artwork Hero Showcase
+        self._album_cover_size = 196
+        self.ambient_cover = AmbientCoverCard(cover_size=self._album_cover_size)
+        self._layout.addWidget(self.ambient_cover)
 
-        self.media_ambient_bg = QLabel("")
-        self.media_ambient_bg.setObjectName("mediaAmbientBackground")
-        self.media_ambient_bg.setScaledContents(True)
-        self.media_stack.addWidget(self.media_ambient_bg)
-
-        self.media_foreground = QWidget()
-        self.media_foreground.setObjectName("mediaForeground")
-        media_block = QVBoxLayout(self.media_foreground)
-        media_block.setContentsMargins(8, 8, 8, 8)
-        media_block.setSpacing(2)
-        self.media_stack.addWidget(self.media_foreground)
-        self.media_stack.setCurrentWidget(self.media_foreground)
-
-        self._album_cover_size = 190
-        cover_row = QHBoxLayout()
-        cover_row.setContentsMargins(0, 0, 0, 0)
-        cover_row.addStretch(1)
+        # Hidden legacy compatibility labels
+        self.hero_card = QWidget()
+        self.hero_card.setVisible(False)
         self.album_cover_label = QLabel("")
-        self.album_cover_label.setObjectName("albumCoverLabel")
-        self.album_cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.album_cover_label.setFixedSize(self._album_cover_size, self._album_cover_size)
-        cover_row.addWidget(self.album_cover_label)
-        cover_row.addStretch(1)
-        media_block.addLayout(cover_row)
+        self.album_cover_label.setVisible(False)
+        self.media_ambient_block = QWidget()
+        self.media_ambient_block.setVisible(False)
+        self.media_ambient_bg = QLabel("")
+        self.media_ambient_bg.setVisible(False)
 
-        song_info_row = QHBoxLayout()
-        song_info_row.setContentsMargins(0, 0, 0, 0)
-        song_info_row.setSpacing(6)
-        self.song_time_left_spacer = QLabel("")
-        self.song_time_left_spacer.setFixedWidth(68)
-        self.song_time_left_spacer.setStyleSheet("background: transparent;")
-        self.song_time_label = QLabel("--:--")
-        self.song_time_label.setObjectName("songTimeLabel")
-        self.song_time_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+        # 3. Track Info (Title & Artist with fixed vertical policy so no vertical stretch)
+        track_box = QVBoxLayout()
+        track_box.setContentsMargins(6, 2, 6, 0)
+        track_box.setSpacing(2)
+
+        self.now_playing_title = AnimatedTrackLabel(
+            "–", font_px=16, font_weight=800, text_color="#ffffff"
         )
-        self.song_time_label.setContentsMargins(0, 8, 0, 0)
-        self.song_time_label.setFixedWidth(68)
-        self.now_playing_label = QLabel("–")
-        self.now_playing_label.setObjectName("nowPlayingLabel")
-        self.now_playing_label.setStyleSheet("font-size: 14px; font-weight: 500;")
-        self.now_playing_label.setWordWrap(True)
-        self.now_playing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        song_info_row.addWidget(self.song_time_left_spacer)
-        song_info_row.addWidget(self.now_playing_label, 1)
-        song_info_row.addWidget(self.song_time_label)
-        media_block.addLayout(song_info_row)
-        self._layout.addWidget(self.media_ambient_block)
+        self.now_playing_title.setObjectName("songTitleLabel")
+        self.now_playing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.now_playing_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        # Song Progress Bar (Dynamic custom widget for smoothness)
+        self.now_playing_artist = AnimatedTrackLabel(
+            "", font_px=13, font_weight=600, text_color="#c8cee0"
+        )
+        self.now_playing_artist.setObjectName("songArtistLabel")
+        self.now_playing_artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.now_playing_artist.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+
+        track_box.addWidget(self.now_playing_title)
+        track_box.addWidget(self.now_playing_artist)
+        self._layout.addLayout(track_box)
+
+        # Legacy label
+        self.now_playing_label = QLabel("–")
+        self.now_playing_label.setVisible(False)
+
+        # 4. Scrubber Progress bar & dual-timestamp HUD row
+        prog_box = QVBoxLayout()
+        prog_box.setContentsMargins(6, 2, 6, 2)
+        prog_box.setSpacing(1)
+
         self.song_progress = SmoothProgressBar()
-        self.song_progress.setVisible(False)
+        self.song_progress.setVisible(True)
         self.song_progress.setObjectName("songProgressBar")
-        self._layout.addWidget(self.song_progress)
+        prog_box.addWidget(self.song_progress)
+
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(4, 0, 4, 0)
+        self.song_time_left_spacer = QLabel("")
+        self.song_time_left_spacer.setVisible(False)
+
+        self.song_elapsed_label = QLabel("0:00")
+        self.song_elapsed_label.setObjectName("timeDisplayLabel")
+        self.song_elapsed_label.setStyleSheet("color: #ff4797; font-size: 11px; font-weight: 700;")
+        self.song_elapsed_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+
+        self.stream_tag_label = QLabel("LISTEN.MOE · STREAM")
+        self.stream_tag_label.setObjectName("sectionTitleLabel")
+        self.stream_tag_label.setStyleSheet(
+            "font-size: 9px; letter-spacing: 1.5px; color: rgba(255, 255, 255, 0.38);"
+        )
+        self.stream_tag_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.stream_tag_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.song_time_label = QLabel("--:--")
+        self.song_time_label.setObjectName("timeDisplayLabel")
+        self.song_time_label.setStyleSheet("color: #c4c9dc; font-size: 11px; font-weight: 700;")
+        self.song_time_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.song_time_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+        time_row.addWidget(self.song_elapsed_label)
+        time_row.addWidget(self.stream_tag_label, 1)
+        time_row.addWidget(self.song_time_label)
+        prog_box.addLayout(time_row)
+
+        self._layout.addLayout(prog_box)
 
         # Connections for signals that update these labels
         try:
-            self.now_playing_changed.connect(self.now_playing_label.setText)
+            self.now_playing_changed.connect(self._on_now_playing_text_changed)
             self.status_changed.connect(self._set_status_text)
             self.label_refresh.connect(self.update_now_playing_label)
             self.cover_data_ready.connect(self._on_album_cover_data_ready)
@@ -458,207 +714,107 @@ class ListenMoePlayer(QWidget):
         self._set_album_cover_pixmap(None)
 
     def _init_meta_section(self):
-        """Restore Channel and Format information row."""
-        meta_row = QHBoxLayout()
-        meta_row.setContentsMargins(0, 0, 0, 0)
-        meta_row.setSpacing(8)
-
+        """Preserves channel and format attributes for backwards compatibility."""
         self.channel_label = QLabel(self.i18n.t("channel_label"))
-        if hasattr(self, "_icon_channel"):
-            self.channel_icon_label = QLabel()
-            self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
-
-        self.channel_value = QLabel(self.settings.value(KEY_CHANNEL, "J-POP"))
-        self.channel_value.setStyleSheet("font-weight: bold;")
-
+        self.channel_label.setVisible(False)
+        self.channel_value = QLabel(str(self.settings.value(KEY_CHANNEL, "J-POP")))
+        self.channel_value.setVisible(False)
         self.format_label = QLabel(self.i18n.t("format_label"))
-        if hasattr(self, "_icon_codec"):
-            self.format_icon_label = QLabel()
-            self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
-
-        self.format_value = QLabel(self.settings.value(KEY_FORMAT, "Vorbis"))
-        self.format_value.setStyleSheet("font-weight: bold;")
-
-        # Pack elements tightly: [Icon][Label][Value]
-        if hasattr(self, "channel_icon_label"):
-            meta_row.addWidget(self.channel_icon_label)
-        meta_row.addWidget(self.channel_label)
-        meta_row.addWidget(self.channel_value)
-
-        meta_row.addStretch(1)
-
-        if hasattr(self, "format_icon_label"):
-            meta_row.addWidget(self.format_icon_label)
-        meta_row.addWidget(self.format_label)
-        meta_row.addWidget(self.format_value)
-
-        # Set a small spacing specifically for this row to keep icons close to labels
-        meta_row.setSpacing(4)
-        self._layout.addLayout(meta_row)
+        self.format_label.setVisible(False)
+        self.format_value = QLabel(str(self.settings.value(KEY_FORMAT, "Vorbis")))
+        self.format_value.setVisible(False)
 
     def _init_controls_section(self):
         """
-        Sets up the primary playback controls (Play, Pause, Stop) and the
-        volume/mute management widgets.
+        Sets up modern Cyber-Moe PlaybackControls with hero circular play button,
+        stop, force stop, volume slider, dynamic speaker icon and autoplay.
         """
+        self.playback_controls = PlaybackControls()
 
-        # Main Playback Controls
-        # Row 1: Play (Priority 1)
-        play_row = QHBoxLayout()
-        self.play_button = QPushButton(self.i18n.t("play"))
-        self.play_button.setFixedHeight(40)
-        if hasattr(self, "_icon_play"):
-            self.play_button.setIcon(self._icon_play)
-        self.play_button.setIconSize(QSize(20, 20))
-        self.play_button.clicked.connect(self.play_stream)
-        play_row.addWidget(self.play_button)
-        self._layout.addLayout(play_row)
+        # Wire PlaybackControls signals
+        self.playback_controls.play_clicked.connect(self.play_stream)
+        self.playback_controls.pause_resume_clicked.connect(self.pause_resume)
+        self.playback_controls.stop_clicked.connect(self.stop_stream)
+        self.playback_controls.force_stop_clicked.connect(self.force_stop_all)
+        self.playback_controls.sleep_toggle_clicked.connect(self._on_sleep_toggle_clicked)
+        self.playback_controls.volume_changed.connect(self.change_volume)
+        self.playback_controls.mute_toggled.connect(self.toggle_mute)
+        self.playback_controls.autoplay_toggled.connect(self._on_autoplay_toggled)
 
-        # Row 2: Pause and Stop (Priority 2)
-        secondary_controls_layout = QHBoxLayout()
-        secondary_controls_layout.setSpacing(12)
+        # Backward compatibility references
+        self.play_button = self.playback_controls.hero_play
+        self.pause_button = self.playback_controls.hero_play
+        self.stop_button = self.playback_controls.btn_stop
+        self.force_stop_button = self.playback_controls.btn_force_stop
+        self.volume_slider = self.playback_controls.volume_slider
+        self.mute_button = self.playback_controls.speaker_btn
+        self.volume_value_label = self.playback_controls.volume_label
+        self.volume_label = QLabel("")
+        self.volume_label.setVisible(False)
+        self.autoplay_checkbox = self.playback_controls.chk_autoplay
 
-        self.pause_button = QPushButton(self.i18n.t("pause"))
-        self.pause_button.setFixedHeight(40)
-        if hasattr(self, "_icon_pause"):
-            self.pause_button.setIcon(self._icon_pause)
-        self.pause_button.setIconSize(QSize(20, 20))
-        self.pause_button.clicked.connect(self.pause_resume)
-
-        self.stop_button = QPushButton(self.i18n.t("stop"))
-        self.stop_button.setFixedHeight(40)
-        if hasattr(self, "_icon_stop"):
-            self.stop_button.setIcon(self._icon_stop)
-        self.stop_button.setIconSize(QSize(20, 20))
-        self.stop_button.clicked.connect(self.stop_stream)
-
-        secondary_controls_layout.addWidget(self.pause_button)
-        secondary_controls_layout.addWidget(self.stop_button)
-        self._layout.addLayout(secondary_controls_layout)
-
-        # Emergency "FORCE STOP" button under Pause/Stop row
-        self.force_stop_button = QPushButton("FORCE STOP")
-        if hasattr(self, "_icon_force_stop"):
-            self.force_stop_button.setIcon(self._icon_force_stop)
-            self.force_stop_button.setIconSize(QSize(16, 16))
-            # Spacing between icon and text (at least 2px)
-            self.force_stop_button.setStyleSheet(
-                "QPushButton { text-align: center; padding-left: 4px; }"
-            )
-        self.force_stop_button.clicked.connect(self.force_stop_all)
-        self._layout.addWidget(self.force_stop_button)
-
-        # Volume Controls
-        vol_row = QHBoxLayout()
-        self.volume_label = QLabel(self.i18n.t("volume"))
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
-
+        # Load initial values
         saved_vol = self.settings.value(KEY_VOLUME, 60)
         try:
-            self.volume_slider.setValue(int(saved_vol))
+            self.playback_controls.set_volume(int(saved_vol))
         except Exception:
-            self.volume_slider.setValue(60)
+            self.playback_controls.set_volume(60)
 
-        self.volume_slider.valueChanged.connect(self.change_volume)
+        self.playback_controls.set_autoplay(self._get_bool(KEY_AUTOPLAY, False))
+        self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
 
-        self.mute_button = QPushButton(self.i18n.t("mute"))
-        self.mute_button.setCheckable(True)
-        self.mute_button.setFixedHeight(30)
-        self.mute_button.setIcon(self._icon_unmute)
-        self.mute_button.clicked.connect(self.toggle_mute)
-
-        self.volume_value_label = QLabel(f"{saved_vol}%")
-        self.volume_value_label.setFixedWidth(40)
-
-        # Autoplay Toggle (on main UI)
-        self.autoplay_checkbox = QCheckBox(self.i18n.t("settings_autoplay"))
-        self.autoplay_checkbox.setChecked(self._get_bool(KEY_AUTOPLAY, False))
-        self.autoplay_checkbox.toggled.connect(self._on_autoplay_toggled)
-
-        vol_row.addWidget(self.volume_label)
-        vol_row.addWidget(self.volume_slider)
-        vol_row.addWidget(self.volume_value_label)
-        vol_row.addWidget(self.mute_button)
-        vol_row.addWidget(self.autoplay_checkbox)
-        self._layout.addLayout(vol_row)
+        self._layout.addWidget(self.playback_controls)
 
     def _init_progress_section(self):
         """
-        Initializes the buffering progress bar and connects visual feedback signals
-        from the playback system to UI updates.
+        Routes buffering and opening visual feedback directly to SmoothProgressBar
+        (self.song_progress), keeping self.buffer_bar hidden off-layout only for
+        backward attribute compatibility.
         """
         self.buffer_bar = QProgressBar()
         self.buffer_bar.setRange(0, 100)
         self.buffer_bar.setVisible(False)
-        self._layout.addWidget(self.buffer_bar)
 
         try:
-            self.buffering_progress.connect(self.buffer_bar.setValue)
-            self.buffering_visible.connect(self.buffer_bar.setVisible)
-            self.buffering_indeterminate.connect(self._set_buffer_bar_indeterminate)
+            self.buffering_progress.connect(self.song_progress.set_buffering_percent)
+            self.buffering_visible.connect(self.song_progress.set_buffering_active)
+            self.buffering_indeterminate.connect(self.song_progress.set_buffering_indeterminate)
         except Exception:
             pass
 
     def _init_sleep_timer_section(self):
-        """Restore Sleep Timer UI controls."""
-        sleep_group_layout = QVBoxLayout()
-        sleep_group_layout.setSpacing(4)
+        """Initializes modern SleepTimerWidget with chip presets and live countdown."""
+        self.sleep_timer_widget = SleepTimerWidget()
+        self.sleep_timer_widget.start_requested.connect(self._on_sleep_start_requested)
+        self.sleep_timer_widget.cancel_requested.connect(self.sleep_cancel_clicked)
+        self.sleep_timer_widget.btn_close.clicked.connect(self._sync_window_height_for_sleep_drawer)
 
-        title_row = QHBoxLayout()
-        self.sleep_title = QLabel(self.i18n.t("sleep_timer"))
-        self.sleep_title.setStyleSheet("font-weight: bold; margin-top: 8px;")
-        title_row.addWidget(self.sleep_title)
-        title_row.addStretch(1)
-        sleep_group_layout.addLayout(title_row)
+        # Backward compatibility attributes
+        self.spin_sleep = self.sleep_timer_widget.spin_minutes
+        self.btn_sleep_start = self.sleep_timer_widget.btn_start
+        self.btn_sleep_cancel = self.sleep_timer_widget.btn_cancel
+        self.sleep_title = self.sleep_timer_widget.title_label
+        self.sleep_minutes_label = QLabel("")
+        self.sleep_minutes_label.setVisible(False)
 
-        controls_row = QHBoxLayout()
-        self.sleep_minutes_label = QLabel(self.i18n.t("sleep_minutes"))
-        self.spin_sleep = QSpinBox()
-        self.spin_sleep.setRange(1, 480)
         try:
-            self.spin_sleep.setValue(int(self.settings.value(KEY_SLEEP_MINUTES, 30)))
+            self.sleep_timer_widget.set_minutes(int(self.settings.value(KEY_SLEEP_MINUTES, 30)))
         except Exception:
-            self.spin_sleep.setValue(30)
+            self.sleep_timer_widget.set_minutes(30)
 
-        self.btn_sleep_start = QPushButton(self.i18n.t("sleep_start"))
-        self.btn_sleep_start.clicked.connect(self.sleep_start_clicked)
-
-        self.btn_sleep_cancel = QPushButton(self.i18n.t("sleep_cancel"))
-        self.btn_sleep_cancel.clicked.connect(self.sleep_cancel_clicked)
-
-        controls_row.addWidget(self.sleep_minutes_label)
-        controls_row.addWidget(self.spin_sleep)
-        controls_row.addWidget(self.btn_sleep_start)
-        controls_row.addWidget(self.btn_sleep_cancel)
-
-        # Ensure consistent heights for sleeper controls
-        for w in (self.spin_sleep, self.btn_sleep_start, self.btn_sleep_cancel):
-            w.setFixedHeight(30)
-
-        sleep_group_layout.addLayout(controls_row)
-
-        self._layout.addLayout(sleep_group_layout)
+        self._layout.addWidget(self.sleep_timer_widget)
 
     def _init_footer_section(self):
-        """Add a bottom footer bar with the session timer."""
-        self.footer_bar = QWidget()
-        self.footer_bar.setObjectName("footerBar")
-        self.footer_bar.setFixedHeight(30)
+        """Initializes the StatusFooter showing audio backend, codec, and session timer."""
+        self.status_footer = StatusFooter()
+        self.footer_bar = self.status_footer
+        self.session_label = self.status_footer.session_label
+        self.session_label.setText(self.i18n.t("session_timer", time="00:00"))
 
-        footer_layout = QHBoxLayout(self.footer_bar)
-        footer_layout.setContentsMargins(10, 2, 10, 2)
-        footer_layout.setSpacing(6)
-        footer_layout.addStretch(1)
-        if hasattr(self, "session_label"):
-            self.session_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.session_label.setText(self.i18n.t("session_timer", time="00:00"))
-            self.session_label.setVisible(True)
-            footer_layout.addWidget(self.session_label)
-        footer_layout.addStretch(1)
+        fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+        self.status_footer.set_format(fmt)
 
-        self._layout.addWidget(self.footer_bar)
-        self._layout.addStretch(1)
+        self._layout.addWidget(self.status_footer)
 
     def _create_player(self, on_event):
         """
@@ -749,7 +905,10 @@ class ListenMoePlayer(QWidget):
         try:
             self.player.set_volume(self.volume_slider.value())
             is_muted = self._get_bool(KEY_MUTE, False)
-            self.mute_button.setChecked(is_muted)
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_muted(is_muted)
+            else:
+                self.mute_button.setChecked(is_muted)
             self.player.set_mute(is_muted)
             self.mute_button.setText(self.i18n.t("unmute") if is_muted else self.i18n.t("mute"))
         except Exception:
@@ -837,6 +996,10 @@ class ListenMoePlayer(QWidget):
         """Final UI polish and logic hooks (Theme, Autoplay, Global Shortcuts)."""
         try:
             self.apply_theme()
+            self.apply_translations()
+            min_h = max(660, self.minimumSizeHint().height())
+            if self.height() < min_h:
+                self.resize(max(380, self.width()), min_h)
             self.backend_status_refresh.connect(self.update_vlc_status_label)
 
             # Autoplay
@@ -1209,7 +1372,8 @@ class ListenMoePlayer(QWidget):
 
                     self.song_progress.show()
                 else:
-                    self.song_progress.hide()
+                    self.song_progress.setValue(0)
+                    self.song_progress.show()
 
             self.label_refresh.emit()
             if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(
@@ -1235,6 +1399,61 @@ class ListenMoePlayer(QWidget):
             self.status_changed.emit(str(text))
         except Exception:
             pass
+
+    def set_radio_provider(self, provider: str) -> None:
+        """Show the J-POP / K-POP switch only when the 'listenmoe' radio is selected."""
+        self._current_radio_provider = (provider or "").strip().lower()
+        if hasattr(self, "channel_switch"):
+            self.channel_switch.setVisible(self._current_radio_provider == "listenmoe")
+
+    def _on_channel_switch_changed(self, new_channel: str) -> None:
+        try:
+            self._apply_tray_stream_setting_change(KEY_CHANNEL, new_channel, ws_channel=new_channel)
+            if hasattr(self, "channel_value"):
+                self.channel_value.setText(new_channel)
+        except Exception:
+            pass
+
+    def _on_sleep_start_requested(self, minutes: int) -> None:
+        try:
+            if hasattr(self, "spin_sleep"):
+                self.spin_sleep.setValue(minutes)
+            self.sleep_start_clicked()
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
+        except Exception:
+            pass
+
+    def _sync_window_height_for_sleep_drawer(self) -> None:
+        try:
+            if hasattr(self, "sleep_timer_widget"):
+                is_open = self.sleep_timer_widget.isVisible()
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_sleep_drawer_open(is_open)
+                extra = 95 if is_open else 0
+                base_h = 530 + CustomTitleBar.HEIGHT
+                target_h = max(base_h + extra, self.minimumSizeHint().height())
+                self.resize(self.width(), target_h)
+        except Exception:
+            pass
+
+    def _on_sleep_toggle_clicked(self) -> None:
+        try:
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.toggle_visible()
+                self._sync_window_height_for_sleep_drawer()
+        except Exception:
+            pass
+
+    def _on_now_playing_text_changed(self, text: str) -> None:
+        if hasattr(self, "now_playing_label"):
+            self.now_playing_label.setText(text)
+        title = self._current_title or self.t("unknown")
+        artist = self._current_artist or ""
+        if hasattr(self, "now_playing_title"):
+            self.now_playing_title.setText(title)
+        if hasattr(self, "now_playing_artist"):
+            self.now_playing_artist.setText(artist)
 
     # 4. Timer & Tray Action Events
     def _on_session_tick(self) -> None:
@@ -1333,10 +1552,19 @@ class ListenMoePlayer(QWidget):
                 if hasattr(self, "sleep_label"):
                     self.sleep_label.setText("")
                     self.sleep_label.setVisible(False)
+                if hasattr(self, "sleep_timer_widget"):
+                    self.sleep_timer_widget.set_inactive()
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_sleep_active(False)
                 if self._get_bool(KEY_SLEEP_STOP_ON_END, True):
                     self.stop_stream()
                 return
             self._sleep_remaining_sec -= 1
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
+            if hasattr(self, "playback_controls"):
+                m, s = divmod(max(0, self._sleep_remaining_sec), 60)
+                self.playback_controls.set_sleep_active(True, f"{m:02d}:{s:02d}")
             if (
                 self._sleep_saved_volume is not None
                 and self._sleep_remaining_sec <= self._sleep_fadeout_sec
@@ -1412,6 +1640,13 @@ class ListenMoePlayer(QWidget):
             self.play_button.setText(
                 self.i18n.t("play_active") if force_playing else self.i18n.t("play")
             )
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_playing_state(
+                    is_playing=force_playing,
+                    is_paused=bool(getattr(self, "_ui_paused", False)),
+                )
+            if hasattr(self, "live_badge"):
+                self.live_badge.set_playing(bool(force_playing))
         except Exception:
             pass
 
@@ -1442,8 +1677,14 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         if hasattr(self, "settings_button"):
-            self.settings_button.setText(self.i18n.t("settings_button"))
+            self.settings_button.setToolTip(self.i18n.t("settings_button"))
         # Sleep UI texts
+        if hasattr(self, "sleep_timer_widget"):
+            self.sleep_timer_widget.apply_translations(
+                title=self.i18n.t("sleep_timer"),
+                start_btn=self.i18n.t("sleep_start"),
+                cancel_btn=self.i18n.t("sleep_cancel"),
+            )
         if hasattr(self, "sleep_title"):
             self.sleep_title.setText(self.i18n.t("sleep_timer"))
         if hasattr(self, "sleep_minutes_label"):
@@ -1459,6 +1700,8 @@ class ListenMoePlayer(QWidget):
         self.update_tray_texts()
         if hasattr(self, "autoplay_checkbox"):
             self.autoplay_checkbox.setText(self.i18n.t("settings_autoplay"))
+        if hasattr(self, "playback_controls"):
+            self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
         # Update dev console dialog texts if open
         try:
             if hasattr(self, "dev_console") and self.dev_console and self.dev_console.is_open():
@@ -1473,71 +1716,16 @@ class ListenMoePlayer(QWidget):
     def apply_theme(self) -> None:
         try:
             dark = True
-            accent = getattr(self, "COLOR_ACCENT", "#c2185b")
+            accent = getattr(self, "COLOR_ACCENT", PALETTE["accent"])
             app = QApplication.instance()
             if not isinstance(app, QApplication):
                 return
-            app.setStyleSheet(
-                f"""
-                QWidget {{ background-color: #121212; color: #e0e0e0; }}
-                QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
-                QWidget#mediaAmbientBlock {{
-                    background-color: #151515; border: 1px solid #232323; border-radius: 10px;
-                }}
-                QLabel#mediaAmbientBackground {{ background-color: #151515; border-radius: 10px; }}
-                QWidget#mediaForeground {{ background: transparent; border: none; }}
-                QLabel#nowPlayingLabel {{
-                    font-size: 14px; font-weight: 500; color: #e0e0e0; background: transparent;
-                }}
-                QLabel#songTimeLabel {{
-                    font-size: 12px; font-weight: 600; color: #cfcfcf; background: transparent;
-                }}
-                QLabel#albumCoverLabel {{
-                    background-color: #101010; border: 1px solid #2a2a2a; border-radius: 10px;
-                }}
-                QWidget#settingsHeaderBar {{
-                    background-color: #2a2a2a; border: none; border-bottom: 1px solid #3a3a3a;
-                    border-radius: 0px;
-                }}
-                QWidget#footerBar {{
-                    background-color: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px;
-                }}
-                QLabel#sessionLabel {{ color: #f0f0f0; font-weight: 600; background: transparent; }}
-                QPushButton {{
-                    background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333;
-                    padding: 6px 10px; border-radius: 4px;
-                }}
-                QPushButton:hover {{ background-color: #2a2a2a; }}
-                QPushButton#menuButton {{
-                    background-color: transparent; border: none; border-radius: 4px;
-                    padding: 4px 4px 4px 2px; margin-left: 0px; color: #ffffff;
-                    font-size: 12px; text-align: left;
-                }}
-                QPushButton#menuButton:hover {{ background-color: #444444; color: #ffffff; }}
-                QPushButton:disabled {{
-                    background-color: #1a1a1a; color: #777; border-color: #2a2a2a;
-                }}
-                QLineEdit, QSpinBox, QComboBox {{
-                    background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333;
-                    border-radius: 4px; padding: 4px;
-                }}
-                QMenu {{ background-color: #121212; color: #e0e0e0; border: 1px solid #333; }}
-                QToolTip {{ background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }}
-                QProgressBar {{
-                    background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0;
-                    border-radius: 4px; text-align: center;
-                }}
-                QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}
-                QProgressBar#songProgressBar {{
-                    background-color: #222; border: none; height: 4px; border-radius: 2px;
-                }}
-                QSlider::groove:horizontal {{ height: 6px; background: #333; border-radius: 3px; }}
-                QSlider::handle:horizontal {{
-                    background: {accent}; width: 14px; height: 14px; margin: -4px 0;
-                    border-radius: 7px;
-                }}
-                """
-            )
+            app.setStyleSheet(get_cyber_moe_stylesheet(accent))
+
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.hero_play.set_accent_color(accent)
+            if hasattr(self, "channel_switch"):
+                self.channel_switch.set_accent_color(accent)
 
             # --- Icon Dynamic Tinting ---
             # All icons now use the accent color (Magenta) for consistent branding
@@ -1563,38 +1751,18 @@ class ListenMoePlayer(QWidget):
             # Skip settings icon as requested (text-only for cleaner alignment)
             # self._icon_settings = self._tint_icon(self._icon_settings_raw, icon_color, sz_small)
 
-            # Assign to UI buttons
-            if hasattr(self, "play_button"):
-                self.play_button.setIcon(self._icon_play)
-            if hasattr(self, "pause_button"):
-                self.pause_button.setIcon(self._icon_pause)
-            if hasattr(self, "stop_button"):
-                self.stop_button.setIcon(self._icon_stop)
-            if hasattr(self, "force_stop_button"):
-                self.force_stop_button.setIcon(self._icon_force_stop)
-
             # Update metadata icon labels with the new tinted icons
             if hasattr(self, "channel_icon_label"):
                 self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
             if hasattr(self, "format_icon_label"):
                 self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
 
-            # Skip settings icon as requested (text-only for cleaner alignment)
-            if hasattr(self, "mute_button"):
-                is_muted = self._get_bool(KEY_MUTE, False)
-                self.mute_button.setIcon(self._icon_mute if is_muted else self._icon_unmute)
-
             try:
                 self.setWindowIcon(self._icon_app)
+                if getattr(self, "_title_bar", None) is not None:
+                    self._title_bar.set_icon(self._icon_app)
             except Exception:
                 pass
-
-            if hasattr(self, "mute_button"):
-                self.mute_button.setIcon(
-                    self._icon_unmute if not self.mute_button.isChecked() else self._icon_mute
-                )
-            # Settings icon removed as requested
-            # if hasattr(self, 'settings_button'): self.settings_button.setIcon(self._icon_settings)
 
             # Synchronize icons with TrayManager
             if hasattr(self, "tray_mgr") and self.tray_mgr:
@@ -1735,7 +1903,6 @@ class ListenMoePlayer(QWidget):
                 self._set_album_cover_pixmap(cached)
                 return
 
-            self._set_album_cover_pixmap(None)
             with self._cover_download_lock:
                 if cover_url in self._cover_download_inflight:
                     return
@@ -1757,7 +1924,7 @@ class ListenMoePlayer(QWidget):
                 return
             if parts.port not in (None, 443):
                 return
-            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.11.0"})
+            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/2.0.0-beta1"})
             with urllib.request.urlopen(req, timeout=8) as res:
                 chunk = res.read((4 * 1024 * 1024) + 1)
                 if isinstance(chunk, (bytes, bytearray)) and 0 < len(chunk) <= (4 * 1024 * 1024):
@@ -1784,6 +1951,8 @@ class ListenMoePlayer(QWidget):
 
             pixmap = QPixmap()
             if not pixmap.loadFromData(raw):
+                if cover_url and cover_url == self._current_cover_url:
+                    self._set_album_cover_pixmap(None)
                 return
 
             self._cover_cache[cover_url] = pixmap
@@ -1852,6 +2021,21 @@ class ListenMoePlayer(QWidget):
 
     def _set_album_cover_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         try:
+            if hasattr(self, "ambient_cover"):
+                self.ambient_cover.set_cover(pixmap)
+            if hasattr(self, "_content_widget") and isinstance(
+                self._content_widget, FullBleedCanvas
+            ):
+                amb_col = (
+                    self.ambient_cover.ambient_color if hasattr(self, "ambient_cover") else None
+                )
+                self._content_widget.set_backdrop(pixmap, amb_col)
+            if hasattr(self, "_settings_dlg") and self._settings_dlg is not None:
+                try:
+                    self._settings_dlg._sync_backdrop_from_parent()
+                except Exception:
+                    pass
+
             if not hasattr(self, "album_cover_label"):
                 return
 
@@ -2085,6 +2269,10 @@ class ListenMoePlayer(QWidget):
                 self.channel_value.setText(channel)
             if hasattr(self, "format_value"):
                 self.format_value.setText(fmt)
+            if hasattr(self, "status_footer"):
+                self.status_footer.set_format(str(fmt))
+            if hasattr(self, "channel_switch"):
+                self.channel_switch.set_selected(str(channel))
             # Mantieni o aggiorna titolo finestra in base al Now Playing
             try:
                 title = getattr(self, "_current_title", "") or ""
@@ -2094,8 +2282,26 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _close_embedded_settings(self) -> None:
+        try:
+            if hasattr(self, "settings_button"):
+                self.settings_button.set_active(False)
+            if hasattr(self, "_view_stack"):
+                self._view_stack.slide_to_index(0, direction=-1)
+        except Exception:
+            pass
+
     def open_settings(self):
         try:
+            # Toggle off with smooth slide-out if embedded settings panel is already open
+            if hasattr(self, "_view_stack") and self._view_stack.currentIndex() == 1:
+                self._close_embedded_settings()
+                return
+
+            # Ensure main window is visible if triggered from system tray
+            if not self.isVisible():
+                self.showNormal()
+
             # Salva stato precedente
             was_playing = bool(self.player and self.player.is_playing())
             prev_channel = self.settings.value(KEY_CHANNEL, "J-POP")
@@ -2109,7 +2315,21 @@ class ListenMoePlayer(QWidget):
                 prev_nc = 1000
             prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
             prev_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-            dlg = SettingsDialog(self)
+
+            # Reuse persistent embedded panel so opening is instantaneous & 60 FPS
+            if not hasattr(self, "_settings_dlg") or self._settings_dlg is None:
+                dlg = SettingsDialog(self, embedded=True)
+                self._settings_dlg = dlg
+                self._view_stack.addWidget(dlg)
+            else:
+                dlg = self._settings_dlg
+                dlg.reload_from_settings()
+                try:
+                    dlg.accepted.disconnect()
+                    dlg.rejected.disconnect()
+                    dlg.settings_changed.disconnect()
+                except Exception:
+                    pass
             try:
                 self._apply_prev_audio_idx = prev_audio_idx
 
@@ -2280,13 +2500,21 @@ class ListenMoePlayer(QWidget):
                     except Exception:
                         pass
 
-            # collega e mostra non-modale
+            # Collega e mostra nel pannello integrato della home
+            def _on_ok_embedded():
+                _on_dialog_accepted()
+                self._close_embedded_settings()
+
             try:
-                dlg.accepted.connect(_on_dialog_accepted)
+                dlg.accepted.connect(_on_ok_embedded)
+                dlg.rejected.connect(self._close_embedded_settings)
+                dlg.settings_changed.connect(_on_dialog_accepted)
             except Exception:
                 pass
             try:
-                dlg.show()
+                if hasattr(self, "settings_button"):
+                    self.settings_button.set_active(True)
+                self._view_stack.slide_to_index(1, direction=1)
             except Exception:
                 pass
         except Exception:
@@ -2364,6 +2592,11 @@ class ListenMoePlayer(QWidget):
                     self.t("sleep_remaining", time=self._format_mmss(self._sleep_remaining_sec))
                 )
                 self.sleep_label.setVisible(True)
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
+            if hasattr(self, "playback_controls"):
+                m, s = divmod(max(0, self._sleep_remaining_sec), 60)
+                self.playback_controls.set_sleep_active(True, f"{m:02d}:{s:02d}")
         except Exception:
             pass
 
@@ -2382,6 +2615,10 @@ class ListenMoePlayer(QWidget):
             if hasattr(self, "sleep_label"):
                 self.sleep_label.setText("")
                 self.sleep_label.setVisible(False)
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_inactive()
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_sleep_active(False)
         except Exception:
             pass
 
@@ -2530,11 +2767,19 @@ class ListenMoePlayer(QWidget):
                         if remaining < 0:
                             remaining = 0
                         mmss = self._format_mmss(remaining)
+                        if hasattr(self, "song_elapsed_label"):
+                            self.song_elapsed_label.setText(
+                                self._format_mmss(int(max(0, min(elapsed, dur))))
+                            )
                     else:
                         # Fallback to total duration to avoid misleading or extreme values
                         mmss = self._format_mmss(dur)
+                        if hasattr(self, "song_elapsed_label"):
+                            self.song_elapsed_label.setText("0:00")
                 elif dur:
                     mmss = self._format_mmss(dur)
+                    if hasattr(self, "song_elapsed_label"):
+                        self.song_elapsed_label.setText("0:00")
                 if mmss:
                     time_text = mmss
         except Exception:
@@ -2544,6 +2789,10 @@ class ListenMoePlayer(QWidget):
                 self.song_time_label.setText(time_text)
         except Exception:
             pass
+        if hasattr(self, "now_playing_title"):
+            self.now_playing_title.setText(title)
+        if hasattr(self, "now_playing_artist"):
+            self.now_playing_artist.setText(artist)
         self.now_playing_changed.emit(text)
         # Update window title too
         try:
@@ -2799,6 +3048,17 @@ class ListenMoePlayer(QWidget):
                 self.vlc_status.setText(self.i18n.t("vlc_not_found"))  # type: ignore[attr-defined]
             else:
                 self.vlc_status.setText(txt or "Audio backend OK")  # type: ignore[attr-defined]
+            if hasattr(self, "status_footer"):
+                backend_name = "Audio"
+                if hasattr(self, "player") and self.player is not None:
+                    backend_name = getattr(
+                        self.player,
+                        "BACKEND_NAME",
+                        type(self.player).__name__.replace("Player", ""),
+                    )
+                self.status_footer.set_backend_status(backend_name, is_ready=ok)
+                fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+                self.status_footer.set_format(fmt)
         except Exception:
             pass
 
@@ -2859,6 +3119,11 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(
                     self.t("status_opening") if hasattr(self, "t") else "Opening..."
                 )
+                try:
+                    if hasattr(self, "song_progress"):
+                        self.song_progress.trigger_play_launch()
+                except Exception:
+                    pass
                 # Preserva il timer se stiamo già riproducendo
                 # (es. cambio URL o click Riproduci mentre attivo)
                 try:
@@ -3080,15 +3345,12 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         try:
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_muted(checked)
             self.mute_button.setText(self.i18n.t("unmute") if checked else self.i18n.t("mute"))
-            # Update tooltip and icon according to state
-            try:
-                self.mute_button.setToolTip(
-                    self.i18n.t("tt_unmute") if checked else self.i18n.t("tt_mute")
-                )
-                self.mute_button.setIcon(self._icon_mute if checked else self._icon_unmute)
-            except Exception:
-                pass
+            self.mute_button.setToolTip(
+                self.i18n.t("tt_unmute") if checked else self.i18n.t("tt_mute")
+            )
         except Exception:
             pass
         try:
@@ -3152,7 +3414,10 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         try:
-            self.mute_button.toggle()
+            if hasattr(self, "playback_controls"):
+                self.playback_controls._on_speaker_clicked()
+            else:
+                self.mute_button.toggle()
         except Exception:
             pass
 

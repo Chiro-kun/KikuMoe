@@ -58,7 +58,7 @@ if icon_dir.is_dir():
 
 # Include version.yml if present so the app can read it at runtime in onefile
 version_yml = repo_root / "version.yml"
-app_version = "1.11.0"
+app_version = "2.0.0-beta1"
 if version_yml.exists():
     datas.append((str(version_yml), "."))
     try:

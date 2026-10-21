@@ -1,18 +1,44 @@
+"""
+SettingsDialog / Integrated Settings Panel for KikuMoe 2.0.0
+Features:
+- 60 FPS SlidingStackedWidget using direct widget geometry translation (zero flash)
+- Custom vector BackToPlayerButton ('< Player') with click bounce animation
+- SettingsCategoryBar with 60 FPS horizontal sliding pill (matching J-POP | K-POP switch)
+- Custom-painted GlassComboBox with 13px DemiBold text and styled popup list
+- Preserved _host_window reference so Developer Console opens reliably when embedded
+"""
+
 import os
 import sys
+from typing import List, Optional
 
-from PyQt6.QtCore import QSettings, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, QSettings, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PyQt6.QtWidgets import (
+    QAbstractSpinBox,
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.constants import (
@@ -37,173 +63,765 @@ from core.constants import (
 from core.i18n import I18n
 from core.logger import silence_stderr
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
+from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
 
 
+class SlidingStackedWidget(QStackedWidget):
+    """
+    QStackedWidget with 60 FPS cubic-out slide transitions that animate the
+    actual child widgets' positions without switching currentIndex early,
+    preventing any flash or transparent bleed-through.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_slide)
+        self._step = 0
+        self._total_steps = 13  # ~200ms silky 60 FPS transition
+        self._w_from: Optional[QWidget] = None
+        self._w_to: Optional[QWidget] = None
+        self._target_index: int = 0
+        self._direction: int = 1
+
+    def finish_active_slide(self) -> None:
+        """Immediately complete any running slide transition."""
+        if self._anim_timer.isActive():
+            self._anim_timer.stop()
+            if self._w_from is not None:
+                self._w_from.move(0, 0)
+            if self._w_to is not None:
+                self._w_to.move(0, 0)
+            super().setCurrentIndex(self._target_index)
+            self._w_from = None
+            self._w_to = None
+
+    def slide_to_index(self, new_index: int, direction: Optional[int] = None) -> None:
+        self.finish_active_slide()
+        old_index = self.currentIndex()
+        if new_index == old_index or not (0 <= new_index < self.count()):
+            return
+
+        if not self.isVisible() or self.width() <= 10 or self.height() <= 10:
+            super().setCurrentIndex(new_index)
+            return
+
+        if direction is None:
+            direction = 1 if new_index > old_index else -1
+
+        w_from = self.widget(old_index)
+        w_to = self.widget(new_index)
+        if w_from is None or w_to is None:
+            super().setCurrentIndex(new_index)
+            return
+
+        w = self.width()
+        h = self.height()
+
+        self._w_from = w_from
+        self._w_to = w_to
+        self._target_index = new_index
+        self._direction = direction
+        self._step = 0
+
+        # Position incoming widget completely offscreen BEFORE showing it so it never flashes
+        if direction >= 0:
+            w_to.setGeometry(w, 0, w, h)
+            w_to.show()
+            w_to.raise_()
+        else:
+            w_to.setGeometry(-int(w * 0.24), 0, w, h)
+            w_to.show()
+            w_from.raise_()
+
+        self._anim_timer.start()
+
+    def _tick_slide(self) -> None:
+        self._step += 1
+        w = float(self.width())
+        if self._step <= self._total_steps and self._w_from is not None and self._w_to is not None:
+            t = self._step / float(self._total_steps)
+            ease = 1.0 - ((1.0 - t) ** 3)
+            if self._direction >= 0:
+                # Incoming panel slides from x=w to x=0 over outgoing panel
+                self._w_from.move(int(-w * 0.24 * ease), 0)
+                self._w_to.move(int(w * (1.0 - ease)), 0)
+            else:
+                # Outgoing panel slides out from x=0 to x=w revealing incoming panel
+                self._w_to.move(int(-w * 0.24 * (1.0 - ease)), 0)
+                self._w_from.move(int(w * ease), 0)
+        else:
+            self.finish_active_slide()
+
+
+class BackToPlayerButton(QPushButton):
+    """
+    Custom vector '< Player' pill button with anti-aliased chevron icon
+    and 60 FPS click bounce animation.
+    """
+
+    def __init__(self, text: str = "Player", parent: Optional[QWidget] = None):
+        super().__init__(text, parent)
+        self._hover = False
+        self._pressed = False
+        self._scale = 1.0
+        self._anim_step = 0
+        self.setFixedSize(88, 28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_anim)
+
+    def enterEvent(self, a0) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(a0)
+
+    def leaveEvent(self, a0) -> None:
+        self._hover = False
+        self._pressed = False
+        self.update()
+        super().leaveEvent(a0)
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self._anim_step = 1
+            self._scale = 0.88
+            self._anim_timer.start()
+            self.update()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:
+        self._pressed = False
+        self.update()
+        super().mouseReleaseEvent(e)
+
+    def _tick_anim(self) -> None:
+        scales = [0.88, 0.94, 1.04, 1.01, 1.0]
+        if 0 < self._anim_step <= len(scales):
+            self._scale = scales[self._anim_step - 1]
+            self._anim_step += 1
+            self.update()
+        else:
+            self._scale = 1.0
+            self._anim_timer.stop()
+            self.update()
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = float(self.width())
+        h = float(self.height())
+        cx = w / 2.0
+        cy = h / 2.0
+
+        painter.translate(cx, cy)
+        painter.scale(self._scale, self._scale)
+        painter.translate(-cx, -cy)
+
+        if self._hover or self._pressed:
+            bg = QColor(236, 24, 108, 48 if self._pressed else 30)
+            border = QColor(PALETTE["accent"])
+            fg = QColor("#ffffff")
+            icon_col = QColor(PALETTE["accent_hover"])
+        else:
+            bg = QColor(255, 255, 255, 16)
+            border = QColor(255, 255, 255, 36)
+            fg = QColor("#e2e6f5")
+            icon_col = QColor(PALETTE["accent_hover"])
+
+        rect = QRectF(1.0, 1.0, w - 2.0, h - 2.0)
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.1))
+        painter.drawRoundedRect(rect, (h - 2.0) / 2.0, (h - 2.0) / 2.0)
+
+        pen = QPen(icon_col, 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        chev = QPainterPath()
+        ix = 16.0
+        chev.moveTo(QPointF(ix + 2.5, cy - 4.5))
+        chev.lineTo(QPointF(ix - 2.5, cy))
+        chev.lineTo(QPointF(ix + 2.5, cy + 4.5))
+        painter.drawPath(chev)
+
+        font = QFont(self.font())
+        font.setPixelSize(12)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(fg)
+        painter.drawText(
+            QRectF(24.0, 0.0, w - 28.0, h),
+            Qt.AlignmentFlag.AlignCenter,
+            self.text(),
+        )
+        painter.end()
+
+
+class GlassComboBox(QComboBox):
+    """
+    Custom-painted QComboBox that renders a dark glass capsule with crisp 12px
+    Medium text and a vector chevron indicator, plus a styled QListView popup.
+    Prevents sticky focus/selection state when closing the popup or switching tabs.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._hover = False
+        self._popup_open = False
+        self.setFixedHeight(30)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        list_view = QListView(self)
+        font = QFont("Segoe UI")
+        font.setPixelSize(12)
+        font.setWeight(QFont.Weight.Medium)
+        self.setFont(font)
+        list_view.setFont(font)
+        list_view.setStyleSheet(
+            f"""
+            QListView {{
+                background-color: #151826;
+                border: 1px solid rgba(236, 24, 108, 0.55);
+                border-radius: 8px;
+                color: #f4f6fd;
+                font-size: 12px;
+                font-weight: 500;
+                selection-background-color: {PALETTE["accent"]};
+                selection-color: #ffffff;
+                padding: 4px;
+                outline: none;
+            }}
+            QListView::item {{
+                min-height: 25px;
+                padding: 3px 10px;
+                border-radius: 5px;
+            }}
+            """
+        )
+        self.setView(list_view)
+
+    def reset_visual_state(self) -> None:
+        """Clear any popup/hover/focus state so the dropdown never stays highlighted."""
+        if self._popup_open:
+            super().hidePopup()
+        self._popup_open = False
+        self._hover = False
+        self.clearFocus()
+        self.update()
+
+    def showPopup(self) -> None:
+        self._popup_open = True
+        self.update()
+        super().showPopup()
+
+    def hidePopup(self) -> None:
+        self._popup_open = False
+        self._hover = False
+        self.clearFocus()
+        self.update()
+        super().hidePopup()
+
+    def enterEvent(self, a0) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(a0)
+
+    def leaveEvent(self, a0) -> None:
+        self._hover = False
+        self.update()
+        super().leaveEvent(a0)
+
+    def focusOutEvent(self, e) -> None:
+        self._hover = False
+        self._popup_open = False
+        self.update()
+        super().focusOutEvent(e)
+
+    def paintEvent(self, e) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = float(self.width())
+        h = float(self.height())
+        rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+
+        if self._hover and not self._popup_open and not self.underMouse():
+            self._hover = False
+
+        if self._hover or self._popup_open:
+            bg = QColor(236, 24, 108, 30)
+            border = QColor(PALETTE["accent"])
+            chev_col = QColor(PALETTE["accent_hover"])
+        else:
+            bg = QColor(255, 255, 255, 16)
+            border = QColor(255, 255, 255, 38)
+            chev_col = QColor("#a6adc4")
+
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.1))
+        painter.drawRoundedRect(rect, 9.0, 9.0)
+
+        # Draw crisp 12px Medium current item text
+        font = QFont(self.font())
+        font.setPixelSize(12)
+        font.setWeight(QFont.Weight.Medium)
+        painter.setFont(font)
+        painter.setPen(QColor("#f4f6fd"))
+
+        text_rect = QRectF(11.0, 0.0, w - 34.0, h)
+        fm = QFontMetrics(font)
+        elided = fm.elidedText(
+            self.currentText(), Qt.TextElideMode.ElideRight, int(text_rect.width())
+        )
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            elided,
+        )
+
+        # Draw anti-aliased vector chevron 'v' on the right
+        cx = w - 15.0
+        cy = h / 2.0 + 0.5
+        pen = QPen(chev_col, 1.7)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        path = QPainterPath()
+        path.moveTo(QPointF(cx - 3.8, cy - 1.8))
+        path.lineTo(QPointF(cx, cy + 2.0))
+        path.lineTo(QPointF(cx + 3.8, cy - 1.8))
+        painter.drawPath(path)
+        painter.end()
+
+
+class AnimatedToggleSwitch(QCheckBox):
+    """
+    Full-row QCheckBox replacement that renders the label on the left and a
+    60 FPS sliding pill toggle switch on the right.
+    - Unchecked (Inactive): neutral monochrome dark glass track & gray knob
+    - Checked (Active): vibrant magenta track (#ec186c) & white knob
+    """
+
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None):
+        super().__init__(text, parent)
+        self._hover = False
+        self._progress = 1.0 if self.isChecked() else 0.0
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(36)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_anim)
+        self.toggled.connect(self._on_toggled)
+
+    def setChecked(self, checked: bool) -> None:
+        super().setChecked(checked)
+        self._progress = 1.0 if checked else 0.0
+        self.update()
+
+    def _on_toggled(self, checked: bool) -> None:
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
+
+    def _tick_anim(self) -> None:
+        target = 1.0 if self.isChecked() else 0.0
+        diff = target - self._progress
+        if abs(diff) < 0.06:
+            self._progress = target
+            self._anim_timer.stop()
+        else:
+            self._progress += diff * 0.34
+        self.update()
+
+    def enterEvent(self, a0) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(a0)
+
+    def leaveEvent(self, a0) -> None:
+        self._hover = False
+        self.update()
+        super().leaveEvent(a0)
+
+    def hitButton(self, pos) -> bool:
+        return self.rect().contains(pos)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = float(self.width())
+        h = float(self.height())
+        enabled = self.isEnabled()
+        p = self._progress
+
+        # 1. Subtle row hover highlight
+        if self._hover and enabled:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 10))
+            painter.drawRoundedRect(QRectF(0.0, 1.0, w, h - 2.0), 8.0, 8.0)
+
+        # 2. Left Text Label (larger readable font)
+        text_col = QColor("#f2f4fc" if (self.isChecked() or self._hover) else "#ced4e6")
+        if not enabled:
+            text_col.setAlpha(95)
+        painter.setPen(text_col)
+        font = QFont(self.font())
+        font.setPixelSize(12 if w < 350 else 13)
+        font.setWeight(QFont.Weight.DemiBold if self.isChecked() else QFont.Weight.Medium)
+        painter.setFont(font)
+
+        sw_w = 42.0
+        sw_h = 22.0
+        sw_x = w - sw_w - 2.0
+        sw_y = (h - sw_h) / 2.0
+
+        text_rect = QRectF(4.0, 0.0, sw_x - 10.0, h)
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
+            self.text(),
+        )
+
+        # 3. Right Sliding Pill Switch Track
+        track_rect = QRectF(sw_x, sw_y, sw_w, sw_h)
+        radius = sw_h / 2.0
+
+        r_bg = int(28 + (236 - 28) * p)
+        g_bg = int(32 + (24 - 32) * p)
+        b_bg = int(48 + (108 - 48) * p)
+        a_bg = int(195 + (255 - 195) * p)
+        if not enabled:
+            a_bg = int(a_bg * 0.45)
+
+        track_col = QColor(r_bg, g_bg, b_bg, a_bg)
+        if p > 0.5:
+            border_col = QColor("#ff4797" if self._hover else PALETTE["accent"])
+        else:
+            border_col = QColor(255, 255, 255, 65 if self._hover else 34)
+        if not enabled:
+            border_col.setAlpha(30)
+
+        painter.setBrush(track_col)
+        painter.setPen(QPen(border_col, 1.1))
+        painter.drawRoundedRect(track_rect, radius, radius)
+
+        # 4. Sliding Knob Circle
+        knob_d = sw_h - 6.0
+        knob_min_x = sw_x + 3.0
+        knob_max_x = sw_x + sw_w - knob_d - 3.0
+        knob_x = knob_min_x + (knob_max_x - knob_min_x) * p
+        knob_y = sw_y + 3.0
+
+        if p > 0.5:
+            knob_col = QColor("#ffffff")
+        else:
+            knob_col = QColor("#cfd5e8" if self._hover else "#8c93aa")
+        if not enabled:
+            knob_col.setAlpha(90)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(knob_col)
+        painter.drawEllipse(QRectF(knob_x, knob_y, knob_d, knob_d))
+        painter.end()
+
+
+class SettingsCategoryBar(QWidget):
+    """
+    3-Tab Segmented Pill Bar with the exact same 60 FPS horizontal sliding pill
+    animation (_anim_pos) as the main window's J-POP | K-POP SegmentedSwitch!
+    """
+
+    tab_changed = pyqtSignal(int)
+
+    def __init__(self, labels: List[str], parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._labels = labels
+        self._selected = 0
+        self._anim_pos = 0.0
+        self._hover_idx = -1
+        self.setFixedHeight(34)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+
+        self._slide_timer = QTimer(self)
+        self._slide_timer.setInterval(16)
+        self._slide_timer.timeout.connect(self._tick_slide)
+
+    def _tick_slide(self) -> None:
+        target = float(self._selected)
+        diff = target - self._anim_pos
+        if abs(diff) < 0.02:
+            self._anim_pos = target
+            self._slide_timer.stop()
+        else:
+            self._anim_pos += diff * 0.32
+        self.update()
+
+    def set_labels(self, labels: List[str]) -> None:
+        self._labels = labels
+        self.update()
+
+    def set_selected(self, idx: int) -> None:
+        if 0 <= idx < len(self._labels) and idx != self._selected:
+            self._selected = idx
+            self._slide_timer.start()
+            self.update()
+
+    def mouseMoveEvent(self, e) -> None:
+        n = max(1, len(self._labels))
+        seg_w = self.width() / float(n)
+        idx = int(e.position().x() // seg_w)
+        idx = max(0, min(n - 1, idx))
+        if idx != self._hover_idx:
+            self._hover_idx = idx
+            self.update()
+        super().mouseMoveEvent(e)
+
+    def leaveEvent(self, a0) -> None:
+        self._hover_idx = -1
+        self.update()
+        super().leaveEvent(a0)
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.MouseButton.LeftButton and self._labels:
+            n = len(self._labels)
+            seg_w = self.width() / float(n)
+            idx = int(e.position().x() // seg_w)
+            idx = max(0, min(n - 1, idx))
+            if idx != self._selected:
+                self._selected = idx
+                self._slide_timer.start()
+                self.tab_changed.emit(idx)
+                self.update()
+        super().mousePressEvent(e)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = float(self.width())
+        h = float(self.height())
+        radius = h / 2.0
+        n = max(1, len(self._labels))
+        seg_w = w / float(n)
+
+        # 1. Outer dark glass track
+        track_path = QPainterPath()
+        track_path.addRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), radius, radius)
+        painter.fillPath(track_path, QColor(18, 21, 34, 240))
+        painter.setPen(QPen(QColor(255, 255, 255, 34), 1.0))
+        painter.drawPath(track_path)
+
+        # 2. Subtle hover highlight on non-active segment
+        if 0 <= self._hover_idx < n and self._hover_idx != self._selected:
+            hover_rect = QRectF(self._hover_idx * seg_w + 2.5, 2.5, seg_w - 5.0, h - 5.0)
+            hover_path = QPainterPath()
+            hover_path.addRoundedRect(hover_rect, radius - 2.5, radius - 2.5)
+            painter.fillPath(hover_path, QColor(255, 255, 255, 16))
+
+        # 3. Animated Sliding Active Indicator Pill (exact match with J-POP | K-POP switch)
+        pad = 2.5
+        pill_w = seg_w - pad * 2.0
+        pill_h = h - pad * 2.0
+        pill_x = self._anim_pos * seg_w + pad
+        pill_y = pad
+        pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
+
+        grad = QLinearGradient(pill_x, pill_y, pill_x, pill_y + pill_h)
+        grad.setColorAt(0.0, QColor(PALETTE["accent_hover"]))
+        grad.setColorAt(1.0, QColor(PALETTE["accent"]))
+        painter.setBrush(grad)
+        painter.setPen(QPen(QColor(255, 255, 255, 65), 1.0))
+        painter.drawRoundedRect(pill_rect, pill_h / 2.0, pill_h / 2.0)
+
+        # 4. Segment labels (12px bold font)
+        font = QFont(self.font())
+        font.setPixelSize(12)
+        font.setBold(True)
+        painter.setFont(font)
+
+        for i, label in enumerate(self._labels):
+            s_rect = QRectF(i * seg_w, 0.0, seg_w, h)
+            if i == self._selected:
+                painter.setPen(QColor("#ffffff"))
+            elif i == self._hover_idx:
+                painter.setPen(QColor("#e2e6f5"))
+            else:
+                painter.setPen(QColor("#9ea4ba"))
+            painter.drawText(s_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+        painter.end()
+
+
 class SettingsDialog(QDialog):
     settings_changed = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, embedded: bool = False):
         super().__init__(parent)
-        # Rendi il dialogo non modale per permettere interazione con altre finestre (es. DevConsole)
-        self.setModal(False)
-        if not _IS_WIN32:
+        self._host_window = parent
+        self._embedded = embedded
+        self._devices_populated = False
+        self.setObjectName("settingsEmbeddedPanel" if embedded else "settingsDialogRoot")
+
+        if embedded:
+            self.setWindowFlags(Qt.WindowType.Widget)
+            self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        else:
+            self.setModal(False)
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+            self.setMinimumSize(460, 470)
+            self.resize(480, 485)
+
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, "it"))
         self.setWindowTitle(self.i18n.t("settings_title"))
-        try:
-            self.setMinimumSize(560, 360 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT))
-        except Exception:
-            pass
 
-        # Use the Windows-native dialog title bar; Linux keeps the custom one.
-        root_layout = QVBoxLayout()
-        if _IS_WIN32:
-            root_layout.setContentsMargins(16, 16, 16, 16)
-            root_layout.setSpacing(8)
-            self._title_bar = None
-        else:
-            root_layout.setContentsMargins(0, 0, 0, 0)
-            root_layout.setSpacing(0)
-            self._title_bar = CustomTitleBar(self)
-            self._title_bar.set_title(self.i18n.t("settings_title"))
+        self._apply_dialog_stylesheet()
 
-            # Adjust close button alignment specifically for the settings window
-            self._title_bar.setStyleSheet(
-                self._title_bar.styleSheet()
-                + """
-                #customTitleBar QPushButton#titleBarBtnClose {
-                    padding-top: 1px;
-                }
-            """
-            )
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
 
-            root_layout.addWidget(self._title_bar)
+        if not embedded:
+            app_icon = getattr(parent, "_icon_app", None) if parent is not None else None
+            self._title_bar: Optional[CustomTitleBar] = CustomTitleBar(self, icon=app_icon)
+            self._title_bar._btn_min.setVisible(False)
+            self._title_bar._btn_max.setVisible(False)
+            self._title_bar._ver_badge.setText(self.i18n.t("settings_title").upper())
+            outer_layout.addWidget(self._title_bar)
             install_size_grip(self)
-
-        layout = QVBoxLayout()
-        if _IS_WIN32:
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(8)
         else:
-            layout.setContentsMargins(16, 16, 16, 16)
-            layout.setSpacing(8)
+            self._title_bar = None
 
-        # Autoplay
-        self.chk_autoplay = QCheckBox(self.i18n.t("settings_autoplay"))
-        self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
-        self.chk_autoplay.setToolTip(
-            self.i18n.t("settings_autoplay_tip") if hasattr(self.i18n, "t") else ""
+        # Inner Content Area
+        body_layout = QVBoxLayout()
+        if embedded:
+            body_layout.setContentsMargins(12, 10, 12, 10)
+            body_layout.setSpacing(8)
+        else:
+            body_layout.setContentsMargins(16, 12, 16, 14)
+            body_layout.setSpacing(10)
+
+        # Embedded Panel Header Row: [< Player]  IMPOSTAZIONI
+        is_it = self.i18n.lang == "it"
+        if embedded:
+            hdr_row = QHBoxLayout()
+            hdr_row.setContentsMargins(2, 0, 2, 2)
+            hdr_row.setSpacing(8)
+
+            self.btn_back = BackToPlayerButton("Player", self)
+            self.btn_back.clicked.connect(self.reject)
+            hdr_row.addWidget(self.btn_back)
+
+            hdr_row.addStretch(1)
+            self.panel_title_lbl = QLabel(self.i18n.t("settings_title").upper())
+            self.panel_title_lbl.setStyleSheet(
+                "color: #ffffff; font-size: 13px; font-weight: 800; letter-spacing: 1.5px;"
+                " background: transparent; border: none;"
+            )
+            hdr_row.addWidget(self.panel_title_lbl)
+            hdr_row.addStretch(1)
+
+            balancer = QWidget()
+            balancer.setFixedWidth(88)
+            hdr_row.addWidget(balancer)
+            body_layout.addLayout(hdr_row)
+
+        # Top 3-Tab Segmented Switcher
+        tab_labels = (
+            ["Generale", "Audio", "Tray & Console"]
+            if is_it
+            else ["General", "Audio", "Tray & Console"]
         )
-        layout.addWidget(self.chk_autoplay)
+        self.category_bar = SettingsCategoryBar(tab_labels, self)
+        body_layout.addWidget(self.category_bar)
 
-        # Sleep Timer option: stop on end
-        self.chk_sleep_stop = QCheckBox(self.i18n.t("settings_sleep_stop_on_end"))
+        # Sliding Stacked Pages
+        self.pages = SlidingStackedWidget(self)
+        self.category_bar.tab_changed.connect(self._on_tab_changed)
+
+        combo_w = 165 if embedded else 200
+
+        # ==================== PAGE 0: GENERALE & RIPRODUZIONE ====================
+        page_gen = QWidget()
+        gen_layout = QVBoxLayout(page_gen)
+        gen_layout.setContentsMargins(0, 2, 0, 2)
+        gen_layout.setSpacing(8)
+
+        card_prefs, prefs_lay = self._make_card(
+            "PREFERENZE RADIO" if is_it else "RADIO PREFERENCES"
+        )
+
+        self.cmb_lang = GlassComboBox()
+        self.cmb_lang.addItems(["Italiano", "English"])
+        self.cmb_lang.setCurrentIndex(0 if self.settings.value(KEY_LANG, "it") == "it" else 1)
+        self.cmb_lang.setFixedWidth(combo_w)
+        prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_language"), self.cmb_lang))
+
+        self.cmb_channel = GlassComboBox()
+        self.cmb_channel.addItems(["J-POP", "K-POP"])
+        self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, "J-POP"))
+        self.cmb_channel.setFixedWidth(combo_w)
+        prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_channel"), self.cmb_channel))
+
+        gen_layout.addWidget(card_prefs)
+
+        card_play, play_lay = self._make_card(
+            "COMPORTAMENTO RIPRODUZIONE" if is_it else "PLAYBACK BEHAVIOR"
+        )
+
+        self.chk_autoplay = AnimatedToggleSwitch(self.i18n.t("settings_autoplay"))
+        self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
+        self.chk_autoplay.setToolTip(self.i18n.t("settings_autoplay_tip"))
+        play_lay.addWidget(self.chk_autoplay)
+
+        self.chk_sleep_stop = AnimatedToggleSwitch(self.i18n.t("settings_sleep_stop_on_end"))
         self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true")
-        layout.addWidget(self.chk_sleep_stop)
+        play_lay.addWidget(self.chk_sleep_stop)
 
-        # Session timer enable
-        self.chk_session_timer = QCheckBox(self.i18n.t("settings_session_timer_enable"))
+        self.chk_session_timer = AnimatedToggleSwitch(self.i18n.t("settings_session_timer_enable"))
         self.chk_session_timer.setToolTip(self.i18n.t("settings_session_timer_tip"))
         self.chk_session_timer.setChecked(
             self.settings.value(KEY_SESSION_TIMER_ENABLED, "true") == "true"
         )
-        layout.addWidget(self.chk_session_timer)
+        play_lay.addWidget(self.chk_session_timer)
 
-        # Developer Console (optional)
-        self.chk_dev_console = QCheckBox(self.i18n.t("settings_dev_console"))
-        self.chk_dev_console.setChecked(
-            self.settings.value(KEY_DEV_CONSOLE_ENABLED, "false") == "true"
+        gen_layout.addWidget(card_play)
+        gen_layout.addStretch(1)
+        self.pages.addWidget(page_gen)
+
+        # ==================== PAGE 1: AUDIO & STREAM ====================
+        page_audio = QWidget()
+        audio_layout = QVBoxLayout(page_audio)
+        audio_layout.setContentsMargins(0, 2, 0, 2)
+        audio_layout.setSpacing(8)
+
+        card_engine, eng_lay = self._make_card(
+            "MOTORE AUDIO & USCITA" if is_it else "AUDIO ENGINE & OUTPUT"
         )
-        # Row with checkbox + open button
-        dev_row = QHBoxLayout()
-        dev_row.setSpacing(8)
-        dev_row.addWidget(self.chk_dev_console)
-        self.btn_open_console = QPushButton(self.i18n.t("dev_console_button"))
-        try:
-            self.btn_open_console.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
-        except Exception:
-            pass
-        # Mantieni il pulsante sempre abilitato, indipendentemente dallo stato della checkbox
-        self.btn_open_console.setEnabled(True)
-        self.btn_open_console.clicked.connect(self._on_open_console)
-        dev_row.addStretch(1)
-        dev_row.addWidget(self.btn_open_console)
-        layout.addLayout(dev_row)
-        # RIMOSSO: non disabilitare più il pulsante quando la console è disattivata
-        # self.chk_dev_console.stateChanged.connect(
-        #     lambda s: self.btn_open_console.setEnabled(self.chk_dev_console.isChecked())
-        # )
 
-        # New: show [DEV] tagged messages toggle (only meaningful when console enabled)
-        self.chk_dev_show_dev = QCheckBox(self.i18n.t("settings_dev_console_show_dev"))
-        self.chk_dev_show_dev.setChecked(
-            self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
-        )
-        self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
-        # sync enabled state
-        self.chk_dev_console.stateChanged.connect(
-            lambda s: self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
-        )
-        layout.addWidget(self.chk_dev_show_dev)
-
-        # Language
-        lang_row = QHBoxLayout()
-        lang_row.setSpacing(8)
-        lab_lang = QLabel(self.i18n.t("settings_language"))
-        lab_lang.setMinimumWidth(140)
-        lang_row.addWidget(lab_lang)
-        self.cmb_lang = QComboBox()
-        self.cmb_lang.addItems(["Italiano", "English"])
-        self.cmb_lang.setCurrentIndex(0 if self.settings.value(KEY_LANG, "it") == "it" else 1)
-        try:
-            self.cmb_lang.setMinimumWidth(160)
-        except Exception:
-            pass
-        lang_row.addWidget(self.cmb_lang, 1)
-        layout.addLayout(lang_row)
-
-        # Channel & Format
-        ch_row = QHBoxLayout()
-        ch_row.setSpacing(8)
-        lab_ch = QLabel(self.i18n.t("settings_channel"))
-        lab_ch.setMinimumWidth(140)
-        ch_row.addWidget(lab_ch)
-        self.cmb_channel = QComboBox()
-        self.cmb_channel.addItems(["J-POP", "K-POP"])
-        self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, "J-POP"))
-        ch_row.addWidget(self.cmb_channel, 1)
-        layout.addLayout(ch_row)
-
-        # Format
-        fmt_row = QHBoxLayout()
-        fmt_row.setSpacing(8)
-        lab_fmt = QLabel(self.i18n.t("settings_format"))
-        lab_fmt.setMinimumWidth(140)
-        fmt_row.addWidget(lab_fmt)
-        self.cmb_format = QComboBox()
-        try:
-            self.cmb_format.addItems(["Vorbis", "Opus", "MP3"])
-        except Exception:
-            pass
-        try:
-            self.cmb_format.setMinimumWidth(160)
-        except Exception:
-            pass
+        self.cmb_format = GlassComboBox()
+        self.cmb_format.addItems(["Vorbis", "Opus", "MP3"])
         self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, "Vorbis"))
-        fmt_row.addWidget(self.cmb_format, 1)
-        layout.addLayout(fmt_row)
+        self.cmb_format.setFixedWidth(combo_w)
+        eng_lay.addLayout(self._make_field_row(self.i18n.t("settings_format"), self.cmb_format))
 
-        # Audio Backend
-        backend_row = QHBoxLayout()
-        backend_row.setSpacing(8)
-        lab_backend = QLabel(self.i18n.t("settings_audio_backend"))
-        lab_backend.setMinimumWidth(140)
-        backend_row.addWidget(lab_backend)
-        self.cmb_audio_backend = QComboBox()
+        self.cmb_audio_backend = GlassComboBox()
         self.cmb_audio_backend.addItem(self.i18n.t("settings_audio_backend_auto"), userData="auto")
         self.cmb_audio_backend.addItem(
             self.i18n.t("settings_audio_backend_ffmpeg"), userData="ffmpeg"
@@ -215,119 +833,393 @@ class SettingsDialog(QDialog):
             if self.cmb_audio_backend.itemData(i) == saved_backend:
                 self.cmb_audio_backend.setCurrentIndex(i)
                 break
-        backend_row.addWidget(self.cmb_audio_backend, 1)
-        layout.addLayout(backend_row)
+        self.cmb_audio_backend.setFixedWidth(combo_w)
+        eng_lay.addLayout(
+            self._make_field_row(self.i18n.t("settings_audio_backend"), self.cmb_audio_backend)
+        )
 
-        # Audio Output Device
-        audio_row = QHBoxLayout()
-        audio_row.setSpacing(8)
         lab_audio = QLabel(self.i18n.t("settings_audio_output"))
-        lab_audio.setMinimumWidth(140)
-        audio_row.addWidget(lab_audio)
-        self.cmb_audio_device = QComboBox()
-        try:
-            self.cmb_audio_device.setMinimumWidth(260)
-        except Exception:
-            pass
-        # Prima voce: default di sistema
-        try:
-            self.cmb_audio_device.addItem(self.i18n.t("settings_audio_default"), userData=None)
-        except Exception:
-            pass
-        audio_row.addWidget(self.cmb_audio_device, 1)
+        lab_audio.setObjectName("settingsFieldLabel")
+        eng_lay.addWidget(lab_audio)
+
+        audio_dev_row = QHBoxLayout()
+        audio_dev_row.setContentsMargins(0, 0, 0, 0)
+        audio_dev_row.setSpacing(6)
+        self.cmb_audio_device = GlassComboBox()
+        self.cmb_audio_device.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.cmb_audio_device.addItem(self.i18n.t("settings_audio_default"), userData=None)
+        audio_dev_row.addWidget(self.cmb_audio_device, 1)
+
         self.btn_audio_refresh = QPushButton(self.i18n.t("settings_audio_refresh"))
-        try:
-            self.btn_audio_refresh.clicked.connect(self._populate_audio_devices)
-        except Exception:
-            pass
-        audio_row.addWidget(self.btn_audio_refresh)
-        layout.addLayout(audio_row)
+        self.btn_audio_refresh.setObjectName("secondaryGlassBtn")
+        self.btn_audio_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_audio_refresh.clicked.connect(self._populate_audio_devices)
+        audio_dev_row.addWidget(self.btn_audio_refresh)
+        eng_lay.addLayout(audio_dev_row)
 
-        # LibVLC Path
-        path_row = QHBoxLayout()
-        path_row.setSpacing(8)
-        lab_path = QLabel(self.i18n.t("settings_vlc_path"))
-        lab_path.setMinimumWidth(140)
-        path_row.addWidget(lab_path)
-        self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ""))
-        path_row.addWidget(self.txt_vlc_path, 1)
-        self.btn_browse = QPushButton(self.i18n.t("settings_browse"))
-        self.btn_browse.clicked.connect(self._browse_vlc_path)
-        path_row.addWidget(self.btn_browse)
-        layout.addLayout(path_row)
+        audio_layout.addWidget(card_engine)
 
-        # Network caching
+        card_net, net_lay = self._make_card(
+            "BUFFER DI RETE & LIBVLC" if is_it else "NETWORK BUFFER & LIBVLC"
+        )
+
         nc_row = QHBoxLayout()
-        nc_row.setSpacing(8)
+        nc_row.setContentsMargins(0, 0, 0, 0)
+        nc_row.setSpacing(6)
         lab_nc = QLabel(self.i18n.t("settings_network_caching"))
-        lab_nc.setMinimumWidth(140)
+        lab_nc.setObjectName("settingsFieldLabel")
         nc_row.addWidget(lab_nc)
+        nc_row.addStretch(1)
+
+        btn_nc_minus = QPushButton("−")
+        btn_nc_minus.setObjectName("stepperBtn")
+        btn_nc_minus.setFixedSize(28, 28)
+        btn_nc_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+
         self.spin_network_caching = QSpinBox()
         self.spin_network_caching.setRange(100, 5000)
-        try:
-            self.spin_network_caching.setSingleStep(100)
-        except Exception:
-            pass
-        try:
-            self.spin_network_caching.setSuffix(" ms")
-        except Exception:
-            pass
-        try:
-            self.spin_network_caching.setMinimumWidth(120)
-        except Exception:
-            pass
+        self.spin_network_caching.setSingleStep(100)
+        self.spin_network_caching.setSuffix(" ms")
+        self.spin_network_caching.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spin_network_caching.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.spin_network_caching.setFixedSize(96, 28)
         try:
             self.spin_network_caching.setValue(int(self.settings.value(KEY_NETWORK_CACHING, 1000)))
         except Exception:
             self.spin_network_caching.setValue(1000)
+
+        btn_nc_plus = QPushButton("+")
+        btn_nc_plus.setObjectName("stepperBtn")
+        btn_nc_plus.setFixedSize(28, 28)
+        btn_nc_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        btn_nc_minus.clicked.connect(
+            lambda: self.spin_network_caching.setValue(
+                max(100, self.spin_network_caching.value() - 100)
+            )
+        )
+        btn_nc_plus.clicked.connect(
+            lambda: self.spin_network_caching.setValue(
+                min(5000, self.spin_network_caching.value() + 100)
+            )
+        )
+
+        nc_row.addWidget(btn_nc_minus)
         nc_row.addWidget(self.spin_network_caching)
-        layout.addLayout(nc_row)
+        nc_row.addWidget(btn_nc_plus)
+        net_lay.addLayout(nc_row)
 
-        # Tray options
-        self.chk_tray_enabled = QCheckBox(self.i18n.t("settings_tray_enable"))
+        lab_path = QLabel(self.i18n.t("settings_vlc_path"))
+        lab_path.setObjectName("settingsFieldLabel")
+        net_lay.addWidget(lab_path)
+
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(6)
+        self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ""))
+        self.txt_vlc_path.setPlaceholderText("Auto / System PATH")
+        path_row.addWidget(self.txt_vlc_path, 1)
+
+        self.btn_browse = QPushButton(self.i18n.t("settings_browse"))
+        self.btn_browse.setObjectName("secondaryGlassBtn")
+        self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_browse.clicked.connect(self._browse_vlc_path)
+        path_row.addWidget(self.btn_browse)
+        net_lay.addLayout(path_row)
+
+        audio_layout.addWidget(card_net)
+        audio_layout.addStretch(1)
+        self.pages.addWidget(page_audio)
+
+        # ==================== PAGE 2: TRAY & CONSOLE ====================
+        page_sys = QWidget()
+        sys_layout = QVBoxLayout(page_sys)
+        sys_layout.setContentsMargins(0, 2, 0, 2)
+        sys_layout.setSpacing(8)
+
+        card_tray, tray_lay = self._make_card("SYSTEM TRAY")
+
+        self.chk_tray_enabled = AnimatedToggleSwitch(self.i18n.t("settings_tray_enable"))
         self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, "true") == "true")
-        layout.addWidget(self.chk_tray_enabled)
+        tray_lay.addWidget(self.chk_tray_enabled)
 
-        self.chk_tray_hide_on_minimize = QCheckBox(self.i18n.t("settings_tray_hide_on_minimize"))
+        self.chk_tray_hide_on_minimize = AnimatedToggleSwitch(
+            self.i18n.t("settings_tray_hide_on_minimize")
+        )
         self.chk_tray_hide_on_minimize.setChecked(
             self.settings.value(KEY_TRAY_HIDE_ON_MINIMIZE, "true") == "true"
         )
         self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked())
         self.chk_tray_enabled.stateChanged.connect(
-            lambda s: self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked())
+            lambda _s: self.chk_tray_hide_on_minimize.setEnabled(self.chk_tray_enabled.isChecked())
         )
-        layout.addWidget(self.chk_tray_hide_on_minimize)
+        tray_lay.addWidget(self.chk_tray_hide_on_minimize)
 
-        self.chk_tray_notifications = QCheckBox(self.i18n.t("settings_tray_notifications"))
+        self.chk_tray_notifications = AnimatedToggleSwitch(
+            self.i18n.t("settings_tray_notifications")
+        )
         self.chk_tray_notifications.setChecked(
             self.settings.value(KEY_TRAY_NOTIFICATIONS, "true") == "true"
         )
-        layout.addWidget(self.chk_tray_notifications)
+        tray_lay.addWidget(self.chk_tray_notifications)
 
-        # Buttons
-        btn_row = QHBoxLayout()
+        sys_layout.addWidget(card_tray)
+
+        card_dev, dev_lay = self._make_card(
+            "CONSOLE SVILUPPATORE" if is_it else "DEVELOPER CONSOLE"
+        )
+
+        dev_top_row = QHBoxLayout()
+        dev_top_row.setContentsMargins(0, 0, 0, 0)
+        dev_top_row.setSpacing(6)
+        self.chk_dev_console = AnimatedToggleSwitch(self.i18n.t("settings_dev_console"))
+        self.chk_dev_console.setChecked(
+            self.settings.value(KEY_DEV_CONSOLE_ENABLED, "false") == "true"
+        )
+        dev_top_row.addWidget(self.chk_dev_console, 1)
+
+        self.btn_open_console = QPushButton(self.i18n.t("dev_console_button"))
+        self.btn_open_console.setObjectName("secondaryGlassBtn")
+        self.btn_open_console.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_open_console.setEnabled(True)
+        self.btn_open_console.clicked.connect(self._on_open_console)
+        dev_top_row.addWidget(self.btn_open_console)
+        dev_lay.addLayout(dev_top_row)
+
+        self.chk_dev_show_dev = AnimatedToggleSwitch(self.i18n.t("settings_dev_console_show_dev"))
+        self.chk_dev_show_dev.setChecked(
+            self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
+        )
+        self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
+        self.chk_dev_console.stateChanged.connect(
+            lambda _s: self.chk_dev_show_dev.setEnabled(self.chk_dev_console.isChecked())
+        )
+        dev_lay.addWidget(self.chk_dev_show_dev)
+
+        sys_layout.addWidget(card_dev)
+        sys_layout.addStretch(1)
+        self.pages.addWidget(page_sys)
+
+        body_layout.addWidget(self.pages, 1)
+
+        # Bottom Action Deck (Annulla | Applica | OK)
+        footer_frame = QFrame()
+        footer_frame.setObjectName("settingsFooterDeck")
+        btn_row = QHBoxLayout(footer_frame)
+        btn_row.setContentsMargins(10, 7, 10, 7)
         btn_row.setSpacing(8)
-        self.btn_ok = QPushButton(self.i18n.t("settings_ok"))
+
         self.btn_cancel = QPushButton(self.i18n.t("settings_cancel"))
+        self.btn_cancel.setObjectName("neutralActionBtn")
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.setFixedHeight(30)
+
         self.btn_apply = QPushButton(self.i18n.t("settings_apply"))
-        try:
-            self.btn_ok.setIcon(self.style().standardIcon(self.style().SP_DialogOkButton))
-            self.btn_cancel.setIcon(self.style().standardIcon(self.style().SP_DialogCancelButton))
-            self.btn_apply.setIcon(self.style().standardIcon(self.style().SP_DialogApplyButton))
-        except Exception:
-            pass
+        self.btn_apply.setObjectName("secondaryGlassBtn")
+        self.btn_apply.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_apply.setFixedHeight(30)
+
+        self.btn_ok = QPushButton(self.i18n.t("settings_ok"))
+        self.btn_ok.setObjectName("primaryActionBtn")
+        self.btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ok.setFixedHeight(30)
+
         self.btn_ok.clicked.connect(self._on_ok)
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_apply.clicked.connect(self._on_apply)
-        btn_row.addStretch(1)
-        btn_row.addWidget(self.btn_cancel)
-        btn_row.addWidget(self.btn_apply)
-        btn_row.addWidget(self.btn_ok)
-        layout.addLayout(btn_row)
 
-        root_layout.addLayout(layout)
-        self.setLayout(root_layout)
-        self.adjustSize()
+        btn_row.addWidget(self.btn_cancel, 1)
+        btn_row.addWidget(self.btn_apply, 1)
+        btn_row.addWidget(self.btn_ok, 1)
+        body_layout.addWidget(footer_frame)
+
+        outer_layout.addLayout(body_layout, 1)
+
+    def _on_tab_changed(self, idx: int) -> None:
+        for cmb in self.findChildren(GlassComboBox):
+            cmb.reset_visual_state()
+        if idx == 1 and not self._devices_populated:
+            self._devices_populated = True
+            self._populate_audio_devices()
+        self.pages.slide_to_index(idx)
+
+    def reload_from_settings(self) -> None:
+        """Fast non-blocking reload of widget values from QSettings."""
+        self.settings.sync()
+        lang = str(self.settings.value(KEY_LANG, "it"))
+        self.i18n.set_lang(lang)
+        self.cmb_lang.setCurrentIndex(0 if lang == "it" else 1)
+        self.cmb_channel.setCurrentText(str(self.settings.value(KEY_CHANNEL, "J-POP")))
+        self.cmb_format.setCurrentText(str(self.settings.value(KEY_FORMAT, "Vorbis")))
+        saved_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
+        for i in range(self.cmb_audio_backend.count()):
+            if self.cmb_audio_backend.itemData(i) == saved_backend:
+                self.cmb_audio_backend.setCurrentIndex(i)
+                break
+        self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
+        self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true")
+        self.chk_session_timer.setChecked(
+            self.settings.value(KEY_SESSION_TIMER_ENABLED, "true") == "true"
+        )
+        self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, "true") == "true")
+        self.chk_tray_hide_on_minimize.setChecked(
+            self.settings.value(KEY_TRAY_HIDE_ON_MINIMIZE, "true") == "true"
+        )
+        self.chk_tray_notifications.setChecked(
+            self.settings.value(KEY_TRAY_NOTIFICATIONS, "true") == "true"
+        )
+        self.chk_dev_console.setChecked(
+            self.settings.value(KEY_DEV_CONSOLE_ENABLED, "false") == "true"
+        )
+        self.chk_dev_show_dev.setChecked(
+            self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
+        )
+        if not self._devices_populated:
+            self._devices_populated = True
+            QTimer.singleShot(250, self._populate_audio_devices)
+
+    @staticmethod
+    def _make_card(section_title: str):
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(13, 10, 13, 11)
+        lay.setSpacing(7)
+
+        hdr = QLabel(section_title)
+        hdr.setObjectName("settingsSectionHeader")
+        lay.addWidget(hdr)
+        return card, lay
+
+    @staticmethod
+    def _make_field_row(label_text: str, widget: QWidget) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
+        lbl = QLabel(label_text)
+        lbl.setObjectName("settingsFieldLabel")
+        row.addWidget(lbl)
+        row.addStretch(1)
+        row.addWidget(widget)
+        return row
+
+    def _sync_backdrop_from_parent(self) -> None:
+        pass
+
+    def _apply_dialog_stylesheet(self) -> None:
+        base_qss = get_cyber_moe_stylesheet(PALETTE["accent"])
+        extra_qss = f"""
+        QDialog#settingsDialogRoot {{
+            background-color: #0c0e17;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 12px;
+        }}
+        QDialog#settingsEmbeddedPanel {{
+            background-color: rgba(12, 14, 22, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 16px;
+        }}
+        QFrame#settingsCard {{
+            background-color: #151826;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-top: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 13px;
+        }}
+        QFrame#settingsFooterDeck {{
+            background-color: #131624;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 12px;
+        }}
+        QLabel#settingsSectionHeader {{
+            color: {PALETTE["accent_hover"]};
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.1px;
+            background: transparent;
+            border: none;
+            padding-bottom: 2px;
+        }}
+        QLabel#settingsFieldLabel {{
+            color: #e4e8f6;
+            font-size: 13px;
+            font-weight: 600;
+            background: transparent;
+            border: none;
+            padding-left: 2px;
+        }}
+        QLineEdit, QSpinBox {{
+            background-color: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 4px 10px;
+            color: #f4f6fd;
+            font-size: 13px;
+            font-weight: 600;
+            min-height: 22px;
+        }}
+        QLineEdit:hover, QSpinBox:hover,
+        QLineEdit:focus, QSpinBox:focus {{
+            border-color: {PALETTE["accent"]};
+            background-color: rgba(236, 24, 108, 0.12);
+        }}
+        QPushButton#primaryActionBtn {{
+            background-color: {PALETTE["accent"]};
+            color: #ffffff;
+            border: none;
+            border-radius: 9px;
+            padding: 0px 10px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QPushButton#primaryActionBtn:hover {{
+            background-color: {PALETTE["accent_hover"]};
+        }}
+        QPushButton#primaryActionBtn:pressed {{
+            background-color: {PALETTE["accent_pressed"]};
+        }}
+        QPushButton#secondaryGlassBtn {{
+            background-color: rgba(255, 255, 255, 0.07);
+            color: #e4e8f6;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 9px;
+            padding: 4px 11px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QPushButton#secondaryGlassBtn:hover {{
+            background-color: rgba(236, 24, 108, 0.22);
+            border-color: {PALETTE["accent"]};
+            color: #ffffff;
+        }}
+        QPushButton#neutralActionBtn {{
+            background-color: rgba(255, 255, 255, 0.04);
+            color: #a6adc4;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 9px;
+            padding: 0px 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        QPushButton#neutralActionBtn:hover {{
+            background-color: rgba(255, 255, 255, 0.10);
+            color: #ffffff;
+        }}
+        QPushButton#stepperBtn {{
+            background-color: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            padding: 0px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #d0d5e8;
+        }}
+        QPushButton#stepperBtn:hover {{
+            background-color: rgba(236, 24, 108, 0.25);
+            border-color: {PALETTE["accent"]};
+            color: #ffffff;
+        }}
+        """
+        self.setStyleSheet(base_qss + extra_qss)
 
     def _browse_vlc_path(self):
         start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
@@ -340,7 +1232,7 @@ class SettingsDialog(QDialog):
             self.txt_vlc_path.setText(chosen)
 
     def _on_apply(self):
-        """Salva i valori senza chiudere la finestra."""
+        """Salva i valori senza chiudere il pannello."""
         self._save_settings()
         try:
             self.settings_changed.emit()
@@ -348,21 +1240,19 @@ class SettingsDialog(QDialog):
             pass
 
     def _on_ok(self):
-        """Salva i valori e chiude la finestra."""
+        """Salva i valori e chiude il pannello."""
         self._save_settings()
         self.accept()
 
     def _on_open_console(self):
-        # Apri la console senza chiudere questo dialogo, che rimane aperto/non modale
         try:
-            # Salva subito le impostazioni (incluso KEY_DEV_CONSOLE_SHOW_DEV)
             self._save_settings()
-            parent = self.parent()
-            if parent and hasattr(parent, "open_dev_console"):
-                # Apri la console con parent = finestra principale
-                from PyQt6.QtCore import QTimer
-
-                QTimer.singleShot(0, lambda: parent.open_dev_console(parent))
+            host = self._host_window or self.window()
+            if host and hasattr(host, "open_dev_console"):
+                try:
+                    host.open_dev_console(host)
+                except TypeError:
+                    host.open_dev_console()
         except Exception:
             pass
 
@@ -397,14 +1287,12 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             KEY_TRAY_NOTIFICATIONS, "true" if self.chk_tray_notifications.isChecked() else "false"
         )
-        # Save audio backend selection
         try:
             self.settings.setValue(
                 KEY_AUDIO_BACKEND, self.cmb_audio_backend.currentData() or "auto"
             )
         except Exception:
             pass
-        # Save audio device selection: None => use system default
         try:
             idx_data = self.cmb_audio_device.currentData()
             if idx_data is None:
@@ -419,16 +1307,14 @@ class SettingsDialog(QDialog):
             super().showEvent(event)
         except Exception:
             pass
-        # Riapplica la titlebar scura quando la finestra viene mostrata
-        try:
-            self._apply_windows_titlebar_dark_mode(True)
-        except Exception:
-            pass
-        # Populate audio devices on show
-        try:
-            self._populate_audio_devices()
-        except Exception:
-            pass
+        if not self._embedded:
+            try:
+                self._apply_windows_titlebar_dark_mode(True)
+            except Exception:
+                pass
+            if not self._devices_populated:
+                self._devices_populated = True
+                QTimer.singleShot(50, self._populate_audio_devices)
 
     def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
         try:
@@ -436,10 +1322,9 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
-    # PortAudio host API type → display tag (same constants as player_ffmpeg.py)
     _PA_API_TAGS = {
         8: "ALSA",
-        18: "PipeWire/Pulse",  # paPulseAudio — also used by pipewire-pulse
+        18: "PipeWire/Pulse",
         12: "JACK",
         2: "MME",
         13: "WASAPI",
@@ -447,15 +1332,10 @@ class SettingsDialog(QDialog):
     }
 
     def _populate_audio_devices(self) -> None:
-        """Enumerate PortAudio devices via PyAudio and fill combo box.
-        Keeps first entry as 'System default'; on Linux annotates each device
-        with its host API (PipeWire/Pulse, ALSA, JACK …).
-        """
         try:
             import pyaudio
         except Exception:
             pyaudio = None
-        # Keep 'System default' as index 0
         try:
             for i in range(self.cmb_audio_device.count() - 1, 0, -1):
                 self.cmb_audio_device.removeItem(i)
@@ -467,7 +1347,6 @@ class SettingsDialog(QDialog):
         try:
             with silence_stderr():
                 pa = pyaudio.PyAudio()
-            # Build host API index → type map for annotation
             api_type_map: dict = {}
             try:
                 for api_idx in range(pa.get_host_api_count()):
@@ -487,7 +1366,6 @@ class SettingsDialog(QDialog):
                     continue
                 max_output = int(info.get("maxOutputChannels", 0))
                 name = str(info.get("name", f"Device {i}"))
-                # Include only devices that can output
                 if max_output > 0:
                     if not _IS_WIN32:
                         api_idx = info.get("hostApi", -1)
@@ -497,12 +1375,10 @@ class SettingsDialog(QDialog):
                     else:
                         label = f"{name} (#{i})"
                     self.cmb_audio_device.addItem(label, i)
-            # Restore persisted selection if available
             persisted = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
             if persisted != "" and persisted is not None:
                 try:
                     persisted = int(persisted)
-                    # Find index in combo where userData == persisted
                     for combo_idx in range(self.cmb_audio_device.count()):
                         if self.cmb_audio_device.itemData(combo_idx) == persisted:
                             self.cmb_audio_device.setCurrentIndex(combo_idx)

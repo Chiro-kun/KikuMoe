@@ -7,7 +7,7 @@ _IS_WIN32 = sys.platform == "win32"
 
 
 def apply_windows_titlebar_dark_mode(target: Any, enable: bool) -> None:
-    """Enable/disable immersive dark mode on a window title bar (Windows only)."""
+    """Enable/disable immersive dark mode and Windows 11 rounded corners on a window."""
     try:
         if not _IS_WIN32:
             return
@@ -35,5 +35,14 @@ def apply_windows_titlebar_dark_mode(target: Any, enable: bool) -> None:
                 )
             except Exception:
                 pass
+
+        # Enable Windows 11 native rounded corners (DWMWA_WINDOW_CORNER_PREFERENCE = 33)
+        try:
+            corner_pref = ctypes.c_int(2)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
+                hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref)
+            )
+        except Exception:
+            pass
     except Exception:
         pass
