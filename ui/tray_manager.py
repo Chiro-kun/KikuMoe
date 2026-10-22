@@ -278,7 +278,7 @@ class TrayManager(QObject):
                         )
                     except Exception:
                         txt_channel = "Canale"
-                    sub_channel = QMenu(txt_channel, self._parent)
+                    sub_channel = QMenu(txt_channel, menu)
                     grp_channel = QActionGroup(self._parent)
                     grp_channel.setExclusive(True)
                     try:
@@ -313,7 +313,7 @@ class TrayManager(QObject):
                         )
                     except Exception:
                         txt_format = "Formato/Codec"
-                    sub_format = QMenu(txt_format, self._parent)
+                    sub_format = QMenu(txt_format, menu)
                     grp_format = QActionGroup(self._parent)
                     grp_format.setExclusive(True)
                     try:
@@ -429,10 +429,14 @@ class TrayManager(QObject):
         try:
             self._icons = icons
             # Forza aggiornamento immediato icone se visibili
+            if "play" in icons and self._act_play_pause:
+                self._act_play_pause.setIcon(icons["play"])
             if "stop" in icons and self._act_stop:
                 self._act_stop.setIcon(icons["stop"])
             if "force_stop" in icons and self._act_force_stop:
                 self._act_force_stop.setIcon(icons["force_stop"])
+            if "mute" in icons and self._act_mute:
+                self._act_mute.setIcon(icons["mute"])
             if "channel" in icons and self._act_ch:
                 self._act_ch.setIcon(icons["channel"])
             if "codec" in icons and self._act_fmt:

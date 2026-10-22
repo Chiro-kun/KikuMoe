@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Set
 
 from PyQt6.QtCore import QEvent, QSettings, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PyQt6.QtGui import QColor, QIcon, QImage, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -1653,27 +1653,80 @@ class ListenMoePlayer(QWidget):
             msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
             msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
 
-    def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
+    def _tint_icon(
+        self, icon: QIcon, color: QColor, size: Optional[QSize] = None
+    ) -> QIcon:
+        """
+        Tints an icon with the requested color while optically normalizing its glyph bounds
+        and generating multi-resolution pixmaps (16px to 64px). This eliminates tiny/misaligned
+        icons in tray menus and toolbars caused by unequal PNG transparent margins.
+        """
         try:
             if icon is None or icon.isNull():
                 return icon
-            if size is None or size.isEmpty():
-                size = QSize(16, 16)
-            src = icon.pixmap(size)
-            if src.isNull():
+
+            # Extract high-resolution image from QIcon
+            large_sz = 256
+            src_pm = icon.pixmap(large_sz, large_sz)
+            if src_pm.isNull():
                 return icon
-            dst = QPixmap(src.size())
-            dst.fill(Qt.GlobalColor.transparent)
-            painter = QPainter()
-            if painter.begin(dst):
-                try:
-                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-                    painter.drawPixmap(0, 0, src)
-                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-                    painter.fillRect(dst.rect(), color)
-                finally:
-                    painter.end()
-            return QIcon(dst)
+            img = src_pm.toImage()
+
+            # Find non-transparent bounds using fast Alpha8 buffer scan
+            alpha_img = img.convertToFormat(QImage.Format.Format_Alpha8)
+            bits = alpha_img.constBits()
+            if bits is None:
+                return icon
+            buf = bits.asarray(alpha_img.sizeInBytes())
+            w, h, bpl = alpha_img.width(), alpha_img.height(), alpha_img.bytesPerLine()
+
+            min_y = None
+            max_y = None
+            min_x = w
+            max_x = 0
+
+            for y in range(h):
+                row = buf[y * bpl : y * bpl + w]
+                if any(row):
+                    row_nonzero = [x for x, val in enumerate(row) if val > 10]
+                    if row_nonzero:
+                        if min_y is None:
+                            min_y = y
+                        max_y = y
+                        min_x = min(min_x, row_nonzero[0])
+                        max_x = max(max_x, row_nonzero[-1])
+
+            if min_y is None or max_y is None or min_x >= max_x:
+                cropped = img
+            else:
+                cropped = img.copy(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+
+            result_icon = QIcon()
+            # Multi-resolution pixmaps ensuring crisp icons on all platforms and DPIs
+            for s in (16, 18, 20, 22, 24, 32, 48, 64):
+                target_content = max(10, int(round(s * 0.82)))
+                scaled = cropped.scaled(
+                    target_content,
+                    target_content,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                dst = QPixmap(s, s)
+                dst.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(dst)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                ox = (s - scaled.width()) // 2
+                oy = (s - scaled.height()) // 2
+                painter.drawImage(ox, oy, scaled)
+                painter.setCompositionMode(
+                    QPainter.CompositionMode.CompositionMode_SourceIn
+                )
+                painter.fillRect(dst.rect(), color)
+                painter.end()
+                result_icon.addPixmap(dst)
+
+            return result_icon
         except Exception:
             return icon
 
