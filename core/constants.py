@@ -94,6 +94,7 @@ AUTHORS = "Chirokun & alsogamer"
 URL_FORGEJO = "https://git.alsogamer.com/chiro/KikuMoe"
 URL_GITHUB = "https://github.com/Chiro-kun/KikuMoe"
 URL_LISTENMOE = "https://listen.moe"
+URL_TELEGRAM = "https://t.me/Chiro_kun"
 LICENSE_NAME = "MIT License"
 
 # QSettings scope

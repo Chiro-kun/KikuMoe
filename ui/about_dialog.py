@@ -38,6 +38,7 @@ from core.constants import (
     URL_FORGEJO,
     URL_GITHUB,
     URL_LISTENMOE,
+    URL_TELEGRAM,
 )
 from core.i18n import I18n
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
@@ -98,6 +99,16 @@ _GITHUB_SVG = QByteArray(
     b'             c-0.139,0.026-0.268-0.034-0.286-0.13 c-0.017-0.099,0.084-0.198,0.223-0.224\n'
     b'             C8.797,19.574,8.925,19.632,8.943,19.731L8.943,19.731z"/>\n'
     b'  </g>\n'
+    b'</svg>'
+)
+
+_TELEGRAM_SVG = QByteArray(
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n'
+    b'  <path fill="#2AABEE"\n'
+    b'        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>\n'
+    b'  <path fill="#ffffff" d="m9.78 15.65.34-4.8 8.74-7.89c.38-.34-.08-.53-.59-.19l-10.8 6.8\n'
+    b'       -4.65-1.46c-1.01-.32-1.03-1.01.21-1.5l18.17-7c.84-.31 1.58.2 1.31 1.47l-3.09 14.56\n'
+    b'       c-.23 1.04-.85 1.29-1.72.8l-4.71-3.47-2.27 2.19c-.25.25-.46.46-.94.46z"/>\n'
     b'</svg>'
 )
 
@@ -166,6 +177,7 @@ class AboutActionButton(QPushButton):
         # Vector SVG renderers
         self._r_forgejo = QSvgRenderer(_FORGEJO_SVG)
         self._r_github = QSvgRenderer(_GITHUB_SVG)
+        self._r_telegram = QSvgRenderer(_TELEGRAM_SVG)
         self._r_copy = QSvgRenderer(_COPY_SVG)
         self._r_check = QSvgRenderer(_CHECK_SVG)
 
@@ -288,6 +300,8 @@ class AboutActionButton(QPushButton):
                 self._r_forgejo.render(painter, icon_rect)
             elif self._icon_kind == "github":
                 self._r_github.render(painter, icon_rect)
+            elif self._icon_kind == "telegram":
+                self._r_telegram.render(painter, icon_rect)
             elif self._icon_kind == "listenmoe" and self._listen_pix:
                 pw = self._listen_pix.width()
                 ph = self._listen_pix.height()
@@ -485,6 +499,18 @@ class AboutWidget(QWidget):
         self.btn_listenmoe.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_LISTENMOE)))
         btns_row.addWidget(self.btn_listenmoe)
 
+        self.btn_telegram = AboutActionButton(
+            self.i18n.t("about_link_telegram"),
+            icon_kind="telegram",
+            is_external=True,
+            parent=self,
+        )
+        self.btn_telegram.setToolTip(
+            f"{self.i18n.t('about_link_telegram_tip')}\n{URL_TELEGRAM}"
+        )
+        self.btn_telegram.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_TELEGRAM)))
+        btns_row.addWidget(self.btn_telegram)
+
         links_lay.addLayout(btns_row)
         main_layout.addWidget(card_links)
 
@@ -629,6 +655,11 @@ class AboutWidget(QWidget):
         self._lbl_pyqt_key.setText(self.i18n.t("about_sys_pyqt"))
         self._lbl_os_key.setText(self.i18n.t("about_sys_os"))
         self.btn_copy.setText(self.i18n.t("about_copy_sys_info"))
+        if hasattr(self, "btn_telegram"):
+            self.btn_telegram.setText(self.i18n.t("about_link_telegram"))
+            self.btn_telegram.setToolTip(
+                f"{self.i18n.t('about_link_telegram_tip')}\n{URL_TELEGRAM}"
+            )
 
     def _load_app_logo(self) -> None:
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
