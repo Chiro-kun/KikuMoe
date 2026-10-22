@@ -269,7 +269,18 @@ def test_glass_combo_box_rendering_and_layout(qapp):
 
 
 def test_about_widget(qapp):
-    from core.constants import AUTHORS, LICENSE_NAME, URL_FORGEJO, URL_GITHUB, URL_LISTENMOE
+    from core.constants import (
+        AUTHORS,
+        LICENSE_NAME,
+        URL_ANISON,
+        URL_FORGEJO,
+        URL_GENSOKYO,
+        URL_GITHUB,
+        URL_LISTENMOE,
+        URL_NEURO21,
+        URL_TELEGRAM,
+        URL_TRUCKERSFM,
+    )
     from core.i18n import I18n
     from ui.about_dialog import AboutWidget
 
@@ -284,7 +295,12 @@ def test_about_widget(qapp):
     # 2. URLs
     assert widget.btn_forgejo.toolTip() == URL_FORGEJO
     assert widget.btn_github.toolTip() == URL_GITHUB
+    assert widget.btn_telegram.toolTip().endswith(URL_TELEGRAM)
     assert widget.btn_listenmoe.toolTip() == URL_LISTENMOE
+    assert widget.btn_gensokyo.toolTip() == URL_GENSOKYO
+    assert widget.btn_anison.toolTip() == URL_ANISON
+    assert widget.btn_neuro21.toolTip() == URL_NEURO21
+    assert widget.btn_truckersfm.toolTip() == URL_TRUCKERSFM
 
     # 3. Audio Backend
     assert widget._lbl_backend_val.text() == "MPV"

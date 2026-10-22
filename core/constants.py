@@ -93,8 +93,12 @@ APP_TITLE = f"{APP_NAME} {APP_VERSION}"
 AUTHORS = "Chirokun & alsogamer"
 URL_FORGEJO = "https://git.alsogamer.com/chiro/KikuMoe"
 URL_GITHUB = "https://github.com/Chiro-kun/KikuMoe"
-URL_LISTENMOE = "https://listen.moe"
 URL_TELEGRAM = "https://t.me/Chiro_kun"
+URL_LISTENMOE = "https://listen.moe"
+URL_GENSOKYO = "https://gensokyoradio.net/"
+URL_ANISON = "https://en.anison.fm/"
+URL_NEURO21 = "https://radio.twinskaraoke.com/"
+URL_TRUCKERSFM = "https://truckers.fm/"
 LICENSE_NAME = "MIT License"
 
 # QSettings scope

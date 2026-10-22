@@ -6,7 +6,7 @@ and runtime system diagnostics with animated action buttons and authentic brand 
 
 import os
 import platform
-from typing import Optional
+from typing import Dict, Optional
 
 from PyQt6.QtCore import PYQT_VERSION_STR, QByteArray, QPointF, QRectF, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
@@ -35,10 +35,14 @@ from core.constants import (
     APP_VERSION,
     AUTHORS,
     LICENSE_NAME,
+    URL_ANISON,
     URL_FORGEJO,
+    URL_GENSOKYO,
     URL_GITHUB,
     URL_LISTENMOE,
+    URL_NEURO21,
     URL_TELEGRAM,
+    URL_TRUCKERSFM,
 )
 from core.i18n import I18n
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
@@ -187,24 +191,28 @@ class AboutActionButton(QPushButton):
         self._r_copy = QSvgRenderer(_COPY_SVG)
         self._r_check = QSvgRenderer(_CHECK_SVG)
 
-        # High-res brand logo for LISTEN.moe
-        self._listen_pix: Optional[QPixmap] = None
+        # High-res brand logos for radios
+        self._pixmaps: Dict[str, QPixmap] = {}
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for logo_cand in (
-            os.path.join(root_dir, "icons", "listen.png"),
-            os.path.expanduser(r"~\Desktop\listen.png"),
-            os.path.join(root_dir, "icons", "Kikumoe - no txt.png"),
-        ):
-            if os.path.isfile(logo_cand):
-                pix = QPixmap(logo_cand)
+        icons_dir = os.path.join(root_dir, "icons")
+        icon_files = {
+            "listenmoe": "listen.png",
+            "gensokyo": "radio_gensokyo.png",
+            "anison": "radio_anison.png",
+            "neuro21": "radio_neuro21.png",
+            "truckersfm": "radio_truckersfm.png",
+        }
+        for kind, fname in icon_files.items():
+            fpath = os.path.join(icons_dir, fname)
+            if os.path.isfile(fpath):
+                pix = QPixmap(fpath)
                 if not pix.isNull():
-                    self._listen_pix = pix.scaled(
+                    self._pixmaps[kind] = pix.scaled(
                         16,
                         16,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
-                    break
 
     def set_icon_kind(self, kind: str) -> None:
         self._icon_kind = kind
@@ -308,12 +316,13 @@ class AboutActionButton(QPushButton):
                 self._r_github.render(painter, icon_rect)
             elif self._icon_kind == "telegram":
                 self._r_telegram.render(painter, icon_rect)
-            elif self._icon_kind == "listenmoe" and self._listen_pix:
-                pw = self._listen_pix.width()
-                ph = self._listen_pix.height()
+            elif self._icon_kind in self._pixmaps:
+                pix = self._pixmaps[self._icon_kind]
+                pw = pix.width()
+                ph = pix.height()
                 px = int(curr_x + (icon_size - pw) / 2.0)
                 py = int((h - ph) / 2.0)
-                painter.drawPixmap(px, py, self._listen_pix)
+                painter.drawPixmap(px, py, pix)
             elif self._icon_kind == "copy":
                 self._r_copy.render(painter, icon_rect)
             elif self._icon_kind == "check":
@@ -456,14 +465,6 @@ class AboutWidget(QWidget):
         )
         auth_row.addWidget(self._lbl_license_val)
         credits_lay.addLayout(auth_row)
-
-        # Streaming Attribution Row
-        self._lbl_credits_stream = QLabel(self.i18n.t("about_credits_stream"))
-        self._lbl_credits_stream.setStyleSheet(
-            f"font-size: 11px; font-weight: 500; color: {PALETTE['accent_hover']};"
-            " font-style: italic; background: transparent; border: none; padding-top: 2px;"
-        )
-        credits_lay.addWidget(self._lbl_credits_stream)
         main_layout.addWidget(card_credits)
 
         # ================= 3. Repositories & Links Card =================
@@ -483,7 +484,7 @@ class AboutWidget(QWidget):
         )
         self.btn_forgejo.setToolTip(URL_FORGEJO)
         self.btn_forgejo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_FORGEJO)))
-        btns_row.addWidget(self.btn_forgejo)
+        btns_row.addWidget(self.btn_forgejo, 1)
 
         self.btn_github = AboutActionButton(
             "GitHub",
@@ -493,17 +494,7 @@ class AboutWidget(QWidget):
         )
         self.btn_github.setToolTip(URL_GITHUB)
         self.btn_github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_GITHUB)))
-        btns_row.addWidget(self.btn_github)
-
-        self.btn_listenmoe = AboutActionButton(
-            "LISTEN.moe",
-            icon_kind="listenmoe",
-            is_external=True,
-            parent=self,
-        )
-        self.btn_listenmoe.setToolTip(URL_LISTENMOE)
-        self.btn_listenmoe.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_LISTENMOE)))
-        btns_row.addWidget(self.btn_listenmoe)
+        btns_row.addWidget(self.btn_github, 1)
 
         self.btn_telegram = AboutActionButton(
             self.i18n.t("about_link_telegram"),
@@ -515,12 +506,80 @@ class AboutWidget(QWidget):
             f"{self.i18n.t('about_link_telegram_tip')}\n{URL_TELEGRAM}"
         )
         self.btn_telegram.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_TELEGRAM)))
-        btns_row.addWidget(self.btn_telegram)
+        btns_row.addWidget(self.btn_telegram, 1)
 
         links_lay.addLayout(btns_row)
         main_layout.addWidget(card_links)
 
-        # ================= 4. System Diagnostics Card =================
+        # ================= 4. Powered By / Radio Stations Card =================
+        card_powered, powered_lay = self._make_card(self.i18n.t("about_powered_by_section"))
+        self._card_powered_hdr = powered_lay.itemAt(0).widget()
+
+        # Row 1: LISTEN.moe, Gensokyo, Anison
+        row_radios_1 = QHBoxLayout()
+        row_radios_1.setContentsMargins(0, 2, 0, 2)
+        row_radios_1.setSpacing(8)
+
+        self.btn_listenmoe = AboutActionButton(
+            self.i18n.t("about_link_listenmoe"),
+            icon_kind="listenmoe",
+            is_external=True,
+            parent=self,
+        )
+        self.btn_listenmoe.setToolTip(URL_LISTENMOE)
+        self.btn_listenmoe.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_LISTENMOE)))
+        row_radios_1.addWidget(self.btn_listenmoe, 1)
+
+        self.btn_gensokyo = AboutActionButton(
+            self.i18n.t("about_link_gensokyo"),
+            icon_kind="gensokyo",
+            is_external=True,
+            parent=self,
+        )
+        self.btn_gensokyo.setToolTip(URL_GENSOKYO)
+        self.btn_gensokyo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_GENSOKYO)))
+        row_radios_1.addWidget(self.btn_gensokyo, 1)
+
+        self.btn_anison = AboutActionButton(
+            self.i18n.t("about_link_anison"),
+            icon_kind="anison",
+            is_external=True,
+            parent=self,
+        )
+        self.btn_anison.setToolTip(URL_ANISON)
+        self.btn_anison.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_ANISON)))
+        row_radios_1.addWidget(self.btn_anison, 1)
+        powered_lay.addLayout(row_radios_1)
+
+        # Row 2: Neuro 21, TruckersFM
+        row_radios_2 = QHBoxLayout()
+        row_radios_2.setContentsMargins(0, 2, 0, 2)
+        row_radios_2.setSpacing(8)
+
+        self.btn_neuro21 = AboutActionButton(
+            self.i18n.t("about_link_neuro21"),
+            icon_kind="neuro21",
+            is_external=True,
+            parent=self,
+        )
+        self.btn_neuro21.setToolTip(URL_NEURO21)
+        self.btn_neuro21.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_NEURO21)))
+        row_radios_2.addWidget(self.btn_neuro21, 1)
+
+        self.btn_truckersfm = AboutActionButton(
+            self.i18n.t("about_link_truckersfm"),
+            icon_kind="truckersfm",
+            is_external=True,
+            parent=self,
+        )
+        self.btn_truckersfm.setToolTip(URL_TRUCKERSFM)
+        self.btn_truckersfm.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_TRUCKERSFM)))
+        row_radios_2.addWidget(self.btn_truckersfm, 1)
+        powered_lay.addLayout(row_radios_2)
+
+        main_layout.addWidget(card_powered)
+
+        # ================= 5. System Diagnostics Card =================
         card_sys, sys_lay = self._make_card(self.i18n.t("about_sys_section"))
         self._card_sys_hdr = sys_lay.itemAt(0).widget()
 
@@ -653,9 +712,10 @@ class AboutWidget(QWidget):
             self._card_credits_hdr.setText(self.i18n.t("about_authors_section"))
         if hasattr(self, "_card_links_hdr") and isinstance(self._card_links_hdr, QLabel):
             self._card_links_hdr.setText(self.i18n.t("about_links_section"))
+        if hasattr(self, "_card_powered_hdr") and isinstance(self._card_powered_hdr, QLabel):
+            self._card_powered_hdr.setText(self.i18n.t("about_powered_by_section"))
         if hasattr(self, "_card_sys_hdr") and isinstance(self._card_sys_hdr, QLabel):
             self._card_sys_hdr.setText(self.i18n.t("about_sys_section"))
-        self._lbl_credits_stream.setText(self.i18n.t("about_credits_stream"))
         self._lbl_backend_key.setText(self.i18n.t("about_sys_backend"))
         self._lbl_python_key.setText(self.i18n.t("about_sys_python"))
         self._lbl_pyqt_key.setText(self.i18n.t("about_sys_pyqt"))
@@ -666,6 +726,21 @@ class AboutWidget(QWidget):
             self.btn_telegram.setToolTip(
                 f"{self.i18n.t('about_link_telegram_tip')}\n{URL_TELEGRAM}"
             )
+        if hasattr(self, "btn_listenmoe"):
+            self.btn_listenmoe.setText(self.i18n.t("about_link_listenmoe"))
+            self.btn_listenmoe.setToolTip(URL_LISTENMOE)
+        if hasattr(self, "btn_gensokyo"):
+            self.btn_gensokyo.setText(self.i18n.t("about_link_gensokyo"))
+            self.btn_gensokyo.setToolTip(URL_GENSOKYO)
+        if hasattr(self, "btn_anison"):
+            self.btn_anison.setText(self.i18n.t("about_link_anison"))
+            self.btn_anison.setToolTip(URL_ANISON)
+        if hasattr(self, "btn_neuro21"):
+            self.btn_neuro21.setText(self.i18n.t("about_link_neuro21"))
+            self.btn_neuro21.setToolTip(URL_NEURO21)
+        if hasattr(self, "btn_truckersfm"):
+            self.btn_truckersfm.setText(self.i18n.t("about_link_truckersfm"))
+            self.btn_truckersfm.setToolTip(URL_TRUCKERSFM)
 
     def _load_app_logo(self) -> None:
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -720,8 +795,8 @@ class AboutDialog(QDialog):
         self.setWindowTitle(self.i18n.t("about_title"))
         self.setModal(False)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        self.setMinimumSize(420, 480)
-        self.resize(440, 520)
+        self.setMinimumSize(440, 520)
+        self.resize(460, 560)
 
         self._apply_dialog_stylesheet()
 
