@@ -18,6 +18,7 @@ from PyQt6.QtCore import (
     QPointF,
     QRectF,
     QSettings,
+    QSize,
     Qt,
     QTimer,
     pyqtSignal,
@@ -48,6 +49,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -349,6 +351,17 @@ class BackToPlayerButton(QPushButton):
         painter.end()
 
 
+class GlassComboDelegate(QStyledItemDelegate):
+    """
+    Delegate for GlassComboBox popup items ensuring consistent row heights (>= 28px)
+    across all platforms and font metrics, eliminating vertical text overlapping.
+    """
+
+    def sizeHint(self, option, index) -> QSize:
+        sh = super().sizeHint(option, index)
+        return QSize(sh.width(), max(sh.height(), 28))
+
+
 class GlassComboBox(QComboBox):
     """
     Custom-painted QComboBox that renders a dark glass capsule with crisp 12px
@@ -365,33 +378,27 @@ class GlassComboBox(QComboBox):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         list_view = QListView(self)
-        font = QFont("Segoe UI")
+        list_view.setUniformItemSizes(True)
+        list_view.setItemDelegate(GlassComboDelegate(list_view))
+
+        font = QFont()
+        font.setFamilies(["Segoe UI", "Inter", "Cantarell", "Ubuntu", "DejaVu Sans", "sans-serif"])
         font.setPixelSize(12)
         font.setWeight(QFont.Weight.Medium)
         self.setFont(font)
         list_view.setFont(font)
-        list_view.setStyleSheet(
-            f"""
-            QListView {{
-                background-color: #151826;
-                border: 1px solid rgba(236, 24, 108, 0.55);
-                border-radius: 8px;
-                color: #f4f6fd;
-                font-size: 12px;
-                font-weight: 500;
-                selection-background-color: {PALETTE["accent"]};
-                selection-color: #ffffff;
-                padding: 4px;
-                outline: none;
-            }}
-            QListView::item {{
-                min-height: 25px;
-                padding: 3px 10px;
-                border-radius: 5px;
-            }}
-            """
-        )
+
         self.setView(list_view)
+
+        popup = list_view.window()
+        if popup is not None:
+            popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            popup.setWindowFlags(
+                Qt.WindowType.Popup
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.NoDropShadowWindowHint
+            )
+            popup.setStyleSheet("background: transparent; border: none;")
 
     def reset_visual_state(self) -> None:
         """Clear any popup/hover/focus state so the dropdown never stays highlighted."""
@@ -405,6 +412,17 @@ class GlassComboBox(QComboBox):
     def showPopup(self) -> None:
         self._popup_open = True
         self.update()
+        view = self.view()
+        if view is not None:
+            popup = view.window()
+            if popup is not None:
+                popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                popup.setWindowFlags(
+                    Qt.WindowType.Popup
+                    | Qt.WindowType.FramelessWindowHint
+                    | Qt.WindowType.NoDropShadowWindowHint
+                )
+                popup.setStyleSheet("background: transparent; border: none;")
         super().showPopup()
 
     def hidePopup(self) -> None:

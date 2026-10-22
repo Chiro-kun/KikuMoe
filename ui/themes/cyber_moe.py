@@ -304,9 +304,14 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
         border: none;
         width: 22px;
     }}
+    /* ComboBox popup container transparent background (prevents white box behind corners) */
+    QComboBox QFrame {{
+        background-color: transparent;
+        border: none;
+    }}
     QComboBox QAbstractItemView {{
         background-color: #151826;
-        border: 1px solid {border_card};
+        border: 1px solid rgba(236, 24, 108, 0.55);
         color: {text_primary};
         font-size: 12px;
         font-weight: 500;
@@ -320,6 +325,11 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
         min-height: 25px;
         padding: 3px 10px;
         border-radius: 5px;
+    }}
+    QComboBox QAbstractItemView::item:hover,
+    QComboBox QAbstractItemView::item:selected {{
+        background-color: {accent};
+        color: #ffffff;
     }}
 
     /* --- Context Menus & Tooltips --- */

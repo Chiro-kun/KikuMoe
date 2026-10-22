@@ -202,3 +202,65 @@ def test_smooth_progress_bar_and_dev_console(qapp):
     assert console._paused is False
     console.close()
     assert console.is_open() is False
+
+
+def test_glass_combo_box_rendering_and_layout(qapp):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+
+    from ui.settings_dialog import GlassComboBox, GlassComboDelegate
+
+    win = QWidget()
+    lay = QVBoxLayout(win)
+    combo = GlassComboBox(win)
+    combo.addItems(["Vorbis", "Opus", "MP3"])
+    lay.addWidget(combo)
+    win.show()
+
+    # 1. Verify GlassComboBox internal configuration
+    view = combo.view()
+    assert view.uniformItemSizes() is True
+    assert isinstance(view.itemDelegate(), GlassComboDelegate)
+
+    popup = view.window()
+    assert popup.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) is True
+    flags = popup.windowFlags()
+    assert Qt.WindowType.FramelessWindowHint in flags
+    assert Qt.WindowType.NoDropShadowWindowHint in flags
+
+    # 2. Test short dropdown layout across styles (Fusion on Linux, Windows)
+    for style_name in ["Fusion", "Windows"]:
+        qapp.setStyle(style_name)
+        qapp.setStyleSheet(get_cyber_moe_stylesheet("#ec186c"))
+        combo.showPopup()
+        m = combo.model()
+        rects = [view.visualRect(m.index(i, 0)) for i in range(m.rowCount())]
+
+        # Each item must satisfy minimum height
+        for r in rects:
+            assert r.height() >= 25
+
+        # Strict non-overlapping test: row i + height must not intrude into row i+1
+        for i in range(len(rects) - 1):
+            assert rects[i].y() + rects[i].height() <= rects[i + 1].y()
+
+        # Visual corner transparency test (no white background box)
+        pix = popup.grab()
+        img = pix.toImage()
+        assert img.pixelColor(0, 0).alpha() == 0
+        combo.hidePopup()
+
+    # 3. Test long dropdown layout
+    combo.clear()
+    combo.addItems([f"Device {i}" for i in range(15)])
+    combo.showPopup()
+    m = combo.model()
+    rects_long = [
+        view.visualRect(m.index(i, 0))
+        for i in range(m.rowCount())
+        if view.visualRect(m.index(i, 0)).y() > 0
+    ]
+    for i in range(len(rects_long) - 1):
+        assert rects_long[i].y() + rects_long[i].height() <= rects_long[i + 1].y()
+    combo.hidePopup()
+    win.close()

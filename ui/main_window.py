@@ -3411,7 +3411,7 @@ class ListenMoePlayer(QWidget):
                 if vol <= 0:
                     try:
                         parent_widget = self if self.isVisible() else None
-            msg = QMessageBox(parent_widget)
+                        msg = QMessageBox(parent_widget)
                         msg.setWindowTitle(self.i18n.t("volume_zero_title"))
                         msg.setText(self.i18n.t("volume_zero_text"))
                         restore_btn = msg.addButton(
