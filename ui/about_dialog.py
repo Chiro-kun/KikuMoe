@@ -155,10 +155,13 @@ def get_os_info() -> str:
     return f"{system} {release}"
 
 
+_RADIO_ICONS_CACHE: Dict[str, QPixmap] = {}
+
+
 class AboutActionButton(QPushButton):
     """
     Tactile Cyber-Moe glass action button with:
-    - 60 FPS scale bounce on click (0.90 -> 0.94 -> 1.04 -> 1.01 -> 1.00)
+    - 60 FPS scale bounce on click
     - Smooth hover glow & border illumination
     - Vector SVG / Pixmap brand icon rendered alongside text
     """
@@ -181,6 +184,7 @@ class AboutActionButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
 
@@ -191,28 +195,30 @@ class AboutActionButton(QPushButton):
         self._r_copy = QSvgRenderer(_COPY_SVG)
         self._r_check = QSvgRenderer(_CHECK_SVG)
 
-        # High-res brand logos for radios
-        self._pixmaps: Dict[str, QPixmap] = {}
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        icons_dir = os.path.join(root_dir, "icons")
-        icon_files = {
-            "listenmoe": "listen.png",
-            "gensokyo": "radio_gensokyo.png",
-            "anison": "radio_anison.png",
-            "neuro21": "radio_neuro21.png",
-            "truckersfm": "radio_truckersfm.png",
-        }
-        for kind, fname in icon_files.items():
-            fpath = os.path.join(icons_dir, fname)
-            if os.path.isfile(fpath):
-                pix = QPixmap(fpath)
-                if not pix.isNull():
-                    self._pixmaps[kind] = pix.scaled(
-                        16,
-                        16,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
+        # High-res brand logos for radios (cached statically across buttons)
+        global _RADIO_ICONS_CACHE
+        if not _RADIO_ICONS_CACHE:
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            icons_dir = os.path.join(root_dir, "icons")
+            icon_files = {
+                "listenmoe": "listen.png",
+                "gensokyo": "radio_gensokyo.png",
+                "anison": "radio_anison.png",
+                "neuro21": "radio_neuro21.png",
+                "truckersfm": "radio_truckersfm.png",
+            }
+            for kind, fname in icon_files.items():
+                fpath = os.path.join(icons_dir, fname)
+                if os.path.isfile(fpath):
+                    pix = QPixmap(fpath)
+                    if not pix.isNull():
+                        _RADIO_ICONS_CACHE[kind] = pix.scaled(
+                            16,
+                            16,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+        self._pixmaps: Dict[str, QPixmap] = _RADIO_ICONS_CACHE
 
     def set_icon_kind(self, kind: str) -> None:
         self._icon_kind = kind
@@ -245,7 +251,7 @@ class AboutActionButton(QPushButton):
         super().mouseReleaseEvent(e)
 
     def _tick_anim(self) -> None:
-        scales = [0.90, 0.94, 1.04, 1.01, 1.0]
+        scales = [0.91, 0.93, 0.96, 1.00, 1.04, 1.05, 1.03, 1.02, 1.01, 1.00]
         if 0 < self._step <= len(scales):
             self._scale = scales[self._step - 1]
             self._step += 1

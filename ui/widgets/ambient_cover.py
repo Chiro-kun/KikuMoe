@@ -11,7 +11,7 @@ Features:
 import math
 from typing import Optional
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -318,7 +318,9 @@ class AnimatedTrackLabel(QLabel):
 
         self.setFixedHeight(max(22, font_px + 8))
 
+        self._elapsed = QElapsedTimer()
         self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
 
@@ -331,6 +333,7 @@ class AnimatedTrackLabel(QLabel):
         super().setText(new_txt)
         if self.isVisible():
             self._anim_progress = 0.0
+            self._elapsed.start()
             if not self._anim_timer.isActive():
                 self._anim_timer.start()
         else:
@@ -338,8 +341,11 @@ class AnimatedTrackLabel(QLabel):
         self.update()
 
     def _tick_anim(self) -> None:
-        self._anim_progress = min(1.0, self._anim_progress + 0.065)
-        if self._anim_progress >= 1.0:
+        elapsed = float(self._elapsed.elapsed())
+        duration = 200.0
+        t = min(1.0, max(0.0, elapsed / duration))
+        self._anim_progress = t
+        if t >= 1.0:
             self._anim_progress = 1.0
             self._anim_timer.stop()
         self.update()

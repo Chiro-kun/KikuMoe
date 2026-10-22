@@ -93,12 +93,13 @@ class SlidingStackedWidget(QStackedWidget):
       never fights widget positions or flashes an unstyled UI skeleton.
     """
 
-    DURATION_MS = 190.0
+    DURATION_MS = 210.0
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._anim_timer = QTimer(self)
-        self._anim_timer.setInterval(14)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_slide)
         self._elapsed = QElapsedTimer()
         self._progress: float = 1.0
@@ -114,10 +115,6 @@ class SlidingStackedWidget(QStackedWidget):
         lay = widget.layout()
         if lay is not None:
             lay.activate()
-        for child in widget.findChildren(QWidget):
-            c_lay = child.layout()
-            if c_lay is not None:
-                c_lay.activate()
 
     def _render_snapshot(self, widget: QWidget) -> QPixmap:
         w = max(1, self.width())
@@ -212,33 +209,31 @@ class SlidingStackedWidget(QStackedWidget):
             self.update()
 
     def paintEvent(self, a0) -> None:
-        super().paintEvent(a0)
         if self._pm_from is None or self._pm_to is None:
+            super().paintEvent(a0)
             return
 
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
         w = float(self.width())
         t = self._progress
-        # Cubic-out easing
+        # Smooth cubic-out easing
         ease = 1.0 - ((1.0 - t) ** 3)
         d = float(self._direction)
 
         # Non-overlapping side-by-side slide with smooth opacity crossfade
-        x_from = -d * w * ease
-        x_to = d * w * (1.0 - ease)
+        # Integer pixel coordinates ensure hardware blit and prevent subpixel jitter
+        x_from = int(round(-d * w * ease))
+        x_to = int(round(d * w * (1.0 - ease)))
 
         alpha_from = max(0.0, min(1.0, (1.0 - ease) ** 1.35))
         alpha_to = max(0.0, min(1.0, 0.25 + 0.75 * ease))
 
         if alpha_from > 0.01:
             painter.setOpacity(alpha_from)
-            painter.drawPixmap(QPointF(x_from, 0.0), self._pm_from)
+            painter.drawPixmap(QPoint(x_from, 0), self._pm_from)
 
         painter.setOpacity(alpha_to)
-        painter.drawPixmap(QPointF(x_to, 0.0), self._pm_to)
+        painter.drawPixmap(QPoint(x_to, 0), self._pm_to)
         painter.end()
 
 
@@ -682,23 +677,28 @@ class SettingsCategoryBar(QWidget):
         self._labels = labels
         self._selected = 0
         self._anim_pos = 0.0
+        self._anim_start_pos = 0.0
         self._hover_idx = -1
         self.setFixedHeight(34)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
 
+        self._slide_elapsed = QElapsedTimer()
         self._slide_timer = QTimer(self)
+        self._slide_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._slide_timer.setInterval(16)
         self._slide_timer.timeout.connect(self._tick_slide)
 
     def _tick_slide(self) -> None:
         target = float(self._selected)
-        diff = target - self._anim_pos
-        if abs(diff) < 0.02:
+        elapsed = float(self._slide_elapsed.elapsed())
+        duration = 180.0
+        t = min(1.0, max(0.0, elapsed / duration))
+        ease = 1.0 - ((1.0 - t) ** 3)
+        self._anim_pos = self._anim_start_pos + (target - self._anim_start_pos) * ease
+        if t >= 1.0:
             self._anim_pos = target
             self._slide_timer.stop()
-        else:
-            self._anim_pos += diff * 0.32
         self.update()
 
     def set_labels(self, labels: List[str]) -> None:
@@ -710,8 +710,11 @@ class SettingsCategoryBar(QWidget):
             self._selected = idx
             if not animated:
                 self._anim_pos = float(idx)
+                self._anim_start_pos = float(idx)
                 self._slide_timer.stop()
             else:
+                self._anim_start_pos = self._anim_pos
+                self._slide_elapsed.start()
                 self._slide_timer.start()
             self.update()
 
@@ -738,6 +741,8 @@ class SettingsCategoryBar(QWidget):
             idx = max(0, min(n - 1, idx))
             if idx != self._selected:
                 self._selected = idx
+                self._anim_start_pos = self._anim_pos
+                self._slide_elapsed.start()
                 self._slide_timer.start()
                 self.tab_changed.emit(idx)
                 self.update()

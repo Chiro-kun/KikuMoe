@@ -6,7 +6,7 @@ Includes smooth 60 FPS sliding pill animation and tactile click bounce + ripple.
 import math
 from typing import List, Optional
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QPushButton, QWidget
 
@@ -27,6 +27,7 @@ class SegmentedSwitch(QWidget):
         self._items = items
         self._current_index = max(0, min(default_index, len(items) - 1))
         self._anim_pos = float(self._current_index)
+        self._anim_start_pos = float(self._current_index)
         self._hover_index = -1
         self._height = height
         self._accent = QColor(PALETTE["accent"])
@@ -35,24 +36,29 @@ class SegmentedSwitch(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        self._slide_elapsed = QElapsedTimer()
         self._slide_timer = QTimer(self)
+        self._slide_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._slide_timer.setInterval(16)
         self._slide_timer.timeout.connect(self._tick_slide)
 
     def _tick_slide(self) -> None:
         target = float(self._current_index)
-        diff = target - self._anim_pos
-        if abs(diff) < 0.02:
+        elapsed = float(self._slide_elapsed.elapsed())
+        duration = 180.0
+        t = min(1.0, max(0.0, elapsed / duration))
+        ease = 1.0 - ((1.0 - t) ** 3)
+        self._anim_pos = self._anim_start_pos + (target - self._anim_start_pos) * ease
+        if t >= 1.0:
             self._anim_pos = target
             self._slide_timer.stop()
-        else:
-            self._anim_pos += diff * 0.32
         self.update()
 
     def set_items(self, items: List[str]) -> None:
         self._items = items
         self._current_index = min(self._current_index, max(0, len(items) - 1))
         self._anim_pos = float(self._current_index)
+        self._anim_start_pos = float(self._current_index)
         self.update()
 
     def set_selected(self, text: str) -> None:
@@ -60,6 +66,8 @@ class SegmentedSwitch(QWidget):
             idx = self._items.index(text)
             if idx != self._current_index:
                 self._current_index = idx
+                self._anim_start_pos = self._anim_pos
+                self._slide_elapsed.start()
                 self._slide_timer.start()
                 self.update()
 
@@ -78,6 +86,8 @@ class SegmentedSwitch(QWidget):
             clicked_idx = int(event.position().x() // item_width)
             if 0 <= clicked_idx < len(self._items) and clicked_idx != self._current_index:
                 self._current_index = clicked_idx
+                self._anim_start_pos = self._anim_pos
+                self._slide_elapsed.start()
                 self._slide_timer.start()
                 self.update()
                 self.selection_changed.emit(self._items[clicked_idx])
@@ -164,6 +174,7 @@ class SettingsIconButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
 
@@ -194,10 +205,10 @@ class SettingsIconButton(QPushButton):
         super().mousePressEvent(e)
 
     def _tick_anim(self) -> None:
-        scales = [0.84, 0.92, 1.06, 1.03, 1.0]
+        scales = [0.86, 0.90, 0.95, 1.01, 1.04, 1.03, 1.01, 1.00]
         if 0 < self._anim_step <= len(scales):
             self._scale = scales[self._anim_step - 1]
-            self._angle_offset += 9.0
+            self._angle_offset += 5.5
             self._anim_step += 1
             self.update()
         else:

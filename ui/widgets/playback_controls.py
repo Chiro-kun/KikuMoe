@@ -49,6 +49,7 @@ class AnimatedVectorButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_click_anim)
 

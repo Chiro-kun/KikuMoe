@@ -3,7 +3,6 @@ import os
 import re
 import sys
 import threading
-import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -118,6 +117,7 @@ class SmoothProgressBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
 
@@ -2332,7 +2332,7 @@ class ListenMoePlayer(QWidget):
             was_playing = bool(self.player and self.player.is_playing())
             prev_channel = self.settings.value(KEY_CHANNEL, "J-POP")
             prev_format = self.settings.value(KEY_FORMAT, "Vorbis")
-            prev_path = self.player.get_configured_path()
+            prev_path = self.settings.value(KEY_LIBVLC_PATH, "") or None
             prev_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
             prev_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
             try:
@@ -2341,6 +2341,7 @@ class ListenMoePlayer(QWidget):
                 prev_nc = 1000
             prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
             prev_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            prev_lang = self.settings.value(KEY_LANG, "it")
 
             # Reuse persistent embedded panel so opening is instantaneous & 60 FPS
             if not hasattr(self, "_settings_dlg") or self._settings_dlg is None:
@@ -2396,10 +2397,11 @@ class ListenMoePlayer(QWidget):
                 pass
 
             def _on_dialog_accepted():
-                # Lingua
+                # Lingua: applica solo se effettivamente modificata
                 lang = self.settings.value(KEY_LANG, "it")
-                self.i18n.set_lang("it" if lang not in ("it", "en") else lang)
-                self.apply_translations()
+                if lang != prev_lang:
+                    self.i18n.set_lang("it" if lang not in ("it", "en") else lang)
+                    self.apply_translations()
                 # Aggiorna header e valori visivi canale/formato da QSettings
                 self.update_header_label()
                 if hasattr(self, "channel_value"):
@@ -2443,8 +2445,6 @@ class ListenMoePlayer(QWidget):
                 new_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
                 path_changed = prev_path != new_path
                 backend_changed = prev_backend != new_backend
-                # Theme (light mode removed, keep dark mode always applied)
-                self.apply_theme()
                 # Ricalibra network caching status
                 self.update_vlc_status_label()
                 # Se backend/path è cambiato o network-caching è variato sensibile, riavvia
@@ -2452,9 +2452,14 @@ class ListenMoePlayer(QWidget):
                     new_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
                 except Exception:
                     new_nc = 1000
-                if backend_changed or path_changed or new_nc != prev_nc:
+                needs_restart = (
+                    backend_changed
+                    or (new_backend == "vlc" and path_changed)
+                    or (prev_backend == "auto" and path_changed)
+                    or (new_nc != prev_nc)
+                )
+                if needs_restart:
                     self.status_changed.emit(self.t("status_restarting"))
-                    time.sleep(0.5)
                     # Recreate player with new settings
                     try:
                         self.player.stop()
@@ -2528,8 +2533,8 @@ class ListenMoePlayer(QWidget):
 
             # Collega e mostra nel pannello integrato della home
             def _on_ok_embedded():
-                _on_dialog_accepted()
                 self._close_embedded_settings()
+                _on_dialog_accepted()
 
             try:
                 dlg.accepted.connect(_on_ok_embedded)
