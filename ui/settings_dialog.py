@@ -817,8 +817,8 @@ class SettingsDialog(QDialog):
         else:
             self.setModal(False)
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-            self.setMinimumSize(460, 500)
-            self.resize(480, 545)
+            self.setMinimumSize(460, 520)
+            self.resize(480, 580)
 
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
         self.i18n = I18n(self.settings.value(KEY_LANG, "it"))

@@ -498,8 +498,8 @@ class ListenMoePlayer(QWidget):
         # Use custom Cyber-Moe title bar with logo on all platforms (Windows & Linux)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 405, 660
-        self.setMinimumSize(380, 520)
+        fixed_w, fixed_h = 405, 670
+        self.setMinimumSize(380, 560)
         self.resize(fixed_w, fixed_h)
         self.setObjectName("mainWindowRoot")
         self._apply_window_title("")

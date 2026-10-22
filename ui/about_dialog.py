@@ -517,7 +517,7 @@ class AboutWidget(QWidget):
 
         # Row 1: LISTEN.moe, Gensokyo, Anison
         row_radios_1 = QHBoxLayout()
-        row_radios_1.setContentsMargins(0, 2, 0, 2)
+        row_radios_1.setContentsMargins(0, 0, 0, 0)
         row_radios_1.setSpacing(8)
 
         self.btn_listenmoe = AboutActionButton(
@@ -551,9 +551,12 @@ class AboutWidget(QWidget):
         row_radios_1.addWidget(self.btn_anison, 1)
         powered_lay.addLayout(row_radios_1)
 
+        # Dedicated vertical spacer between radio rows
+        powered_lay.addSpacing(7)
+
         # Row 2: Neuro 21, TruckersFM
         row_radios_2 = QHBoxLayout()
-        row_radios_2.setContentsMargins(0, 2, 0, 2)
+        row_radios_2.setContentsMargins(0, 0, 0, 0)
         row_radios_2.setSpacing(8)
 
         self.btn_neuro21 = AboutActionButton(
@@ -577,6 +580,7 @@ class AboutWidget(QWidget):
         row_radios_2.addWidget(self.btn_truckersfm, 1)
         powered_lay.addLayout(row_radios_2)
 
+        card_powered.setMinimumHeight(114)
         main_layout.addWidget(card_powered)
 
         # ================= 5. System Diagnostics Card =================
@@ -795,8 +799,8 @@ class AboutDialog(QDialog):
         self.setWindowTitle(self.i18n.t("about_title"))
         self.setModal(False)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        self.setMinimumSize(440, 520)
-        self.resize(460, 560)
+        self.setMinimumSize(450, 560)
+        self.resize(470, 610)
 
         self._apply_dialog_stylesheet()
 
