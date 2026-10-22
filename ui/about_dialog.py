@@ -1,15 +1,24 @@
 """
 Cyber-Moe Credits & System Info Dialog for KikuMoe 2.0.0
 Displays author credits, official Forgejo & GitHub repositories,
-and runtime system diagnostics with copy-to-clipboard functionality.
+and runtime system diagnostics with animated action buttons and authentic brand vector icons.
 """
 
 import os
 import platform
 from typing import Optional
 
-from PyQt6.QtCore import PYQT_VERSION_STR, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QPixmap
+from PyQt6.QtCore import PYQT_VERSION_STR, QByteArray, QPointF, QRectF, Qt, QTimer, QUrl
+from PyQt6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QFont,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -35,6 +44,54 @@ from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
+# Vector SVG assets for authentic brand icons and feedback glyphs
+_FORGEJO_SVG = QByteArray(
+    b"""<svg viewBox="0 0 212 212" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(6,6)">
+    <path d="M58 168 v-98 a50 50 0 0 1 50-50 h20" fill="none" stroke="#ff6600"
+          stroke-width="25" stroke-linecap="round" />
+    <path d="M58 168 v-30 a50 50 0 0 1 50-50 h20" fill="none" stroke="#d40000"
+          stroke-width="25" stroke-linecap="round" />
+    <circle cx="142" cy="20" r="18" fill="none" stroke="#ff6600" stroke-width="16" />
+    <circle cx="142" cy="88" r="18" fill="none" stroke="#d40000" stroke-width="16" />
+    <circle cx="58" cy="180" r="18" fill="none" stroke="#d40000" stroke-width="16" />
+  </g>
+</svg>"""
+)
+
+_GITHUB_SVG = QByteArray(
+    b'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">\n'
+    b'  <path fill="#ffffff" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504'
+    b'.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369'
+    b'-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53'
+    b'1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22'
+    b'-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272'
+    b'.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504'
+    b'.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028'
+    b'1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0'
+    b'1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22'
+    b'6.484 17.522 2 12 2z"/>\n'
+    b'</svg>'
+)
+
+_COPY_SVG = QByteArray(
+    b"""<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path fill="none" stroke="#d0d5ea" stroke-width="2.2" stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.08 2.57
+           A2 2 0 0 0 14.65 2H10a2 2 0 0 0-2 2z"/>
+  <path fill="none" stroke="#d0d5ea" stroke-width="2.2" stroke-linecap="round"
+        stroke-linejoin="round" d="M16 4h-2a2 2 0 0 0-2 2v1M4 8v12a2 2 0 0 0 2 2h8"/>
+</svg>"""
+)
+
+_CHECK_SVG = QByteArray(
+    b"""<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path fill="none" stroke="#00e676" stroke-width="2.8" stroke-linecap="round"
+        stroke-linejoin="round" d="M20 6L9 17l-5-5"/>
+</svg>"""
+)
+
 
 def get_os_info() -> str:
     """Returns human-friendly OS name and display server info on Linux."""
@@ -48,6 +105,192 @@ def get_os_info() -> str:
     if system == "Windows":
         return f"Windows {release}"
     return f"{system} {release}"
+
+
+class AboutActionButton(QPushButton):
+    """
+    Tactile Cyber-Moe glass action button with:
+    - 60 FPS scale bounce on click (0.90 -> 0.94 -> 1.04 -> 1.01 -> 1.00)
+    - Smooth hover glow & border illumination
+    - Vector SVG / Pixmap brand icon rendered alongside text
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        icon_kind: str = "",
+        is_external: bool = False,
+        parent: Optional[QWidget] = None,
+    ):
+        super().__init__(text, parent)
+        self._icon_kind = icon_kind
+        self._is_external = is_external
+        self._hover = False
+        self._pressed = False
+        self._scale = 1.0
+        self._step = 0
+        self.setFixedHeight(30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_anim)
+
+        # Vector SVG renderers
+        self._r_forgejo = QSvgRenderer(_FORGEJO_SVG)
+        self._r_github = QSvgRenderer(_GITHUB_SVG)
+        self._r_copy = QSvgRenderer(_COPY_SVG)
+        self._r_check = QSvgRenderer(_CHECK_SVG)
+
+        # High-res sakura headphones icon for LISTEN.moe
+        self._listen_pix: Optional[QPixmap] = None
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        logo_path = os.path.join(root_dir, "icons", "Kikumoe - no txt.png")
+        if os.path.isfile(logo_path):
+            pix = QPixmap(logo_path)
+            if not pix.isNull():
+                self._listen_pix = pix.scaled(
+                    17,
+                    17,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+
+    def set_icon_kind(self, kind: str) -> None:
+        self._icon_kind = kind
+        self.update()
+
+    def enterEvent(self, a0) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(a0)
+
+    def leaveEvent(self, a0) -> None:
+        self._hover = False
+        self._pressed = False
+        self.update()
+        super().leaveEvent(a0)
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self._step = 1
+            self._scale = 0.90
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+            self.update()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:
+        self._pressed = False
+        self.update()
+        super().mouseReleaseEvent(e)
+
+    def _tick_anim(self) -> None:
+        scales = [0.90, 0.94, 1.04, 1.01, 1.0]
+        if 0 < self._step <= len(scales):
+            self._scale = scales[self._step - 1]
+            self._step += 1
+        else:
+            self._scale = 1.0
+            self._step = 0
+            self._anim_timer.stop()
+        self.update()
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = float(self.width())
+        h = float(self.height())
+        cx = w / 2.0
+        cy = h / 2.0
+
+        painter.translate(cx, cy)
+        painter.scale(self._scale, self._scale)
+        painter.translate(-cx, -cy)
+
+        # Cyber-Moe translucent background and neon accent border on hover
+        if self._pressed:
+            bg = QColor(236, 24, 108, 55)
+            border = QColor(PALETTE["accent"])
+        elif self._hover:
+            bg = QColor(236, 24, 108, 30)
+            border = QColor(PALETTE["accent"])
+        else:
+            bg = QColor(255, 255, 255, 14)
+            border = QColor(255, 255, 255, 30)
+
+        rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.1))
+        painter.drawRoundedRect(rect, 8.0, 8.0)
+
+        # Compute label and icon positioning
+        txt = self.text()
+        font = QFont(self.font())
+        font.setPixelSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+        txt_w = fm.horizontalAdvance(txt)
+        txt_h = fm.capHeight()
+
+        icon_size = 16.0
+        icon_pad = 6.0 if self._icon_kind else 0.0
+        ext_w = 9.0 if self._is_external else 0.0
+
+        total_content_w = (
+            (icon_size + icon_pad if self._icon_kind else 0)
+            + txt_w
+            + (4.0 + ext_w if self._is_external else 0)
+        )
+        start_x = max(6.0, (w - total_content_w) / 2.0)
+
+        # 1. Render Icon
+        curr_x = start_x
+        if self._icon_kind:
+            icon_rect = QRectF(curr_x, (h - icon_size) / 2.0, icon_size, icon_size)
+            if self._icon_kind == "forgejo":
+                self._r_forgejo.render(painter, icon_rect)
+            elif self._icon_kind == "github":
+                self._r_github.render(painter, icon_rect)
+            elif self._icon_kind == "listenmoe" and self._listen_pix:
+                painter.drawPixmap(
+                    int(curr_x),
+                    int((h - icon_size) / 2.0),
+                    int(icon_size),
+                    int(icon_size),
+                    self._listen_pix,
+                )
+            elif self._icon_kind == "copy":
+                self._r_copy.render(painter, icon_rect)
+            elif self._icon_kind == "check":
+                self._r_check.render(painter, icon_rect)
+            curr_x += icon_size + icon_pad
+
+        # 2. Render Text
+        painter.setPen(QColor("#ffffff" if (self._hover or self._pressed) else "#e2e6f5"))
+        txt_y = (h + txt_h) / 2.0 - 1.0
+        painter.drawText(QPointF(curr_x, txt_y), txt)
+        curr_x += txt_w
+
+        # 3. Render External Link Glyph ↗
+        if self._is_external:
+            pen = QPen(QColor(PALETTE["accent_hover"] if self._hover else "#8c93aa"), 1.3)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            chev_x = curr_x + 4.0
+            chev_y = (h - 7.0) / 2.0
+            path = QPainterPath()
+            path.moveTo(chev_x, chev_y + 6.0)
+            path.lineTo(chev_x + 6.0, chev_y)
+            path.moveTo(chev_x + 2.5, chev_y)
+            path.lineTo(chev_x + 6.0, chev_y)
+            path.lineTo(chev_x + 6.0, chev_y + 3.5)
+            painter.drawPath(path)
+
+        painter.end()
 
 
 class AboutWidget(QWidget):
@@ -180,26 +423,33 @@ class AboutWidget(QWidget):
         btns_row.setContentsMargins(0, 2, 0, 2)
         btns_row.setSpacing(8)
 
-        self.btn_forgejo = QPushButton(f"{self.i18n.t('about_link_forgejo')} ↗")
-        self.btn_forgejo.setObjectName("secondaryGlassBtn")
-        self.btn_forgejo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_forgejo.setFixedHeight(28)
+        # Tactile animated buttons with official brand icons
+        self.btn_forgejo = AboutActionButton(
+            "Forgejo",
+            icon_kind="forgejo",
+            is_external=True,
+            parent=self,
+        )
         self.btn_forgejo.setToolTip(URL_FORGEJO)
         self.btn_forgejo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_FORGEJO)))
         btns_row.addWidget(self.btn_forgejo)
 
-        self.btn_github = QPushButton(f"{self.i18n.t('about_link_github')} ↗")
-        self.btn_github.setObjectName("secondaryGlassBtn")
-        self.btn_github.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_github.setFixedHeight(28)
+        self.btn_github = AboutActionButton(
+            "GitHub",
+            icon_kind="github",
+            is_external=True,
+            parent=self,
+        )
         self.btn_github.setToolTip(URL_GITHUB)
         self.btn_github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_GITHUB)))
         btns_row.addWidget(self.btn_github)
 
-        self.btn_listenmoe = QPushButton(f"{self.i18n.t('about_link_listenmoe')} ↗")
-        self.btn_listenmoe.setObjectName("secondaryGlassBtn")
-        self.btn_listenmoe.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_listenmoe.setFixedHeight(28)
+        self.btn_listenmoe = AboutActionButton(
+            "LISTEN.moe",
+            icon_kind="listenmoe",
+            is_external=True,
+            parent=self,
+        )
         self.btn_listenmoe.setToolTip(URL_LISTENMOE)
         self.btn_listenmoe.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_LISTENMOE)))
         btns_row.addWidget(self.btn_listenmoe)
@@ -273,12 +523,14 @@ class AboutWidget(QWidget):
         diag_col_row.addLayout(col_right, 1)
         sys_lay.addLayout(diag_col_row)
 
-        # Copy System Info Button
+        # Animated Copy System Info Button
         copy_row = QHBoxLayout()
         copy_row.setContentsMargins(0, 4, 0, 0)
-        self.btn_copy = QPushButton(self.i18n.t("about_copy_sys_info"))
-        self.btn_copy.setObjectName("secondaryGlassBtn")
-        self.btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_copy = AboutActionButton(
+            self.i18n.t("about_copy_sys_info"),
+            icon_kind="copy",
+            parent=self,
+        )
         self.btn_copy.setFixedHeight(28)
         self.btn_copy.clicked.connect(self._copy_system_info)
         copy_row.addWidget(self.btn_copy)
@@ -304,27 +556,10 @@ class AboutWidget(QWidget):
             border: none;
             padding-bottom: 2px;
         }}
-        QPushButton#secondaryGlassBtn {{
-            background-color: rgba(255, 255, 255, 0.07);
-            color: #e4e8f6;
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 8px;
-            padding: 3px 8px;
-            font-size: 11px;
-            font-weight: 700;
-        }}
-        QPushButton#secondaryGlassBtn:hover {{
-            background-color: rgba(236, 24, 108, 0.22);
-            border-color: {PALETTE["accent"]};
-            color: #ffffff;
-        }}
-        QPushButton#secondaryGlassBtn:pressed {{
-            background-color: rgba(236, 24, 108, 0.35);
-        }}
         """)
 
     def _copy_system_info(self) -> None:
-        """Copies formatted diagnostics string to the system clipboard with feedback."""
+        """Copies formatted diagnostics string to the system clipboard with tactile feedback."""
         info_text = (
             f"{APP_NAME} v{APP_VERSION}\n"
             f"Authors: {AUTHORS}\n"
@@ -339,11 +574,13 @@ class AboutWidget(QWidget):
         cb = QApplication.clipboard()
         if cb is not None:
             cb.setText(info_text)
+        self.btn_copy.set_icon_kind("check")
         self.btn_copy.setText(self.i18n.t("about_copied"))
         self.btn_copy.setEnabled(False)
         QTimer.singleShot(2000, self._reset_copy_btn)
 
     def _reset_copy_btn(self) -> None:
+        self.btn_copy.set_icon_kind("copy")
         self.btn_copy.setText(self.i18n.t("about_copy_sys_info"))
         self.btn_copy.setEnabled(True)
 
@@ -356,9 +593,6 @@ class AboutWidget(QWidget):
         if hasattr(self, "_card_sys_hdr") and isinstance(self._card_sys_hdr, QLabel):
             self._card_sys_hdr.setText(self.i18n.t("about_sys_section"))
         self._lbl_credits_stream.setText(self.i18n.t("about_credits_stream"))
-        self.btn_forgejo.setText(f"{self.i18n.t('about_link_forgejo')} ↗")
-        self.btn_github.setText(f"{self.i18n.t('about_link_github')} ↗")
-        self.btn_listenmoe.setText(f"{self.i18n.t('about_link_listenmoe')} ↗")
         self._lbl_backend_key.setText(self.i18n.t("about_sys_backend"))
         self._lbl_python_key.setText(self.i18n.t("about_sys_python"))
         self._lbl_pyqt_key.setText(self.i18n.t("about_sys_pyqt"))
@@ -379,7 +613,7 @@ class AboutWidget(QWidget):
                 )
                 self._logo_lbl.setPixmap(scaled)
                 return
-        # Fallback empty / placeholder
+        # Fallback placeholder
         self._logo_lbl.setText("🌸")
         self._logo_lbl.setStyleSheet("font-size: 28px; background: transparent;")
 
@@ -482,23 +716,6 @@ class AboutDialog(QDialog):
             background: transparent;
             border: none;
             padding-bottom: 2px;
-        }}
-        QPushButton#secondaryGlassBtn {{
-            background-color: rgba(255, 255, 255, 0.07);
-            color: #e4e8f6;
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 8px;
-            padding: 3px 8px;
-            font-size: 11px;
-            font-weight: 700;
-        }}
-        QPushButton#secondaryGlassBtn:hover {{
-            background-color: rgba(236, 24, 108, 0.22);
-            border-color: {PALETTE["accent"]};
-            color: #ffffff;
-        }}
-        QPushButton#secondaryGlassBtn:pressed {{
-            background-color: rgba(236, 24, 108, 0.35);
         }}
         """
         self.setStyleSheet(base_qss + extra_qss)
