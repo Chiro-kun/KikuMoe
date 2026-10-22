@@ -570,6 +570,7 @@ class PlaybackControls(QFrame):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setObjectName("consoleDeck")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._is_playing = False
         self._is_paused = False
         self._is_muted = False
@@ -642,7 +643,7 @@ class PlaybackControls(QFrame):
 
         self.volume_label = QLabel("60%")
         self.volume_label.setObjectName("timeDisplayLabel")
-        self.volume_label.setFixedWidth(44)
+        self.volume_label.setFixedSize(44, 24)
         self.volume_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.volume_label.setStyleSheet(
             "background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);"
@@ -650,9 +651,9 @@ class PlaybackControls(QFrame):
             " font-size: 11px; font-weight: 700;"
         )
 
-        vol_row.addWidget(self.speaker_btn)
-        vol_row.addWidget(self.volume_slider, 1)
-        vol_row.addWidget(self.volume_label)
+        vol_row.addWidget(self.speaker_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        vol_row.addWidget(self.volume_slider, 1, Qt.AlignmentFlag.AlignVCenter)
+        vol_row.addWidget(self.volume_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         root.addLayout(vol_row)
 
