@@ -78,6 +78,7 @@ from core.i18n import I18n
 from core.logger import get_logger
 from core.ssl_compat import get_ssl_context
 from network.ws_client import NowPlayingWS
+from ui.about_dialog import AboutDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
@@ -352,6 +353,8 @@ class ListenMoePlayer(QWidget):
         self._retry_count = 0
         self._max_retries = 10
         self._retry_pending = False
+        self._settings_dlg: Optional[SettingsDialog] = None
+        self._about_dialog: Optional[AboutDialog] = None
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -994,6 +997,7 @@ class ListenMoePlayer(QWidget):
                 on_force_stop=self.force_stop_all,
                 on_toggle_mute=self.toggle_mute_shortcut,
                 on_quit=self._on_tray_quit,
+                on_about=self.open_about,
             )
             self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon())
             self.tray_icon_refresh.connect(self.update_tray_icon)
@@ -1797,6 +1801,7 @@ class ListenMoePlayer(QWidget):
                         "channel": self._icon_channel,
                         "codec": self._icon_codec,
                         "quit": self._icon_quit,
+                        "settings": self._icon_settings,
                     }
                 )
                 # Refresh tray menu state to apply icons immediately
@@ -2309,10 +2314,13 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def open_settings(self):
+    def open_settings(self, tab_idx: int = 0):
         try:
             # Toggle off with smooth slide-out if embedded settings panel is already open
             if hasattr(self, "_view_stack") and self._view_stack.currentIndex() == 1:
+                if tab_idx != 0 and hasattr(self, "_settings_dlg") and self._settings_dlg:
+                    self._settings_dlg.set_tab(tab_idx)
+                    return
                 self._close_embedded_settings()
                 return
 
@@ -2530,11 +2538,43 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             try:
+                if hasattr(dlg, "set_tab"):
+                    dlg.set_tab(tab_idx)
                 if hasattr(self, "settings_button"):
                     self.settings_button.set_active(True)
                 self._view_stack.slide_to_index(1, direction=1)
             except Exception:
                 pass
+        except Exception:
+            pass
+
+    def open_about(self) -> None:
+        """Opens Info & Credits: in embedded settings if visible, or standalone dialog if hidden."""
+        try:
+            if not self.isVisible():
+                from ui.about_dialog import AboutDialog
+
+                backend_name = "Audio"
+                if hasattr(self, "player") and self.player is not None:
+                    backend_name = getattr(
+                        self.player,
+                        "BACKEND_NAME",
+                        type(self.player).__name__.replace("Player", ""),
+                    )
+                if not hasattr(self, "_about_dialog") or self._about_dialog is None:
+                    self._about_dialog = AboutDialog(
+                        self,
+                        i18n=self.i18n,
+                        backend_name=backend_name,
+                    )
+                else:
+                    self._about_dialog.about_widget.set_i18n(self.i18n)
+                    self._about_dialog.about_widget.set_backend_name(backend_name)
+                self._about_dialog.show()
+                self._about_dialog.raise_()
+                self._about_dialog.activateWindow()
+            else:
+                self.open_settings(tab_idx=3)
         except Exception:
             pass
 
@@ -2955,6 +2995,7 @@ class ListenMoePlayer(QWidget):
                         on_stop_stream=self.stop_stream,
                         on_toggle_mute=self.toggle_mute_shortcut,
                         on_quit=self._on_tray_quit,
+                        on_about=self.open_about,
                     )
                 except Exception:
                     return

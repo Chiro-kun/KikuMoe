@@ -125,7 +125,7 @@ def test_settings_dialog_and_toggles(qapp):
     assert toggle._progress == 1.0
 
     dlg = SettingsDialog()
-    assert dlg.pages.count() == 3
+    assert dlg.pages.count() == 4
     dlg.category_bar.set_selected(1)
     dlg.pages.setCurrentIndex(1)
     assert dlg.pages.currentIndex() == 1
@@ -266,3 +266,69 @@ def test_glass_combo_box_rendering_and_layout(qapp):
         assert rects_long[i].y() + rects_long[i].height() <= rects_long[i + 1].y()
     combo.hidePopup()
     win.close()
+
+
+def test_about_widget(qapp):
+    from core.constants import AUTHORS, LICENSE_NAME, URL_FORGEJO, URL_GITHUB, URL_LISTENMOE
+    from core.i18n import I18n
+    from ui.about_dialog import AboutWidget
+
+    i18n = I18n("it")
+    widget = AboutWidget(i18n=i18n, backend_name="MPV")
+    widget.show()
+
+    # 1. Authors & License
+    assert AUTHORS in widget._lbl_authors_val.text()
+    assert LICENSE_NAME in widget._lbl_license_val.text()
+
+    # 2. URLs
+    assert widget.btn_forgejo.toolTip() == URL_FORGEJO
+    assert widget.btn_github.toolTip() == URL_GITHUB
+    assert widget.btn_listenmoe.toolTip() == URL_LISTENMOE
+
+    # 3. Audio Backend
+    assert widget._lbl_backend_val.text() == "MPV"
+    widget.set_backend_name("VLC")
+    assert widget._lbl_backend_val.text() == "VLC"
+
+    # 4. Copy System Info to clipboard
+    widget._copy_system_info()
+    clipboard_text = QApplication.clipboard().text()
+    assert "KikuMoe" in clipboard_text
+    assert AUTHORS in clipboard_text
+    assert "VLC" in clipboard_text
+    assert URL_FORGEJO in clipboard_text
+
+    # 5. Language switch
+    i18n_en = I18n("en")
+    widget.set_i18n(i18n_en)
+    assert widget.btn_copy.text() == i18n_en.t("about_copy_sys_info")
+    widget.close()
+
+
+def test_about_dialog(qapp):
+    from ui.about_dialog import AboutDialog
+
+    dlg = AboutDialog(backend_name="FFmpeg")
+    dlg.show()
+    assert dlg.about_widget._backend_name == "FFmpeg"
+    assert dlg.windowTitle() != ""
+    dlg.close()
+
+
+def test_settings_dialog_four_tabs(qapp):
+    from ui.settings_dialog import SettingsDialog
+
+    dlg = SettingsDialog(embedded=True)
+    # Check 4 labels present in category bar
+    assert len(dlg.category_bar._labels) == 4
+    assert dlg.category_bar._labels[0] == dlg.i18n.t("settings_tab_general")
+    assert dlg.category_bar._labels[1] == dlg.i18n.t("settings_tab_audio")
+    assert dlg.category_bar._labels[2] == dlg.i18n.t("settings_tab_advanced")
+    assert dlg.category_bar._labels[3] == dlg.i18n.t("settings_tab_info")
+
+    # Switch to 4th tab (Info)
+    dlg.set_tab(3)
+    assert dlg.category_bar._selected == 3
+    assert dlg.pages.currentIndex() == 3
+    dlg.close()

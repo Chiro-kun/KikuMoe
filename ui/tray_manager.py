@@ -27,6 +27,7 @@ class TrayManager(QObject):
         on_stop_stream: Optional[Callable] = None,
         on_force_stop: Optional[Callable] = None,
         on_toggle_mute: Optional[Callable] = None,
+        on_about: Optional[Callable] = None,
     ):
         super().__init__(parent)
         self._parent = parent
@@ -47,6 +48,7 @@ class TrayManager(QObject):
         self._on_stop_stream = on_stop_stream
         self._on_force_stop = on_force_stop
         self._on_toggle_mute = on_toggle_mute
+        self._on_about = on_about
         # Azioni informative in cima al menu
         self._act_info_now: Optional[QAction] = None
         self._act_info_session: Optional[QAction] = None
@@ -57,6 +59,8 @@ class TrayManager(QObject):
         self._act_force_stop: Optional[QAction] = None
         self._act_mute: Optional[QAction] = None
         self._act_quit: Optional[QAction] = None
+        self._act_settings: Optional[QAction] = None
+        self._act_about: Optional[QAction] = None
         self._act_ch: Optional[QAction] = None
         self._act_fmt: Optional[QAction] = None
         self._channel_actions: Dict[str, QAction] = {}
@@ -254,9 +258,30 @@ class TrayManager(QObject):
                     except Exception:
                         txt_settings = "Impostazioni"
                     act_settings = QAction(txt_settings, self._parent)
+                    if "settings" in self._icons:
+                        act_settings.setIcon(self._icons["settings"])
                     if self._on_open_settings:
                         cb_settings = self._on_open_settings
                         act_settings.triggered.connect(lambda: cb_settings())
+                    menu.addAction(act_settings)
+                    self._act_settings = act_settings
+
+                    # Informazioni su KikuMoe...
+                    try:
+                        txt_about = (
+                            self._i18n.t("tray_about")
+                            if hasattr(self._i18n, "t")
+                            else "Informazioni su KikuMoe..."
+                        )
+                    except Exception:
+                        txt_about = "Informazioni su KikuMoe..."
+                    act_about = QAction(txt_about, self._parent)
+                    if self._on_about:
+                        cb_about = self._on_about
+                        act_about.triggered.connect(lambda: cb_about())
+                    menu.addAction(act_about)
+                    self._act_about = act_about
+
                     # Separatore fine sezione Window
                     self._sep_window_end = menu.addSeparator()
                     # Sezione: Preferences (intestazione)
@@ -497,6 +522,8 @@ class TrayManager(QObject):
                 self._act_fmt.setIcon(icons["codec"])
             if "quit" in icons and self._act_quit:
                 self._act_quit.setIcon(icons["quit"])
+            if "settings" in icons and hasattr(self, "_act_settings") and self._act_settings:
+                self._act_settings.setIcon(icons["settings"])
         except Exception:
             pass
 

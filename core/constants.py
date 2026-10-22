@@ -89,6 +89,13 @@ def _read_version_from_files() -> str:
 APP_VERSION = _read_version_from_files()
 APP_TITLE = f"{APP_NAME} {APP_VERSION}"
 
+# Project metadata & links
+AUTHORS = "Chirokun & alsogamer"
+URL_FORGEJO = "https://git.alsogamer.com/chiro/KikuMoe"
+URL_GITHUB = "https://github.com/Chiro-kun/KikuMoe"
+URL_LISTENMOE = "https://listen.moe"
+LICENSE_NAME = "MIT License"
+
 # QSettings scope
 ORG_NAME = "KikuMoe"
 APP_SETTINGS = "ListenMoePlayer"

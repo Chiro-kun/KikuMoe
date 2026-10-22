@@ -131,3 +131,28 @@ def test_tray_manager_on_quit_triggered(qapp):
     assert tray_mgr._act_quit is not None
     tray_mgr._act_quit.trigger()
     assert quit_callback.call_count == 1
+
+
+def test_tray_manager_settings_and_about_actions(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    settings_cb = MagicMock()
+    about_cb = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_open_settings=settings_cb,
+        on_about=about_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._act_settings is not None
+    assert tray_mgr._act_about is not None
+
+    tray_mgr._act_settings.trigger()
+    assert settings_cb.call_count == 1
+
+    tray_mgr._act_about.trigger()
+    assert about_cb.call_count == 1

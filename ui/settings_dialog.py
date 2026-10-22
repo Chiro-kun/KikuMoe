@@ -75,6 +75,7 @@ from core.constants import (
 )
 from core.i18n import I18n
 from core.logger import silence_stderr
+from ui.about_dialog import AboutWidget
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
@@ -870,12 +871,13 @@ class SettingsDialog(QDialog):
             hdr_row.addWidget(balancer)
             body_layout.addLayout(hdr_row)
 
-        # Top 3-Tab Segmented Switcher
-        tab_labels = (
-            ["Generale", "Audio", "Tray & Console"]
-            if is_it
-            else ["General", "Audio", "Tray & Console"]
-        )
+        # Top 4-Tab Segmented Switcher
+        tab_labels = [
+            self.i18n.t("settings_tab_general"),
+            self.i18n.t("settings_tab_audio"),
+            self.i18n.t("settings_tab_advanced"),
+            self.i18n.t("settings_tab_info"),
+        ]
         self.category_bar = SettingsCategoryBar(tab_labels, self)
         body_layout.addWidget(self.category_bar)
 
@@ -1128,6 +1130,27 @@ class SettingsDialog(QDialog):
         sys_layout.addStretch(1)
         self.pages.addWidget(page_sys)
 
+        # ==================== PAGE 3: INFO & CREDITI ====================
+        page_about = QWidget()
+        about_lay = QVBoxLayout(page_about)
+        about_lay.setContentsMargins(0, 2, 0, 2)
+        about_lay.setSpacing(8)
+
+        backend_name = "Auto"
+        if parent is not None and hasattr(parent, "player") and parent.player is not None:
+            backend_name = getattr(
+                parent.player,
+                "BACKEND_NAME",
+                type(parent.player).__name__.replace("Player", ""),
+            )
+        self.about_widget = AboutWidget(
+            page_about,
+            i18n=self.i18n,
+            backend_name=backend_name,
+        )
+        about_lay.addWidget(self.about_widget)
+        self.pages.addWidget(page_about)
+
         body_layout.addWidget(self.pages, 1)
 
         # Bottom Action Deck (Annulla | Applica | OK)
@@ -1169,6 +1192,12 @@ class SettingsDialog(QDialog):
             self._devices_populated = True
             self._populate_audio_devices()
 
+    def set_tab(self, idx: int) -> None:
+        """Programmatically switch to tab index (0=General, 1=Audio, 2=Advanced, 3=Info)."""
+        if hasattr(self, "category_bar") and hasattr(self, "pages"):
+            self.category_bar.set_selected(idx)
+            self._on_tab_changed(idx)
+
     def _on_tab_changed(self, idx: int) -> None:
         for cmb in self.findChildren(GlassComboBox):
             cmb.reset_visual_state()
@@ -1209,6 +1238,26 @@ class SettingsDialog(QDialog):
         )
         if not self._devices_populated:
             QTimer.singleShot(250, self._ensure_devices_populated)
+        tab_labels = [
+            self.i18n.t("settings_tab_general"),
+            self.i18n.t("settings_tab_audio"),
+            self.i18n.t("settings_tab_advanced"),
+            self.i18n.t("settings_tab_info"),
+        ]
+        self.category_bar.set_labels(tab_labels)
+        if hasattr(self, "about_widget"):
+            self.about_widget.set_i18n(self.i18n)
+            if self._host_window is not None and hasattr(self._host_window, "player"):
+                be = (
+                    getattr(
+                        self._host_window.player,
+                        "BACKEND_NAME",
+                        type(self._host_window.player).__name__.replace("Player", ""),
+                    )
+                    if self._host_window.player
+                    else "Auto"
+                )
+                self.about_widget.set_backend_name(be)
 
     @staticmethod
     def _make_card(section_title: str):
