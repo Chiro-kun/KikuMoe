@@ -347,6 +347,7 @@ class ListenMoePlayer(QWidget):
         self._sleep_remaining_sec = 0
         self._sleep_fadeout_sec = 15
         self._sleep_saved_volume: Optional[int] = None
+        self._from_tray_quit: bool = False
         self._clock_sync_offset = 0.0  # Difference between server time and local CPU clock
         self._retry_count = 0
         self._max_retries = 10
@@ -992,6 +993,7 @@ class ListenMoePlayer(QWidget):
                 on_stop_stream=self.stop_stream,
                 on_force_stop=self.force_stop_all,
                 on_toggle_mute=self.toggle_mute_shortcut,
+                on_quit=self._on_tray_quit,
             )
             self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon())
             self.tray_icon_refresh.connect(self.update_tray_icon)
@@ -1081,9 +1083,10 @@ class ListenMoePlayer(QWidget):
 
         dont_ask = self._get_bool(KEY_DONT_ASK_ON_CLOSE, False)
         close_to_tray = self._get_bool(KEY_CLOSE_TO_TRAY, False)
+        from_tray = getattr(self, "_from_tray_quit", False)
 
         if dont_ask:
-            if close_to_tray:
+            if close_to_tray and not from_tray:
                 self.hide()
                 event.ignore()
             else:
@@ -1092,7 +1095,8 @@ class ListenMoePlayer(QWidget):
             return
 
         try:
-            msg = QMessageBox(self)
+            parent_widget = self if self.isVisible() else None
+            msg = QMessageBox(parent_widget)
             msg.setWindowTitle(self.i18n.t("close_dialog_title"))
             msg.setText(self.i18n.t("close_dialog_text"))
             msg.setIcon(QMessageBox.Icon.Question)
@@ -1112,6 +1116,12 @@ class ListenMoePlayer(QWidget):
             self._make_frameless_msg(msg)
             try:
                 apply_windows_titlebar_dark_mode(msg, True)
+            except Exception:
+                pass
+            try:
+                msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                msg.raise_()
+                msg.activateWindow()
             except Exception:
                 pass
 
@@ -1142,6 +1152,12 @@ class ListenMoePlayer(QWidget):
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""
         try:
+            if hasattr(self, "tray_mgr") and self.tray_mgr:
+                try:
+                    if hasattr(self.tray_mgr, "_tray") and self.tray_mgr._tray:
+                        self.tray_mgr._tray.hide()
+                except Exception:
+                    pass
             if hasattr(self, "dev_console") and self.dev_console:
                 self.dev_console.deactivate_logging()
                 self.dev_console.close()
@@ -2938,6 +2954,7 @@ class ListenMoePlayer(QWidget):
                         on_toggle_play_pause=self._tray_toggle_play_pause,
                         on_stop_stream=self.stop_stream,
                         on_toggle_mute=self.toggle_mute_shortcut,
+                        on_quit=self._on_tray_quit,
                     )
                 except Exception:
                     return
@@ -2976,6 +2993,14 @@ class ListenMoePlayer(QWidget):
             self._apply_tray_stream_setting_change(KEY_CHANNEL, channel, ws_channel=channel)
         except Exception:
             pass
+
+    def _on_tray_quit(self) -> None:
+        """Triggered when the user selects 'Quit' from the tray menu."""
+        try:
+            self._from_tray_quit = True
+            self.close()
+        finally:
+            self._from_tray_quit = False
 
     def _tray_change_format(self, fmt: str) -> None:
         try:
@@ -3385,7 +3410,8 @@ class ListenMoePlayer(QWidget):
                     vol = 0
                 if vol <= 0:
                     try:
-                        msg = QMessageBox(self)
+                        parent_widget = self if self.isVisible() else None
+            msg = QMessageBox(parent_widget)
                         msg.setWindowTitle(self.i18n.t("volume_zero_title"))
                         msg.setText(self.i18n.t("volume_zero_text"))
                         restore_btn = msg.addButton(

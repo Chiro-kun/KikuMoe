@@ -117,3 +117,17 @@ def test_tray_manager_sync_stream_settings_from_settings(qapp):
     assert tray_mgr._format_actions["MP3"].isChecked() is True
     assert tray_mgr._format_actions["Vorbis"].isChecked() is False
     assert tray_mgr._format_actions["Opus"].isChecked() is False
+
+
+def test_tray_manager_on_quit_triggered(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    quit_callback = MagicMock()
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n, on_quit=quit_callback)
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._act_quit is not None
+    tray_mgr._act_quit.trigger()
+    assert quit_callback.call_count == 1
