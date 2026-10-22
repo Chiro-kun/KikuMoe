@@ -2,7 +2,7 @@ from typing import Dict
 
 I18N: Dict[str, Dict[str, str]] = {
     "it": {
-        "app_title": "LISTEN.moe Player",
+        "app_title": "KikuMoe",
         "header": "LISTEN.moe - {channel} - {format}",
         "channel_label": "Canale:",
         "format_label": "Formato:",
@@ -153,7 +153,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "settings_tab_info": "Info",
         # About & Info
         "about_title": "Informazioni su KikuMoe",
-        "about_tagline": "Player desktop moderno per stazioni radio anime & musica giapponese",
+        "about_tagline": "Player desktop moderno per web radio, musica e ascolto locale",
         "about_authors_section": "AUTORI & SVILUPPO",
         "about_authors_names": "Chirokun & alsogamer",
         "about_credits_stream": "Streaming radio powered by LISTEN.moe",
@@ -174,7 +174,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "tray_about": "Informazioni su KikuMoe...",
     },
     "en": {
-        "app_title": "LISTEN.moe Player",
+        "app_title": "KikuMoe",
         "header": "LISTEN.moe - {channel} - {format}",
         "channel_label": "Channel:",
         "format_label": "Format:",
@@ -321,7 +321,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "settings_tab_info": "About",
         # About & Info
         "about_title": "About KikuMoe",
-        "about_tagline": "Modern desktop radio player for anime & Japanese music",
+        "about_tagline": "Modern desktop player for web radio, music & local playback",
         "about_authors_section": "AUTHORS & DEVELOPMENT",
         "about_authors_names": "Chirokun & alsogamer",
         "about_credits_stream": "Radio streaming powered by LISTEN.moe",
