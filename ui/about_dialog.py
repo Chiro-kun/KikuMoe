@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -54,7 +53,7 @@ def get_os_info() -> str:
 class AboutWidget(QWidget):
     """
     Modular widget displaying KikuMoe identity, author credits,
-    official repository links, and system diagnostics.
+    official repository links, and system diagnostics inside Cyber-Moe glass cards.
     Can be embedded inside SettingsDialog or hosted in AboutDialog.
     """
 
@@ -65,6 +64,7 @@ class AboutWidget(QWidget):
         backend_name: Optional[str] = None,
     ):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.i18n = i18n or I18n("it")
         self._backend_name = backend_name or "Auto"
         self._init_ui()
@@ -81,31 +81,20 @@ class AboutWidget(QWidget):
 
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 2, 0, 2)
+        main_layout.setSpacing(8)
 
-        # Smooth scroll area for flexible adaptation across compact window heights
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background: transparent; border: none;")
-
-        container = QWidget()
-        container.setStyleSheet("background: transparent;")
-        c_layout = QVBoxLayout(container)
-        c_layout.setContentsMargins(4, 4, 4, 8)
-        c_layout.setSpacing(8)
+        self._apply_widget_stylesheet()
 
         # ================= 1. Header Card (Brand & Identity) =================
         card_header, header_lay = self._make_card()
         header_row = QHBoxLayout()
-        header_row.setContentsMargins(2, 2, 2, 2)
+        header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(12)
 
         # High-res App Logo
         self._logo_lbl = QLabel()
-        self._logo_lbl.setFixedSize(52, 52)
+        self._logo_lbl.setFixedSize(46, 46)
         self._logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._load_app_logo()
         header_row.addWidget(self._logo_lbl)
@@ -121,7 +110,7 @@ class AboutWidget(QWidget):
 
         self._lbl_app_name = QLabel(APP_NAME)
         self._lbl_app_name.setStyleSheet(
-            "font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: 0.8px;"
+            "font-size: 15px; font-weight: 800; color: #ffffff; letter-spacing: 0.8px;"
             " background: transparent; border: none;"
         )
         title_row.addWidget(self._lbl_app_name)
@@ -130,7 +119,7 @@ class AboutWidget(QWidget):
         self._lbl_version = QLabel(f"v{APP_VERSION}")
         self._lbl_version.setStyleSheet(
             f"background-color: {PALETTE['accent']}; color: #ffffff; font-size: 10px;"
-            " font-weight: 800; border-radius: 9px; padding: 2px 8px; letter-spacing: 0.5px;"
+            " font-weight: 800; border-radius: 8px; padding: 1px 7px; letter-spacing: 0.5px;"
         )
         title_row.addWidget(self._lbl_version)
         title_row.addStretch(1)
@@ -146,7 +135,7 @@ class AboutWidget(QWidget):
 
         header_row.addLayout(v_title_lay, 1)
         header_lay.addLayout(header_row)
-        c_layout.addWidget(card_header)
+        main_layout.addWidget(card_header)
 
         # ================= 2. Authors & Credits Card =================
         card_credits, credits_lay = self._make_card(self.i18n.t("about_authors_section"))
@@ -181,7 +170,7 @@ class AboutWidget(QWidget):
             " font-style: italic; background: transparent; border: none; padding-top: 2px;"
         )
         credits_lay.addWidget(self._lbl_credits_stream)
-        c_layout.addWidget(card_credits)
+        main_layout.addWidget(card_credits)
 
         # ================= 3. Repositories & Links Card =================
         card_links, links_lay = self._make_card(self.i18n.t("about_links_section"))
@@ -194,6 +183,7 @@ class AboutWidget(QWidget):
         self.btn_forgejo = QPushButton(f"{self.i18n.t('about_link_forgejo')} ↗")
         self.btn_forgejo.setObjectName("secondaryGlassBtn")
         self.btn_forgejo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_forgejo.setFixedHeight(28)
         self.btn_forgejo.setToolTip(URL_FORGEJO)
         self.btn_forgejo.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_FORGEJO)))
         btns_row.addWidget(self.btn_forgejo)
@@ -201,6 +191,7 @@ class AboutWidget(QWidget):
         self.btn_github = QPushButton(f"{self.i18n.t('about_link_github')} ↗")
         self.btn_github.setObjectName("secondaryGlassBtn")
         self.btn_github.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_github.setFixedHeight(28)
         self.btn_github.setToolTip(URL_GITHUB)
         self.btn_github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_GITHUB)))
         btns_row.addWidget(self.btn_github)
@@ -208,12 +199,13 @@ class AboutWidget(QWidget):
         self.btn_listenmoe = QPushButton(f"{self.i18n.t('about_link_listenmoe')} ↗")
         self.btn_listenmoe.setObjectName("secondaryGlassBtn")
         self.btn_listenmoe.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_listenmoe.setFixedHeight(28)
         self.btn_listenmoe.setToolTip(URL_LISTENMOE)
         self.btn_listenmoe.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(URL_LISTENMOE)))
         btns_row.addWidget(self.btn_listenmoe)
 
         links_lay.addLayout(btns_row)
-        c_layout.addWidget(card_links)
+        main_layout.addWidget(card_links)
 
         # ================= 4. System Diagnostics Card =================
         card_sys, sys_lay = self._make_card(self.i18n.t("about_sys_section"))
@@ -292,11 +284,44 @@ class AboutWidget(QWidget):
         copy_row.addWidget(self.btn_copy)
         sys_lay.addLayout(copy_row)
 
-        c_layout.addWidget(card_sys)
-        c_layout.addStretch(1)
+        main_layout.addWidget(card_sys)
+        main_layout.addStretch(1)
 
-        scroll.setWidget(container)
-        main_layout.addWidget(scroll)
+    def _apply_widget_stylesheet(self) -> None:
+        self.setStyleSheet(f"""
+        QFrame#settingsCard {{
+            background-color: #151826;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-top: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 13px;
+        }}
+        QLabel#settingsSectionHeader {{
+            color: {PALETTE["accent_hover"]};
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.1px;
+            background: transparent;
+            border: none;
+            padding-bottom: 2px;
+        }}
+        QPushButton#secondaryGlassBtn {{
+            background-color: rgba(255, 255, 255, 0.07);
+            color: #e4e8f6;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 8px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 700;
+        }}
+        QPushButton#secondaryGlassBtn:hover {{
+            background-color: rgba(236, 24, 108, 0.22);
+            border-color: {PALETTE["accent"]};
+            color: #ffffff;
+        }}
+        QPushButton#secondaryGlassBtn:pressed {{
+            background-color: rgba(236, 24, 108, 0.35);
+        }}
+        """)
 
     def _copy_system_info(self) -> None:
         """Copies formatted diagnostics string to the system clipboard with feedback."""
@@ -347,8 +372,8 @@ class AboutWidget(QWidget):
             pix = QPixmap(logo_path)
             if not pix.isNull():
                 scaled = pix.scaled(
-                    48,
-                    48,
+                    44,
+                    44,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -362,6 +387,7 @@ class AboutWidget(QWidget):
     def _make_card(section_title: Optional[str] = None):
         card = QFrame()
         card.setObjectName("settingsCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QVBoxLayout(card)
         lay.setContentsMargins(13, 10, 13, 11)
         lay.setSpacing(7)
@@ -461,9 +487,9 @@ class AboutDialog(QDialog):
             background-color: rgba(255, 255, 255, 0.07);
             color: #e4e8f6;
             border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 9px;
-            padding: 4px 11px;
-            font-size: 12px;
+            border-radius: 8px;
+            padding: 3px 8px;
+            font-size: 11px;
             font-weight: 700;
         }}
         QPushButton#secondaryGlassBtn:hover {{

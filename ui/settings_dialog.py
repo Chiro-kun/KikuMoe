@@ -705,10 +705,14 @@ class SettingsCategoryBar(QWidget):
         self._labels = labels
         self.update()
 
-    def set_selected(self, idx: int) -> None:
-        if 0 <= idx < len(self._labels) and idx != self._selected:
+    def set_selected(self, idx: int, animated: bool = True) -> None:
+        if 0 <= idx < len(self._labels):
             self._selected = idx
-            self._slide_timer.start()
+            if not animated:
+                self._anim_pos = float(idx)
+                self._slide_timer.stop()
+            else:
+                self._slide_timer.start()
             self.update()
 
     def mouseMoveEvent(self, e) -> None:
@@ -1192,11 +1196,14 @@ class SettingsDialog(QDialog):
             self._devices_populated = True
             self._populate_audio_devices()
 
-    def set_tab(self, idx: int) -> None:
+    def set_tab(self, idx: int, animated: bool = False) -> None:
         """Programmatically switch to tab index (0=General, 1=Audio, 2=Advanced, 3=Info)."""
         if hasattr(self, "category_bar") and hasattr(self, "pages"):
-            self.category_bar.set_selected(idx)
-            self._on_tab_changed(idx)
+            self.category_bar.set_selected(idx, animated=animated)
+            if not animated:
+                self.pages.setCurrentIndex(idx)
+            else:
+                self._on_tab_changed(idx)
 
     def _on_tab_changed(self, idx: int) -> None:
         for cmb in self.findChildren(GlassComboBox):
