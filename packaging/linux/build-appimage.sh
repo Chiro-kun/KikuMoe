@@ -77,6 +77,29 @@ fi
 cat > "$APPDIR/AppRun" << 'APPRUN_EOF'
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
+
+# Ensure host CA certificates are discovered by OpenSSL/Python across Linux distros
+if [ -z "$SSL_CERT_FILE" ]; then
+    for cert in \
+        /etc/ssl/certs/ca-certificates.crt \
+        /etc/pki/tls/certs/ca-bundle.crt \
+        /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+        /etc/ssl/ca-bundle.pem \
+        /etc/ssl/cert.pem; do
+        if [ -f "$cert" ]; then
+            export SSL_CERT_FILE="$cert"
+            break
+        fi
+    done
+fi
+if [ -z "$SSL_CERT_DIR" ]; then
+    for cdir in /etc/ssl/certs /etc/pki/tls/certs; do
+        if [ -d "$cdir" ]; then
+            export SSL_CERT_DIR="$cdir"
+            break
+        fi
+    done
+fi
 exec "$HERE/usr/bin/KikuMoe" "$@"
 APPRUN_EOF
 chmod +x "$APPDIR/AppRun"

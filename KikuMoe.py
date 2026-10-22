@@ -7,7 +7,11 @@ from datetime import datetime
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
+from core.ssl_compat import setup_ssl_environment
 from ui.main_window import ListenMoePlayer
+
+# Configure process-wide SSL/TLS CA certificate resolution as early as possible
+setup_ssl_environment()
 
 _IS_WIN32 = sys.platform == "win32"
 _MAX_CRASH_LOG_SIZE = 512 * 1024  # 512 KB
