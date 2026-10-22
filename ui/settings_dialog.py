@@ -387,6 +387,31 @@ class GlassComboBox(QComboBox):
         font.setWeight(QFont.Weight.Medium)
         self.setFont(font)
         list_view.setFont(font)
+        list_view.setStyleSheet(
+            f"""
+            QListView {{
+                background-color: #151826;
+                border: 1px solid rgba(236, 24, 108, 0.55);
+                border-radius: 8px;
+                color: #f4f6fd;
+                font-size: 12px;
+                font-weight: 500;
+                selection-background-color: {PALETTE["accent"]};
+                selection-color: #ffffff;
+                padding: 4px;
+                outline: none;
+            }}
+            QListView::item {{
+                min-height: 28px;
+                padding: 3px 10px;
+                border-radius: 5px;
+            }}
+            QListView::item:hover, QListView::item:selected {{
+                background-color: {PALETTE["accent"]};
+                color: #ffffff;
+            }}
+            """
+        )
 
         self.setView(list_view)
 
@@ -398,7 +423,9 @@ class GlassComboBox(QComboBox):
                 | Qt.WindowType.FramelessWindowHint
                 | Qt.WindowType.NoDropShadowWindowHint
             )
-            popup.setStyleSheet("background: transparent; border: none;")
+            popup.setStyleSheet(
+                "QComboBoxPrivateContainer { background-color: transparent; border: none; }"
+            )
 
     def reset_visual_state(self) -> None:
         """Clear any popup/hover/focus state so the dropdown never stays highlighted."""
@@ -422,7 +449,9 @@ class GlassComboBox(QComboBox):
                     | Qt.WindowType.FramelessWindowHint
                     | Qt.WindowType.NoDropShadowWindowHint
                 )
-                popup.setStyleSheet("background: transparent; border: none;")
+                popup.setStyleSheet(
+                    "QComboBoxPrivateContainer { background-color: transparent; border: none; }"
+                )
         super().showPopup()
 
     def hidePopup(self) -> None:

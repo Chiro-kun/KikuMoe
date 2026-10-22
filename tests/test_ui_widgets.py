@@ -248,6 +248,8 @@ def test_glass_combo_box_rendering_and_layout(qapp):
         pix = popup.grab()
         img = pix.toImage()
         assert img.pixelColor(0, 0).alpha() == 0
+        # Card interior must remain solid/opaque (never transparent)
+        assert img.pixelColor(img.width() // 2, img.height() // 2).alpha() == 255
         combo.hidePopup()
 
     # 3. Test long dropdown layout
