@@ -2344,6 +2344,8 @@ class ListenMoePlayer(QWidget):
                                     notification_body=self.t("tray_audio_restarted")
                                 )
                             self._apply_prev_audio_idx = new_audio_idx
+                        self.update_header_label()
+                        self.update_tray_texts()
                     except Exception:
                         pass
 
@@ -2830,6 +2832,10 @@ class ListenMoePlayer(QWidget):
             if not hasattr(self, "tray_mgr") or self.tray_mgr is None:
                 return
             self.tray_mgr.update_tooltip(self._get_tray_tooltip())
+            self.tray_mgr.sync_stream_settings(
+                str(self.settings.value(KEY_CHANNEL, "J-POP")),
+                str(self.settings.value(KEY_FORMAT, "Vorbis")),
+            )
         except Exception:
             pass
 

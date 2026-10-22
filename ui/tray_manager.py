@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QFont, QIcon
@@ -59,6 +59,10 @@ class TrayManager(QObject):
         self._act_quit: Optional[QAction] = None
         self._act_ch: Optional[QAction] = None
         self._act_fmt: Optional[QAction] = None
+        self._channel_actions: Dict[str, QAction] = {}
+        self._format_actions: Dict[str, QAction] = {}
+        self._grp_channel: Optional[QActionGroup] = None
+        self._grp_format: Optional[QActionGroup] = None
         # Intestazioni e separatori di sezione
         self._act_hdr_playback: Optional[QAction] = None
         self._sep_playback_end: Optional[QAction] = None
@@ -281,6 +285,8 @@ class TrayManager(QObject):
                     sub_channel = QMenu(txt_channel, self._parent)
                     grp_channel = QActionGroup(self._parent)
                     grp_channel.setExclusive(True)
+                    self._grp_channel = grp_channel
+                    self._channel_actions.clear()
                     try:
                         current_channel = self._parent.settings.value(KEY_CHANNEL, "J-POP")
                     except Exception:
@@ -288,7 +294,7 @@ class TrayManager(QObject):
                     for ch in ["J-POP", "K-POP"]:
                         act = QAction(ch, self._parent)
                         act.setCheckable(True)
-                        act.setChecked(str(current_channel) == ch)
+                        act.setChecked(str(current_channel).strip().upper() == ch.strip().upper())
                         if self._on_change_channel:
                             act.triggered.connect(
                                 lambda checked, v=ch: (
@@ -299,12 +305,17 @@ class TrayManager(QObject):
                             )
                         grp_channel.addAction(act)
                         sub_channel.addAction(act)
+                        self._channel_actions[ch] = act
                     act_ch = menu.addMenu(sub_channel)
                     self._act_ch = act_ch
                     if "channel" in self._icons and self._act_ch is not None:
                         self._act_ch.setIcon(self._icons["channel"])
+                    try:
+                        sub_channel.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
 
-                    # Formato (Vorbis/MP3)
+                    # Formato (Vorbis/Opus/MP3)
                     try:
                         txt_format = (
                             self._i18n.t("tray_format")
@@ -316,14 +327,16 @@ class TrayManager(QObject):
                     sub_format = QMenu(txt_format, self._parent)
                     grp_format = QActionGroup(self._parent)
                     grp_format.setExclusive(True)
+                    self._grp_format = grp_format
+                    self._format_actions.clear()
                     try:
                         current_format = self._parent.settings.value(KEY_FORMAT, "Vorbis")
                     except Exception:
                         current_format = "Vorbis"
-                    for fmt in ["Vorbis", "MP3"]:
+                    for fmt in ["Vorbis", "Opus", "MP3"]:
                         actf = QAction(fmt, self._parent)
                         actf.setCheckable(True)
-                        actf.setChecked(str(current_format) == fmt)
+                        actf.setChecked(str(current_format).strip().upper() == fmt.strip().upper())
                         if self._on_change_format:
                             actf.triggered.connect(
                                 lambda checked, v=fmt: (
@@ -332,10 +345,15 @@ class TrayManager(QObject):
                             )
                         grp_format.addAction(actf)
                         sub_format.addAction(actf)
+                        self._format_actions[fmt] = actf
                     act_fmt = menu.addMenu(sub_format)
                     self._act_fmt = act_fmt
                     if "codec" in self._icons and self._act_fmt is not None:
                         self._act_fmt.setIcon(self._icons["codec"])
+                    try:
+                        sub_format.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
 
                     # Esci
                     try:
@@ -353,8 +371,13 @@ class TrayManager(QObject):
                     self._tray.setContextMenu(menu)
                     # Sposta il menu a sinistra per evitare che i sottomenu escano dallo schermo
                     menu.aboutToShow.connect(self._nudge_menu_left)
+                    try:
+                        menu.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
                     if tooltip:
                         self.update_tooltip(tooltip)
+                    self.sync_stream_settings()
                     self._tray.setVisible(True)
                 else:
                     # già creato: assicurati sia visibile e aggiornato
@@ -363,12 +386,47 @@ class TrayManager(QObject):
                         self.update_icon(window_icon)
                     if tooltip is not None:
                         self.update_tooltip(tooltip)
+                    self.sync_stream_settings()
             else:
                 if self._tray is not None:
                     try:
                         self._tray.setVisible(False)
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+    def sync_stream_settings(
+        self, channel: Optional[str] = None, fmt: Optional[str] = None
+    ) -> None:
+        """Synchronizes the checked state of channel and format actions in the tray menu."""
+        try:
+            if channel is None:
+                try:
+                    channel = str(self._parent.settings.value(KEY_CHANNEL, "J-POP"))
+                except Exception:
+                    channel = "J-POP"
+            if fmt is None:
+                try:
+                    fmt = str(self._parent.settings.value(KEY_FORMAT, "Vorbis"))
+                except Exception:
+                    fmt = "Vorbis"
+
+            target_channel = str(channel).strip().upper()
+            for ch_key, act in self._channel_actions.items():
+                should_check = (ch_key.strip().upper() == target_channel)
+                if act.isChecked() != should_check:
+                    act.blockSignals(True)
+                    act.setChecked(should_check)
+                    act.blockSignals(False)
+
+            target_fmt = str(fmt).strip().upper()
+            for fmt_key, actf in self._format_actions.items():
+                should_check = (fmt_key.strip().upper() == target_fmt)
+                if actf.isChecked() != should_check:
+                    actf.blockSignals(True)
+                    actf.setChecked(should_check)
+                    actf.blockSignals(False)
         except Exception:
             pass
 
