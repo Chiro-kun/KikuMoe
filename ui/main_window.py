@@ -3433,7 +3433,7 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             try:
-                self.log.info(f"[UI] volume_changed -> {int(value)}")
+                self.log.debug(f"[UI] volume_changed -> {int(value)}")
             except Exception:
                 pass
         except Exception:
