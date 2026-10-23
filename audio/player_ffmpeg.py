@@ -527,6 +527,162 @@ class PlayerFFmpeg:
         except Exception:
             pass
 
+    def _open_pyaudio_stream(self, device_idx: int | None) -> tuple[Any, int]:
+        """Tenta di aprire uno stream PyAudio negoziando una frequenza di campionamento
+        supportata (48000, 44100 o il default del dispositivo).
+        Restituisce una tupla (audio_stream, sample_rate).
+        """
+        pa = self._pyaudio_instance
+        if pa is None:
+            raise RuntimeError("PyAudio instance not initialized")
+
+        pa_format = getattr(pyaudio, "paInt16", None)
+        # 2048 frames (circa 43-46ms) per eliminare crackle, micro-interruzioni e buffer underrun
+        frames_per_buffer = 2048
+
+        def _get_candidate_rates(dev_index: int | None) -> list[int]:
+            rates: list[int] = []
+            if dev_index is not None:
+                try:
+                    info = pa.get_device_info_by_index(dev_index)
+                    if isinstance(info, dict):
+                        def_rate = int(round(float(info.get("defaultSampleRate", 0))))
+                        if def_rate > 0:
+                            rates.append(def_rate)
+                except Exception:
+                    pass
+            else:
+                try:
+                    info = pa.get_default_output_device_info()
+                    if isinstance(info, dict):
+                        def_rate = int(round(float(info.get("defaultSampleRate", 0))))
+                        if def_rate > 0:
+                            rates.append(def_rate)
+                except Exception:
+                    pass
+            for r in (48000, 44100):
+                if r not in rates:
+                    rates.append(r)
+            return rates
+
+        last_exc: Exception | None = None
+
+        # 1. Tentativo con device_idx (se configurato)
+        if device_idx is not None:
+            candidate_rates = _get_candidate_rates(device_idx)
+            self.log.debug(
+                "[DEBUG] _open_pyaudio_stream: trying device_idx=%s with rates: %s",
+                device_idx,
+                candidate_rates,
+            )
+            for rate in candidate_rates:
+                try:
+                    stream = pa.open(
+                        format=pa_format,
+                        channels=2,
+                        rate=rate,
+                        output=True,
+                        output_device_index=device_idx,
+                        frames_per_buffer=frames_per_buffer,
+                    )
+                    self.log.debug(
+                        "[DEBUG] _open_pyaudio_stream: opened device_idx=%s with rate=%d",
+                        device_idx,
+                        rate,
+                    )
+                    return stream, rate
+                except Exception as e:
+                    last_exc = e
+                    self.log.debug(
+                        "[DEBUG] _open_pyaudio_stream: device_idx=%s failed with rate=%d: %s",
+                        device_idx,
+                        rate,
+                        e,
+                    )
+
+            self.log.debug(
+                "[DEBUG] _open_pyaudio_stream: all rates failed for device %s, retry default",
+                device_idx,
+            )
+
+        # 2. Tentativo con dispositivo predefinito di sistema (output_device_index=None)
+        candidate_rates = _get_candidate_rates(None)
+        self.log.debug(
+            "[DEBUG] _open_pyaudio_stream: trying system default device with rates: %s",
+            candidate_rates,
+        )
+        for rate in candidate_rates:
+            try:
+                stream = pa.open(
+                    format=pa_format,
+                    channels=2,
+                    rate=rate,
+                    output=True,
+                    frames_per_buffer=frames_per_buffer,
+                )
+                self.log.debug(
+                    "[DEBUG] _open_pyaudio_stream: opened system default device with rate=%d", rate
+                )
+                return stream, rate
+            except Exception as e:
+                last_exc = e
+                self.log.debug(
+                    "[DEBUG] _open_pyaudio_stream: default device failed with rate=%d: %s",
+                    rate,
+                    e,
+                )
+
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("Failed to open PyAudio stream with any candidate sample rate")
+
+    def _write_audio_chunk(self, data: bytes) -> None:
+        """Applica il controllo dinamico del volume e scrive il chunk PCM
+        nello stream PyAudio con gestione di underflow e pause."""
+        stream = self._audio_stream
+        if stream is None:
+            return
+
+        try:
+            stream_active = getattr(stream, "is_active", lambda: False)()
+        except Exception:
+            stream_active = False
+
+        if not stream_active or self._paused:
+            time.sleep(0.02)
+            return
+
+        n_bytes = len(data)
+        if n_bytes == 0:
+            return
+
+        if self._muted:
+            try:
+                stream.write(b"\x00" * n_bytes, exception_on_underflow=False)
+            except Exception:
+                pass
+            return
+
+        vol = self._volume
+        # Ottimizzazione: a volume massimo (o quasi), invia direttamente il chunk raw
+        if vol >= 0.999:
+            chunk_to_write = data
+        elif vol <= 0.001:
+            chunk_to_write = b"\x00" * n_bytes
+        else:
+            try:
+                n_samples = n_bytes // 2
+                samples = struct.unpack(f"<{n_samples}h", data)
+                vol_samples = [max(-32768, min(32767, int(s * vol))) for s in samples]
+                chunk_to_write = struct.pack(f"<{n_samples}h", *vol_samples)
+            except Exception:
+                chunk_to_write = data
+
+        try:
+            stream.write(chunk_to_write, exception_on_underflow=False)
+        except Exception as e:
+            self.log.debug("[DEBUG] _write_audio_chunk: error writing chunk: %s", e)
+
     def _stream_worker(self, url: str) -> None:
         self.log.debug("[DEBUG] _stream_worker: started for url: %s", url)
         try:
@@ -539,58 +695,19 @@ class PlayerFFmpeg:
                 self._emit("error", None)
                 return
 
-            # Open audio stream
+            # Open audio stream with robust sample rate negotiation
             self.log.debug("[DEBUG] _stream_worker: opening PyAudio stream")
-            if self._pyaudio_instance is not None and hasattr(self._pyaudio_instance, "open"):
-                pa_format = getattr(pyaudio, "paInt16", None)
+            if self._pyaudio_instance is not None:
                 try:
                     device_idx = self._get_output_device_index()
-                    if device_idx is None:
-                        self.log.debug("[DEBUG] _stream_worker: using system default output device")
-                    else:
-                        self.log.debug(
-                            "[DEBUG] _stream_worker: using output_device_index=%s", device_idx
-                        )
-                    open_kwargs = {
-                        "format": pa_format,
-                        "channels": 2,
-                        "rate": 44100,
-                        "output": True,
-                        "frames_per_buffer": 1024,
-                    }
-                    if device_idx is not None:
-                        open_kwargs["output_device_index"] = device_idx
-                    # Try open; if fails with a specific device, retry with default system device
-                    try:
-                        self._audio_stream = self._pyaudio_instance.open(**open_kwargs)
-                    except Exception as oe:
-                        if device_idx is not None:
-                            try:
-                                self.log.debug(
-                                    "[DEBUG] _stream_worker: failed to open with device "
-                                    "%s, retrying with system default: %s",
-                                    device_idx,
-                                    oe,
-                                )
-                            except Exception:
-                                pass
-                            try:
-                                open_kwargs.pop("output_device_index", None)
-                                self._audio_stream = self._pyaudio_instance.open(**open_kwargs)
-                            except Exception as oe2:
-                                self.log.debug(
-                                    "[DEBUG] _stream_worker: also failed to open default "
-                                    "device: %s",
-                                    oe2,
-                                )
-                                raise
-                        else:
-                            raise
-                    self.log.debug("[DEBUG] _stream_worker: PyAudio stream opened")
+                    self._audio_stream, stream_rate = self._open_pyaudio_stream(device_idx)
                     try:
                         if hasattr(self._audio_stream, "start_stream"):
                             self._audio_stream.start_stream()
-                            self.log.debug("[DEBUG] _stream_worker: PyAudio stream started")
+                            self.log.debug(
+                                "[DEBUG] _stream_worker: PyAudio stream started at rate=%d",
+                                stream_rate,
+                            )
                     except Exception as se:
                         self.log.debug(
                             "[DEBUG] _stream_worker: could not start PyAudio stream: %s", se
@@ -640,7 +757,7 @@ class PlayerFFmpeg:
                 except Exception:
                     pass
 
-                # FFmpeg command to decode stream and output raw audio (with robust HTTP options)
+                # FFmpeg command to decode stream and output raw audio at full 100% scale
                 is_mp3 = False
                 try:
                     uu = cur_url.lower()
@@ -694,29 +811,29 @@ class PlayerFFmpeg:
                 # Input URL
                 ffmpeg_cmd.extend(["-i", cur_url])
 
-                # Output format: raw PCM s16le to stdout
+                # Output format: raw PCM s16le to stdout matching negotiated stream_rate
                 ffmpeg_cmd.extend(
                     [
                         "-vn",
-                        "-fflags",
-                        "nobuffer",
+                        "-probesize",
+                        "32768",
+                        "-analyzeduration",
+                        "0",
                         "-f",
                         "s16le",
                         "-ar",
-                        "44100",
+                        str(stream_rate),
                         "-ac",
                         "2",
                         "-acodec",
                         "pcm_s16le",
-                        "-af",
-                        f"volume={self._volume:.2f}",
                         "-loglevel",
                         "error",
                         "-",
                     ]
                 )
 
-                # Launch ffmpeg process
+                # Launch ffmpeg process with OS pipe buffering (64KB)
                 with self._state_lock:
                     self._ffmpeg_process = None
                 try:
@@ -731,7 +848,7 @@ class PlayerFFmpeg:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         stdin=subprocess.DEVNULL,
-                        bufsize=0,
+                        bufsize=65536,
                         **kwargs,
                     )
                     self.log.debug(
@@ -741,14 +858,18 @@ class PlayerFFmpeg:
                 except Exception as e:
                     self.log.debug("[DEBUG] _stream_worker: failed to start ffmpeg: %s", e)
                     self._ffmpeg_process = None
-                    # Prova prossimo candidato
                     continue
 
                 # Loop di lettura dei dati
-                chunk_size = 4096
+                # Chunk size = 8192 bytes (2048 frames stereo 16-bit, circa 43ms a 48kHz)
+                chunk_size = 8192
                 empty_reads = 0
                 stall_timeout = 10.0
                 last_data_ts = time.time()
+                prebuffer: list[bytes] = []
+                # Bufferizza circa 0.25s di audio prima di avviare l'emissione (elimina crackle)
+                prebuffer_target_bytes = stream_rate * 4 // 4
+
                 # Watchdog di stallo: se non arrivano dati per troppo tempo, forza riavvio di ffmpeg
                 watchdog_stop = threading.Event()
                 forced_error_ref = {"v": False}
@@ -771,7 +892,6 @@ class PlayerFFmpeg:
                         except Exception:
                             delta = stall_timeout + 1
 
-                        # Throttled status log for debugging stalls (once per 5s)
                         now_int = int(time.time())
                         if now_int != _last_wd_log[0] and now_int % 5 == 0:
                             _last_wd_log[0] = now_int
@@ -811,8 +931,6 @@ class PlayerFFmpeg:
                 try:
                     watchdog_thread.start()
                 except Exception:
-                    # Se il watchdog non parte, prosegui comunque
-                    # (sarà lo stdout.read a segnalare problemi)
                     pass
 
                 while True:
@@ -830,7 +948,6 @@ class PlayerFFmpeg:
                         self.log.debug(
                             "[DEBUG] _stream_worker: ffmpeg process ended with code: %s", code
                         )
-                        # Try to read stderr if possible
                         err = b""
                         try:
                             if proc.stderr:
@@ -841,14 +958,11 @@ class PlayerFFmpeg:
                                     )
                         except Exception as e:
                             self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
-                        # Se il watchdog ha segnalato stallo, marca come errore forzato
                         try:
                             if "forced_error_ref" in locals() and forced_error_ref.get("v"):
                                 forced_error = True
                         except Exception:
                             pass
-                        # Se ffmpeg è terminato con codice != 0 o ha scritto su stderr,
-                        # considera errore
                         if not forced_error:
                             try:
                                 if code not in (0, None):
@@ -857,7 +971,6 @@ class PlayerFFmpeg:
                                     forced_error = True
                             except Exception:
                                 pass
-                        # Fine tentativo corrente: passa al prossimo URL
                         break
 
                     if proc.stdout is None:
@@ -876,38 +989,23 @@ class PlayerFFmpeg:
 
                     if not chunk:
                         empty_reads += 1
-                        # If ffmpeg is still running, wait a bit and retry
-                        # instead of breaking immediately
                         if proc.poll() is None:
                             if empty_reads % 20 == 0:
                                 self.log.debug(
-                                    "[DEBUG] _stream_worker: empty chunk (x%d), "
-                                    "waiting for data...",
+                                    "[DEBUG] _stream_worker: empty chunk (x%d), waiting...",
                                     empty_reads,
                                 )
                             time.sleep(0.05)
                             continue
                         else:
                             self.log.debug(
-                                "[DEBUG] _stream_worker: ffmpeg stdout EOF or empty chunk "
-                                "after process ended"
+                                "[DEBUG] _stream_worker: ffmpeg stdout EOF after process ended"
                             )
                             break
 
-                    # got data
+                    # Ricevuto chunk di dati validi
                     empty_reads = 0
                     last_data_ts = time.time()
-                    if not started_streaming:
-                        started_streaming = True
-                        try:
-                            self.log.debug(
-                                "[DEBUG] _stream_worker: first audio chunk received "
-                                "(len=%d), emitting playing",
-                                len(chunk),
-                            )
-                        except Exception:
-                            pass
-                        self._emit("playing", None)
 
                     n_bytes = (len(chunk) // 2) * 2
                     if n_bytes == 0:
@@ -915,70 +1013,25 @@ class PlayerFFmpeg:
                         continue
                     data: bytes = chunk[:n_bytes]  # type: ignore[assignment]
 
-                    # Avoid writing to PyAudio when paused/stream inactive to prevent
-                    # [Errno -9988] spam
-                    stream_active = False
-                    if self._audio_stream is not None:
-                        try:
-                            stream_active = getattr(
-                                self._audio_stream, "is_active", lambda: False
-                            )()
-                        except Exception:
-                            stream_active = False
+                    # Jitter buffer iniziale: accumula dati prima di iniziare la riproduzione
+                    if not started_streaming:
+                        prebuffer.append(data)
+                        if sum(len(c) for c in prebuffer) >= prebuffer_target_bytes:
+                            started_streaming = True
+                            self.log.debug(
+                                "[DEBUG] _stream_worker: pre-buffer filled (%d B), playing",
+                                sum(len(c) for c in prebuffer),
+                            )
+                            self._emit("playing", None)
+                            for pre_chunk in prebuffer:
+                                if self._stop_event.is_set():
+                                    break
+                                self._write_audio_chunk(pre_chunk)
+                            prebuffer.clear()
+                        continue
 
-                    if not self._muted:
-                        try:
-                            # Optimize: skip scaling if volume is 100%
-                            if self._volume >= 0.99:
-                                volume_chunk = data
-                            else:
-                                samples = struct.unpack(f"<{n_bytes // 2}h", data)
-                                volume_samples = [int(sample * self._volume) for sample in samples]
-                                volume_samples = [
-                                    max(-32768, min(32767, s)) for s in volume_samples
-                                ]
-                                volume_chunk = struct.pack(
-                                    f"<{len(volume_samples)}h", *volume_samples
-                                )
-
-                            if self._audio_stream is not None and stream_active:
-                                self._audio_stream.write(volume_chunk)
-                            else:
-                                # Paused or no audio stream: skip writing to avoid errors
-                                time.sleep(0.02)
-                                continue
-                        except Exception as e:
-                            # Log errors only if stream is active; otherwise likely paused/closed
-                            if stream_active:
-                                self.log.debug(
-                                    "[DEBUG] _stream_worker: error in audio processing: %s", e
-                                )
-                                try:
-                                    if self._audio_stream is not None and stream_active:
-                                        self._audio_stream.write(b"\x00" * n_bytes)
-                                except Exception as e2:
-                                    self.log.debug(
-                                        "[DEBUG] _stream_worker: error writing silence: %s", e2
-                                    )
-                            else:
-                                time.sleep(0.02)
-                                continue
-                    else:
-                        try:
-                            if self._audio_stream is not None and stream_active:
-                                self._audio_stream.write(b"\x00" * n_bytes)
-                            else:
-                                # Paused or no audio stream: skip writing to avoid errors
-                                time.sleep(0.02)
-                                continue
-                        except Exception as e:
-                            if stream_active:
-                                self.log.debug(
-                                    "[DEBUG] _stream_worker: error writing silence (muted): %s", e
-                                )
-                            else:
-                                # Suppress spam when paused/closed
-                                pass
+                    # Riproduzione standard continua con gestione volume e buffer safety
+                    self._write_audio_chunk(data)
 
                 # prova a spegnere il watchdog
                 try:
@@ -1034,8 +1087,7 @@ class PlayerFFmpeg:
                     self._emit("error", None)
                 elif not started_streaming:
                     self.log.debug(
-                        "[DEBUG] _stream_worker: connection failed before receiving "
-                        "data (all attempts)"
+                        "[DEBUG] _stream_worker: connection failed before data (all attempts)"
                     )
                     self._emit("error", None)
                 else:
@@ -1072,12 +1124,10 @@ class PlayerFFmpeg:
                     self.log.debug("[DEBUG] _stream_worker: error in audio stream cleanup: %s", e)
                 self._audio_stream = None
             with self._state_lock:
-                # Clear thread reference if we're the worker thread
                 try:
                     if self._stream_thread is threading.current_thread():
                         self._stream_thread = None
                 except Exception:
-                    # Fallback: ensure at least process ref is dropped
                     pass
                 self._ffmpeg_process = None
             self.log.debug("[DEBUG] _stream_worker: exited")

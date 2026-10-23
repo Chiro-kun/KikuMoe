@@ -126,3 +126,36 @@ def test_player_ffmpeg_bin_discovery(monkeypatch):
         monkeypatch.setenv("FFMPEG_PATH", str(fake_ffmpeg) + "_nonexistent")
         res = _find_ffmpeg_bin()
         assert res is not None
+
+
+def test_player_ffmpeg_sample_rate_negotiation(monkeypatch):
+    """Verify _open_pyaudio_stream negotiates fallback sample rates when preferred rate fails."""
+    from audio.player_ffmpeg import PlayerFFmpeg
+
+    player = PlayerFFmpeg()
+
+    class FakePyAudio:
+        def __init__(self):
+            self.opened_rates = []
+
+        def get_device_info_by_index(self, idx):
+            return {"defaultSampleRate": 48000.0}
+
+        def get_default_output_device_info(self):
+            return {"defaultSampleRate": 44100.0}
+
+        def open(self, **kwargs):
+            rate = kwargs.get("rate")
+            self.opened_rates.append(rate)
+            # Simulate 48000 failing on device, but 44100 succeeding
+            if kwargs.get("output_device_index") == 99 and rate == 48000:
+                raise OSError(-9997, "Invalid sample rate")
+            return "fake_stream"
+
+    fake_pa = FakePyAudio()
+    player._pyaudio_instance = fake_pa
+
+    stream, rate = player._open_pyaudio_stream(99)
+    assert stream == "fake_stream"
+    assert rate == 44100
+    assert 48000 in fake_pa.opened_rates
