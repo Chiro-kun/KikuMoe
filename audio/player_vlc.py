@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import sys
 from typing import Callable
@@ -119,7 +120,7 @@ class PlayerVLC:
                 self.log.debug("[DEBUG] _init_vlc: events attached")
             except Exception as e:
                 self.log.debug("[DEBUG] _init_vlc: event attach failed: %s", e)
-            self.player.audio_set_volume(self._volume)
+            self.player.audio_set_volume(self._to_backend_volume(self._volume))
             self.player.audio_set_mute(self._muted)
             self._ready = True
             # Apply explicit device selection (Linux/pulse only, best-effort)
@@ -299,13 +300,28 @@ class PlayerVLC:
         except Exception:
             self._emit("error", None)
 
+    @staticmethod
+    def _to_backend_volume(vol: int) -> int:
+        """Map user slider percentage (0..100) to libvlc integer volume.
+
+        VLC's audio output (e.g. WASAPI on Windows) internally applies a cubic
+        tapering curve (vol = vol^3). A raw linear percentage makes volume < 20%
+        almost inaudible (-42 dB). Applying the sqrt mapping ensures an effective
+        power curve (gain = (vol/100)^1.5), providing a smooth, fully audible range.
+        """
+        if vol <= 0:
+            return 0
+        if vol >= 100:
+            return 100
+        return int(round(100.0 * math.sqrt(vol / 100.0)))
+
     def set_volume(self, vol: int) -> None:
         self._volume = max(0, min(100, int(vol)))
         if not self.is_ready():
             return
         try:
             assert self.player is not None
-            self.player.audio_set_volume(self._volume)
+            self.player.audio_set_volume(self._to_backend_volume(self._volume))
         except Exception:
             self._emit("error", None)
 

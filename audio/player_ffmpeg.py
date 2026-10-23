@@ -25,6 +25,7 @@ class PlayerFFmpeg:
     def __init__(self, on_event: Callable[[str, int | None], None] | None = None) -> None:
         self._on_event = on_event
         self._muted: bool = False
+        self._user_volume: int = 100
         self._volume: float = 1.0
         self._ready: bool = False
         self._playing: bool = False
@@ -380,13 +381,19 @@ class PlayerFFmpeg:
             self._emit("error", None)
 
     def set_volume(self, vol: int) -> None:
-        self._volume = max(0.0, min(1.0, float(vol) / 100.0))
+        self._user_volume = max(0, min(100, int(vol)))
+        if self._user_volume <= 0:
+            self._volume = 0.0
+        elif self._user_volume >= 100:
+            self._volume = 1.0
+        else:
+            self._volume = float((self._user_volume / 100.0) ** 1.5)
 
     def set_mute(self, mute: bool) -> None:
         self._muted = bool(mute)
 
     def get_volume(self) -> int:
-        return int(self._volume * 100)
+        return self._user_volume
 
     def get_mute(self) -> bool:
         return self._muted

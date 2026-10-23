@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import locale
+import math
 import os
 import sys
 from pathlib import Path
@@ -231,7 +232,7 @@ class PlayerMPV:
             if linux_ao:
                 kwargs["ao"] = linux_ao
             self._player = mpv.MPV(**kwargs)
-            self._player.volume = float(self._volume)
+            self._player.volume = self._to_backend_volume(self._volume)
             self._player.mute = self._muted
 
             @self._player.event_callback("start-file")
@@ -296,7 +297,7 @@ class PlayerMPV:
                     self.log.debug("[DEBUG] PlayerMPV: retrying without ao preference")
                     kwargs.pop("ao")
                     self._player = mpv.MPV(**kwargs)
-                    self._player.volume = float(self._volume)
+                    self._player.volume = self._to_backend_volume(self._volume)
                     self._player.mute = self._muted
                     self._ready = True
                 except Exception as e2:
@@ -373,13 +374,29 @@ class PlayerMPV:
         except Exception:
             self._emit("error", None)
 
+    @staticmethod
+    def _to_backend_volume(vol: int) -> float:
+        """Map user slider percentage (0..100) to mpv internal software volume.
+
+        MPV's internal softvol operates on a cubic scale (gain = (vol/100)^3).
+        A raw linear pass-through makes volume < 20% virtually imperceptible (-42 dB).
+        Mapping with 100 * (vol/100)^0.5 ensures an effective perceptual response curve
+        (gain = (vol/100)^1.5), providing clear, natural, and fully audible dynamics
+        across the entire 0-100% range without sudden drop-offs.
+        """
+        if vol <= 0:
+            return 0.0
+        if vol >= 100:
+            return 100.0
+        return float(100.0 * math.sqrt(vol / 100.0))
+
     def set_volume(self, vol: int) -> None:
         self._volume = max(0, min(100, int(vol)))
         if not self.is_ready():
             return
         try:
             assert self._player is not None
-            self._player.volume = float(self._volume)
+            self._player.volume = self._to_backend_volume(self._volume)
         except Exception:
             pass
 
