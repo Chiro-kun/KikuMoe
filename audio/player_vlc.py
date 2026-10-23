@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+from pathlib import Path
 from typing import Callable
 
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
@@ -53,17 +54,64 @@ class PlayerVLC:
             self._init_error = "python-vlc module not installed or unavailable"
             self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
             return
-        # Setup plugin path if provided
+        # Setup plugin path if provided by user setting, otherwise detect system plugins
         if self._vlc_path and os.path.isdir(self._vlc_path):
             try:
                 if _IS_WIN32:
-                    os.add_dll_directory(self._vlc_path)  # type: ignore[attr-defined]
+                    if hasattr(os, "add_dll_directory"):
+                        os.add_dll_directory(self._vlc_path)  # type: ignore[attr-defined]
+                    plugins_path = os.path.join(self._vlc_path, "plugins")
+                    if os.path.isdir(plugins_path):
+                        os.environ["VLC_PLUGIN_PATH"] = plugins_path
                 else:
                     plugins_path = os.path.join(self._vlc_path, "plugins")
                     if os.path.isdir(plugins_path):
                         os.environ["VLC_PLUGIN_PATH"] = plugins_path
             except Exception as e:
-                self.log.debug("[DEBUG] _init_vlc: plugin path setup failed: %s", e)
+                self.log.debug("[DEBUG] _init_vlc: custom plugin path setup failed: %s", e)
+        elif not os.environ.get("VLC_PLUGIN_PATH"):
+            # Auto-detect plugin directory if not explicitly configured
+            plugin_candidates: list[Path] = []
+            if _IS_WIN32:
+                if getattr(sys, "frozen", False):
+                    meipass = getattr(sys, "_MEIPASS", None)
+                    if meipass:
+                        plugin_candidates.append(Path(meipass) / "plugins")
+                    plugin_candidates.append(Path(sys.executable).resolve().parent / "plugins")
+                plugin_candidates.extend(
+                    [
+                        Path(r"C:\Program Files\VideoLAN\VLC\plugins"),
+                        Path(r"C:\Program Files (x86)\VideoLAN\VLC\plugins"),
+                    ]
+                )
+            else:
+                # Linux / Unix
+                if getattr(sys, "frozen", False):
+                    meipass = getattr(sys, "_MEIPASS", None)
+                    if meipass:
+                        plugin_candidates.append(Path(meipass) / "plugins")
+                        plugin_candidates.append(Path(meipass) / "vlc" / "plugins")
+                    exe_parent = Path(sys.executable).resolve().parent
+                    plugin_candidates.append(exe_parent / "plugins")
+                    plugin_candidates.append(exe_parent.parent / "lib" / "vlc" / "plugins")
+                plugin_candidates.extend(
+                    [
+                        Path("/usr/lib/x86_64-linux-gnu/vlc/plugins"),
+                        Path("/usr/lib/aarch64-linux-gnu/vlc/plugins"),
+                        Path("/usr/lib64/vlc/plugins"),
+                        Path("/usr/lib/vlc/plugins"),
+                        Path("/usr/local/lib/vlc/plugins"),
+                        Path("/app/lib/vlc/plugins"),
+                    ]
+                )
+            for p_dir in plugin_candidates:
+                try:
+                    if p_dir.is_dir():
+                        os.environ["VLC_PLUGIN_PATH"] = str(p_dir.resolve())
+                        self.log.debug("[DEBUG] _init_vlc: found VLC_PLUGIN_PATH=%s", p_dir)
+                        break
+                except Exception:
+                    pass
         try:
             inst_opts = ["--quiet", "--no-video-title-show"]
             if self._network_caching_ms is not None:
@@ -98,9 +146,10 @@ class PlayerVLC:
                 self.instance = vlc.Instance(inst_opts)
             if self.instance is None:
                 self._init_error = (
-                    "vlc.Instance() creation failed (libvlc not found or not initialized)"
+                    "vlc.Instance() creation failed "
+                    "(libvlc not found, no plugins, or incompatible architecture)"
                 )
-                self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
+                self.log.error("[BACKEND] %s", self._init_error)
                 return
             self.player = self.instance.media_player_new()
             if self.player is None:

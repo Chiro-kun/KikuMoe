@@ -66,18 +66,38 @@ def silence_stderr():
     if _debug_enabled:
         yield
         return
+
+    saved_fd = None
+    devnull_fd = None
     try:
         devnull_fd = os.open(os.devnull, os.O_WRONLY)
         saved_fd = os.dup(2)
         os.dup2(devnull_fd, 2)
-        os.close(devnull_fd)
-        try:
-            yield
-        finally:
-            os.dup2(saved_fd, 2)
-            os.close(saved_fd)
     except Exception:
+        # If redirection setup fails (e.g. fd 2 not available or closed in GUI/Windows),
+        # proceed without silencing.
+        if devnull_fd is not None:
+            try:
+                os.close(devnull_fd)
+            except Exception:
+                pass
         yield
+        return
+    else:
+        try:
+            os.close(devnull_fd)
+        except Exception:
+            pass
+
+    try:
+        yield
+    finally:
+        if saved_fd is not None:
+            try:
+                os.dup2(saved_fd, 2)
+                os.close(saved_fd)
+            except Exception:
+                pass
 
 
 def set_debug(enabled: bool) -> None:

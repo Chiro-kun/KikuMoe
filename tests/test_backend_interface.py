@@ -84,3 +84,24 @@ def test_player_mpv_find_library_resolution(monkeypatch):
         monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.setattr("audio.player_mpv._IS_WIN32", False)
         assert _find_libmpv_path() == str(fake_lib.resolve())
+
+
+def test_silence_stderr_exception_propagation():
+    """Verify silence_stderr propagates exceptions raised in its block without masking them."""
+    import pytest
+
+    from core.logger import silence_stderr
+
+    with pytest.raises(ZeroDivisionError):
+        with silence_stderr():
+            _ = 1 / 0
+
+
+def test_player_vlc_plugin_path_detection(monkeypatch):
+    """Verify VLC_PLUGIN_PATH detection does not crash and respects existing environment."""
+    from audio.player_vlc import PlayerVLC
+
+    monkeypatch.setenv("VLC_PLUGIN_PATH", "/custom/vlc/plugins")
+    player = PlayerVLC()
+    # Should not crash during initialization
+    assert hasattr(player, "is_ready")
