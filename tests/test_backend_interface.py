@@ -61,3 +61,26 @@ def test_player_backends_volume_scaling():
     assert ffmpeg.get_volume() == 0
     ffmpeg.set_volume(150)
     assert ffmpeg.get_volume() == 100
+
+
+def test_player_mpv_find_library_resolution(monkeypatch):
+    """Verify libmpv path detection with explicit environment overrides and fallback behavior."""
+    import tempfile
+    from pathlib import Path
+
+    from audio.player_mpv import _find_libmpv_path
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        # Case 1: MPV_PATH override pointing to an existing file
+        fake_lib = tmp_path / "libmpv.so.2"
+        fake_lib.write_text("dummy", encoding="utf-8")
+        monkeypatch.setenv("MPV_PATH", str(fake_lib))
+        assert _find_libmpv_path() == str(fake_lib.resolve())
+
+        # Case 2: MPV_DIR override containing candidate library on Linux
+        monkeypatch.delenv("MPV_PATH", raising=False)
+        monkeypatch.setenv("MPV_DIR", str(tmp_path))
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr("audio.player_mpv._IS_WIN32", False)
+        assert _find_libmpv_path() == str(fake_lib.resolve())

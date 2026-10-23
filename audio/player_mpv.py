@@ -21,47 +21,79 @@ _IS_WIN32 = sys.platform == "win32"
 
 
 def _find_libmpv_path() -> str | None:
-    """Cerca la DLL di libmpv nelle posizioni comuni su Windows in modo robusto."""
-    if not _IS_WIN32:
-        return None
-
-    # Se MPV_PATH punta direttamente a un file esistente, usalo subito
+    """Cerca la libreria dinamica libmpv (DLL su Windows, .so su Linux, .dylib su macOS)
+    in modo robusto e ne restituisce il percorso assoluto."""
+    # 1. Se MPV_PATH punta direttamente a un file esistente, usalo subito
     env_mpv_path = os.environ.get("MPV_PATH")
     if env_mpv_path and os.path.isfile(env_mpv_path):
         return str(Path(env_mpv_path).resolve())
 
-    # Nomi comuni per libmpv su Windows
-    names = ["libmpv-2.dll", "mpv-2.dll", "libmpv-1.dll", "mpv-1.dll", "mpv.dll"]
-
     candidate_dirs: list[Path] = []
 
-    # 1. Directory da variabile d'ambiente MPV_DIR se specificata
+    # 2. Directory da variabile d'ambiente MPV_DIR se specificata
     env_mpv_dir = os.environ.get("MPV_DIR")
     if env_mpv_dir:
         candidate_dirs.append(Path(env_mpv_dir))
 
-    # 2. Se congelato (PyInstaller)
+    # 3. Directory dell'applicazione (PyInstaller frozen o ambiente di sviluppo)
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             candidate_dirs.append(Path(meipass))
-        candidate_dirs.append(Path(sys.executable).resolve().parent)
+        exe_dir = Path(sys.executable).resolve().parent
+        candidate_dirs.append(exe_dir)
+        if not _IS_WIN32:
+            candidate_dirs.append(exe_dir.parent / "lib")
+            candidate_dirs.append(exe_dir / "lib")
     else:
         # In sviluppo: radice del repository determinata dal file corrente
         script_dir = Path(__file__).resolve().parent  # <repo>/audio
         repo_root = script_dir.parent  # <repo>
         candidate_dirs.append(repo_root)
         candidate_dirs.append(script_dir)
-        candidate_dirs.append(repo_root / "packaging" / "windows")
+        if _IS_WIN32:
+            candidate_dirs.append(repo_root / "packaging" / "windows")
 
         try:
             proj_root = Path(_get_project_root()).resolve()
             candidate_dirs.append(proj_root)
-            candidate_dirs.append(proj_root / "packaging" / "windows")
+            if _IS_WIN32:
+                candidate_dirs.append(proj_root / "packaging" / "windows")
         except Exception:
             pass
 
-    # 3. Rimuovi duplicati preservando l'ordine (NO fallback su CWD per prevenire DLL hijacking)
+    # 4. Nomi delle librerie in base alla piattaforma
+    if _IS_WIN32:
+        names = ["libmpv-2.dll", "mpv-2.dll", "libmpv-1.dll", "mpv-1.dll", "mpv.dll"]
+    elif sys.platform == "darwin":
+        names = ["libmpv.2.dylib", "libmpv.1.dylib", "libmpv.dylib"]
+        candidate_dirs.extend(
+            [
+                Path("/opt/homebrew/lib"),
+                Path("/usr/local/lib"),
+                Path("/opt/local/lib"),
+            ]
+        )
+    else:
+        # Linux / BSD / Unix (in ordine di preferenza ABI)
+        names = ["libmpv.so.2", "libmpv.so.1", "libmpv.so"]
+        candidate_dirs.extend(
+            [
+                Path("/usr/lib/x86_64-linux-gnu"),
+                Path("/usr/lib/aarch64-linux-gnu"),
+                Path("/usr/lib/arm-linux-gnueabihf"),
+                Path("/usr/lib64"),
+                Path("/usr/lib"),
+                Path("/usr/local/lib"),
+                Path("/lib/x86_64-linux-gnu"),
+                Path("/lib64"),
+                Path("/lib"),
+                Path("/app/lib"),  # Flatpak
+                Path(os.path.expanduser("~/.local/lib")),
+            ]
+        )
+
+    # 5. Rimuovi duplicati preservando l'ordine
     unique_dirs: list[Path] = []
     seen = set()
     for d in candidate_dirs:
@@ -73,27 +105,71 @@ def _find_libmpv_path() -> str | None:
         except Exception:
             pass
 
-    # 5. Cerca le DLL nelle directory individuate
-    for d in unique_dirs:
-        for name in names:
-            dll_path = d / name
+    # 6. Cerca le librerie nelle directory individuate rispettando l'ordine dei nomi
+    for name in names:
+        for d in unique_dirs:
+            candidate = d / name
             try:
-                if dll_path.is_file():
-                    return str(dll_path.resolve())
+                if candidate.is_file():
+                    return str(candidate.resolve())
             except Exception:
                 pass
+
+    # 7. Su Linux, se non ancora trovata nelle directory note, interroga ldconfig -p
+    if not _IS_WIN32 and sys.platform != "darwin":
+        try:
+            import subprocess
+
+            for ldconfig_bin in ("/sbin/ldconfig", "ldconfig"):
+                try:
+                    res = subprocess.run(
+                        [ldconfig_bin, "-p"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=False,
+                    )
+                    if res.returncode == 0 and res.stdout:
+                        lines = res.stdout.splitlines()
+                        for name in names:
+                            for line in lines:
+                                if name in line and "=>" in line:
+                                    target = line.split("=>", 1)[1].strip()
+                                    if target and os.path.isfile(target):
+                                        return str(Path(target).resolve())
+                        break
+                except (FileNotFoundError, PermissionError):
+                    continue
+        except Exception:
+            pass
+
+    # 8. Prova come ultima risorsa ctypes.util.find_library
+    try:
+        import ctypes.util
+
+        lib_name = ctypes.util.find_library("mpv")
+        if lib_name:
+            if os.path.isabs(lib_name) and os.path.isfile(lib_name):
+                return str(Path(lib_name).resolve())
+            for d in unique_dirs:
+                candidate = d / lib_name
+                try:
+                    if candidate.is_file():
+                        return str(candidate.resolve())
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     return None
 
 
-# Configura il path DLL PRIMA di importare mpv
+# Configura il path DLL/SO PRIMA di importare mpv
 _found_libmpv = _find_libmpv_path()
 if _found_libmpv:
     _dll_dir = str(Path(_found_libmpv).parent)
+    os.environ["MPV_PATH"] = _found_libmpv
     if _IS_WIN32:
-        # Forza python-mpv a usare questa specifica DLL
-        # (utile per nomi non standard come libmpv-2.dll)
-        os.environ["MPV_PATH"] = _found_libmpv
         # Aggiungi al PATH per sicurezza
         os.environ["PATH"] = _dll_dir + os.pathsep + os.environ.get("PATH", "")
         # Per Python 3.8+ su Windows, aggiungi alla directory DLL sicura
@@ -102,14 +178,60 @@ if _found_libmpv:
                 os.add_dll_directory(_dll_dir)
             except Exception:
                 pass
+    else:
+        # Su Linux/Unix, esporta la directory in LD_LIBRARY_PATH
+        curr_ld = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = _dll_dir + (os.pathsep + curr_ld if curr_ld else "")
 
 
 _mpv_import_error: Exception | None = None
-try:
-    import mpv
-except Exception as e:
-    mpv = None  # type: ignore
-    _mpv_import_error = e
+
+# Su piattaforme non-Windows, python-mpv chiama internamente ctypes.util.find_library('mpv').
+# In un binario PyInstaller frozen, PyInstaller intercetta CDLL() e solleva PyInstallerImportError
+# se il nome passato è relativo e non è stato impacchettato in sys._MEIPASS.
+# Monkey-patchando ctypes.util.find_library per restituire il percorso assoluto della libreria
+# consentiamo a CDLL() di effettuare la dlopen() direttamente dal percorso di sistema.
+_orig_find_library = None
+if _found_libmpv and not _IS_WIN32:
+    try:
+        import ctypes.util
+
+        _orig_find_library = ctypes.util.find_library
+
+        def _custom_find_library(name: str) -> str | None:
+            if name == "mpv":
+                return _found_libmpv
+            return _orig_find_library(name) if _orig_find_library else None
+
+        ctypes.util.find_library = _custom_find_library
+    except Exception:
+        pass
+
+# Se libmpv non è presente nel sistema Linux/Unix, evitiamo l'import fallimentare
+# di python-mpv con errore fuorviante di PyInstaller e forniamo un messaggio chiaro.
+mpv: Any = None
+if not _IS_WIN32 and not _found_libmpv:
+    _mpv_import_error = OSError(
+        "libmpv was not found on this system. Please install libmpv "
+        "(e.g. 'sudo apt install libmpv-dev libmpv1' on Debian/Ubuntu, "
+        "'sudo pacman -S mpv' on Arch, or 'sudo dnf install mpv-libs' on Fedora)."
+    )
+else:
+    try:
+        import mpv as _mpv_mod
+
+        mpv = _mpv_mod
+    except Exception as e:
+        mpv = None
+        _mpv_import_error = e
+    finally:
+        if _orig_find_library is not None:
+            try:
+                import ctypes.util
+
+                ctypes.util.find_library = _orig_find_library
+            except Exception:
+                pass
 
 # MPV end-file reason integers (MPV_END_FILE_REASON_*)
 _MPV_END_STOP = 2
@@ -193,7 +315,9 @@ class PlayerMPV:
     def _init_mpv(self) -> None:
         self._ready = False
         if mpv is None:
-            self._init_error = str(_mpv_import_error or "unknown import error")
+            cause = getattr(_mpv_import_error, "__cause__", None)
+            cause_msg = f" (cause: {cause})" if cause else ""
+            self._init_error = f"{_mpv_import_error}{cause_msg}"
             self.log.error(
                 "[BACKEND] PlayerMPV: python-mpv import unavailable: %s",
                 self._init_error,
