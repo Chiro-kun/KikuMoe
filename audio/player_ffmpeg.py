@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from PyQt6.QtCore import QSettings
@@ -19,6 +22,41 @@ try:
     import pyaudio
 except Exception:
     pyaudio = None  # type: ignore
+
+
+def _find_ffmpeg_bin() -> str:
+    """Restituisce il percorso dell'eseguibile ffmpeg, cercando prima in FFMPEG_PATH,
+    poi nella cartella dell'eseguibile (utile per distribuzioni portatili su Windows)
+    e infine nel PATH di sistema."""
+    env_bin = os.environ.get("FFMPEG_PATH")
+    if env_bin and os.path.isfile(env_bin):
+        return env_bin
+
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / ("ffmpeg.exe" if _IS_WIN32 else "ffmpeg"))
+    else:
+        try:
+            repo_root = Path(__file__).resolve().parent.parent
+            candidates.append(repo_root / ("ffmpeg.exe" if _IS_WIN32 else "ffmpeg"))
+            if _IS_WIN32:
+                candidates.append(repo_root / "packaging" / "windows" / "ffmpeg.exe")
+        except Exception:
+            pass
+
+    for c in candidates:
+        try:
+            if c.is_file():
+                return str(c.resolve())
+        except Exception:
+            pass
+
+    which_bin = shutil.which("ffmpeg")
+    if which_bin:
+        return which_bin
+
+    return "ffmpeg"
 
 
 class PlayerFFmpeg:
@@ -43,6 +81,7 @@ class PlayerFFmpeg:
         self._paused: bool = False
         self._init_error: str | None = None
         self.log = get_logger("PlayerFFmpeg")
+        self._ffmpeg_bin = _find_ffmpeg_bin()
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.11.0")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -153,8 +192,9 @@ class PlayerFFmpeg:
             kwargs: dict = {}
             if _IS_WIN32:
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            bin_to_check = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
             result = subprocess.run(
-                ["ffmpeg", "-version"],
+                [bin_to_check, "-version"],
                 capture_output=True,
                 check=False,
                 timeout=5,
@@ -410,8 +450,9 @@ class PlayerFFmpeg:
             kwargs: dict = {}
             if _IS_WIN32:
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            bin_to_run = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
             result = subprocess.run(
-                ["ffmpeg", "-version"],
+                [bin_to_run, "-version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -607,8 +648,9 @@ class PlayerFFmpeg:
                 except Exception:
                     is_mp3 = False
 
+                ffmpeg_bin = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
                 ffmpeg_cmd = [
-                    "ffmpeg",
+                    ffmpeg_bin,
                     "-hide_banner",
                     "-nostdin",
                     # Network/HTTP options for robust streaming

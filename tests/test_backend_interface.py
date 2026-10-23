@@ -105,3 +105,24 @@ def test_player_vlc_plugin_path_detection(monkeypatch):
     player = PlayerVLC()
     # Should not crash during initialization
     assert hasattr(player, "is_ready")
+
+
+def test_player_ffmpeg_bin_discovery(monkeypatch):
+    """Verify _find_ffmpeg_bin respects FFMPEG_PATH and fallback behavior."""
+    import tempfile
+    from pathlib import Path
+
+    from audio.player_ffmpeg import _find_ffmpeg_bin
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fake_ffmpeg = Path(tmp_dir) / "fake_ffmpeg.exe"
+        fake_ffmpeg.write_text("dummy", encoding="utf-8")
+
+        # FFMPEG_PATH takes precedence
+        monkeypatch.setenv("FFMPEG_PATH", str(fake_ffmpeg))
+        assert _find_ffmpeg_bin() == str(fake_ffmpeg)
+
+        # Non-existent FFMPEG_PATH falls back
+        monkeypatch.setenv("FFMPEG_PATH", str(fake_ffmpeg) + "_nonexistent")
+        res = _find_ffmpeg_bin()
+        assert res is not None
