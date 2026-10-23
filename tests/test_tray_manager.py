@@ -31,10 +31,12 @@ class DummySettings:
 class DummyParent(QWidget):
     def __init__(self):
         super().__init__()
-        self.settings = DummySettings({
-            KEY_CHANNEL: "J-POP",
-            KEY_FORMAT: "Vorbis",
-        })
+        self.settings = DummySettings(
+            {
+                KEY_CHANNEL: "J-POP",
+                KEY_FORMAT: "Vorbis",
+            }
+        )
 
 
 def test_tray_manager_initial_sync(qapp):

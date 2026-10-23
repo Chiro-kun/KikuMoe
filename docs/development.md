@@ -77,8 +77,8 @@ from core.constants import ORG_NAME, APP_SETTINGS, KEY_VOLUME
 
 settings = QSettings(ORG_NAME, APP_SETTINGS)
 
-vol = settings.value(KEY_VOLUME, 80, type=int)   # read with default
-settings.setValue(KEY_VOLUME, 75)                 # write
+vol = settings.value(KEY_VOLUME, 80, type=int)  # read with default
+settings.setValue(KEY_VOLUME, 75)  # write
 ```
 
 - **Windows:** `HKEY_CURRENT_USER\Software\KikuMoe\ListenMoePlayer`

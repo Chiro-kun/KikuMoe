@@ -7,33 +7,33 @@
 Global app constants and `QSettings` keys. Single source of truth for setting names.
 
 ```python
-APP_NAME     = "KikuMoe"
-APP_VERSION  = _read_version_from_files()   # from version.yml or version_info.txt
-APP_TITLE    = f"{APP_NAME} {APP_VERSION}"
-ORG_NAME     = "KikuMoe"
+APP_NAME = "KikuMoe"
+APP_VERSION = _read_version_from_files()  # from version.yml or version_info.txt
+APP_TITLE = f"{APP_NAME} {APP_VERSION}"
+ORG_NAME = "KikuMoe"
 APP_SETTINGS = "ListenMoePlayer"
 
-KEY_LANG                  = "lang"
-KEY_VOLUME                = "volume"
-KEY_MUTE                  = "mute"
-KEY_CHANNEL               = "channel"
-KEY_FORMAT                = "format"
-KEY_AUTOPLAY              = "autoplay"
-KEY_TRAY_ENABLED          = "tray_enabled"
-KEY_TRAY_NOTIFICATIONS    = "tray_notifications"
+KEY_LANG = "lang"
+KEY_VOLUME = "volume"
+KEY_MUTE = "mute"
+KEY_CHANNEL = "channel"
+KEY_FORMAT = "format"
+KEY_AUTOPLAY = "autoplay"
+KEY_TRAY_ENABLED = "tray_enabled"
+KEY_TRAY_NOTIFICATIONS = "tray_notifications"
 KEY_TRAY_HIDE_ON_MINIMIZE = "tray_hide_on_minimize"
-KEY_LIBVLC_PATH           = "libvlc_path"
-KEY_NETWORK_CACHING       = "network_caching"
-KEY_SLEEP_MINUTES         = "sleep_minutes"
-KEY_SLEEP_STOP_ON_END     = "sleep_stop_on_end"
-KEY_DEV_CONSOLE_ENABLED   = "dev_console_enabled"
-KEY_DEV_CONSOLE_SHOW_DEV  = "dev_console_show_dev"
+KEY_LIBVLC_PATH = "libvlc_path"
+KEY_NETWORK_CACHING = "network_caching"
+KEY_SLEEP_MINUTES = "sleep_minutes"
+KEY_SLEEP_STOP_ON_END = "sleep_stop_on_end"
+KEY_DEV_CONSOLE_ENABLED = "dev_console_enabled"
+KEY_DEV_CONSOLE_SHOW_DEV = "dev_console_show_dev"
 KEY_SESSION_TIMER_ENABLED = "session_timer_enabled"
-KEY_AUDIO_DEVICE_INDEX    = "audio_device_index"
-KEY_WINDOW_GEOMETRY       = "window_geometry"
-KEY_DONT_ASK_ON_CLOSE     = "dont_ask_on_close"
-KEY_CLOSE_TO_TRAY         = "close_to_tray"
-KEY_AUDIO_BACKEND         = "audio_backend"   # 'auto' | 'ffmpeg' | 'mpv' | 'vlc'
+KEY_AUDIO_DEVICE_INDEX = "audio_device_index"
+KEY_WINDOW_GEOMETRY = "window_geometry"
+KEY_DONT_ASK_ON_CLOSE = "dont_ask_on_close"
+KEY_CLOSE_TO_TRAY = "close_to_tray"
+KEY_AUDIO_BACKEND = "audio_backend"  # 'auto' | 'ffmpeg' | 'mpv' | 'vlc'
 ```
 
 Version is resolved in order from:
@@ -51,13 +51,13 @@ Stream URL dictionary. Single source of truth for LISTEN.moe endpoints.
 STREAMS = {
     "J-POP": {
         "Vorbis": "https://listen.moe/stream",
-        "Opus":   "https://listen.moe/opus",
-        "MP3":    "https://listen.moe/fallback",
+        "Opus": "https://listen.moe/opus",
+        "MP3": "https://listen.moe/fallback",
     },
     "K-POP": {
         "Vorbis": "https://listen.moe/kpop/stream",
-        "Opus":   "https://listen.moe/kpop/opus",
-        "MP3":    "https://listen.moe/kpop/fallback",
+        "Opus": "https://listen.moe/kpop/opus",
+        "MP3": "https://listen.moe/kpop/fallback",
     },
 }
 ```
@@ -73,9 +73,9 @@ Adding a channel only requires extending this dict; the UI reads it dynamically.
 ```python
 from core.i18n import I18n
 
-i18n = I18n(lang="it")             # or "en"
-label = i18n.t("status_playing")   # returns string in the current language
-i18n.set_lang("en")                # switch language at runtime
+i18n = I18n(lang="it")  # or "en"
+label = i18n.t("status_playing")  # returns string in the current language
+i18n.set_lang("en")  # switch language at runtime
 ```
 
 - Missing key in selected language → falls back to Italian.
@@ -91,8 +91,8 @@ A runtime language switch calls `retranslateUi()` on the main window without res
 from core.logger import get_logger, silence_stderr, set_debug
 
 log = get_logger(__name__)
-log.debug("verbose trace")   # suppressed by default
-log.info("backend selected") # always visible
+log.debug("verbose trace")  # suppressed by default
+log.info("backend selected")  # always visible
 ```
 
 - `get_logger(name)` — returns a `logging.Logger` writing to `stdout`. Default level is `INFO`; `DEBUG` traces are hidden unless the app is started with `--debug`.
@@ -133,7 +133,7 @@ player.get_mute()             -> bool
 Callback set by `main_window.py`:
 
 ```python
-player.on_event = fn   # fn(event: str, data=None)
+player.on_event = fn  # fn(event: str, data=None)
 ```
 
 Emitted events: `"opening"`, `"buffering"`, `"playing"`, `"paused"`, `"stopped"`, `"ended"`, `"error"`.
@@ -201,10 +201,10 @@ Channel filtering is applied client-side via the `channel_filter` callback passe
 
 ```python
 ws = NowPlayingWS(
-    on_now_playing=fn,       # fn(title, artist, duration_s, start_epoch, cover_filename)
-    on_error_text=fn,        # fn(msg: str)
-    on_closed_text=fn,       # fn(msg: str)
-    channel_filter=fn,       # optional fn(d: dict) -> bool
+    on_now_playing=fn,  # fn(title, artist, duration_s, start_epoch, cover_filename)
+    on_error_text=fn,  # fn(msg: str)
+    on_closed_text=fn,  # fn(msg: str)
+    channel_filter=fn,  # optional fn(d: dict) -> bool
 )
 ws.start()
 ws.shutdown()
@@ -221,12 +221,12 @@ Main class (`QWidget`) that coordinates all other components.
 **Qt signals:**
 
 ```python
-status_changed        = pyqtSignal(str)
-now_playing_changed   = pyqtSignal(str, str)   # title, artist
-buffering_progress    = pyqtSignal(int)
-cover_data_ready      = pyqtSignal(bytes)
-ws_error              = pyqtSignal(str)
-ws_closed             = pyqtSignal(str)
+status_changed = pyqtSignal(str)
+now_playing_changed = pyqtSignal(str, str)  # title, artist
+buffering_progress = pyqtSignal(int)
+cover_data_ready = pyqtSignal(bytes)
+ws_error = pyqtSignal(str)
+ws_closed = pyqtSignal(str)
 ```
 
 Signals are the only safe channel for updating the UI from non-main threads.
@@ -257,8 +257,9 @@ Optional window that captures logs from the root logger and displays them in a t
 
 ```python
 from ui.dev_console import DevConsole
+
 console = DevConsole(parent=main_window)
-console.attach()   # installs the QHandler into the root logger
+console.attach()  # installs the QHandler into the root logger
 console.show()
 ```
 
@@ -268,6 +269,7 @@ console.show()
 
 ```python
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+
 apply_windows_titlebar_dark_mode(hwnd)
 ```
 
@@ -282,7 +284,7 @@ from ui.custom_titlebar import CustomTitleBar, install_size_grip
 
 bar = CustomTitleBar(window, icon=app_icon)
 root_layout.addWidget(bar)
-install_size_grip(window)   # call once after the title bar is added
+install_size_grip(window)  # call once after the title bar is added
 ```
 
 `CustomTitleBar(QWidget)` — a minimal CSD title bar drawn entirely by the application. The owning window must have `Qt.WindowType.FramelessWindowHint` set before it is shown. `ListenMoePlayer._init_ui_base()` and `SettingsDialog.__init__()` both set that flag and insert the title bar at index 0 of a zero-margin root layout, with the regular content layout nested below.

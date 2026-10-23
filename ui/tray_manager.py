@@ -439,7 +439,7 @@ class TrayManager(QObject):
 
             target_channel = str(channel).strip().upper()
             for ch_key, act in self._channel_actions.items():
-                should_check = (ch_key.strip().upper() == target_channel)
+                should_check = ch_key.strip().upper() == target_channel
                 if act.isChecked() != should_check:
                     act.blockSignals(True)
                     act.setChecked(should_check)
@@ -447,7 +447,7 @@ class TrayManager(QObject):
 
             target_fmt = str(fmt).strip().upper()
             for fmt_key, actf in self._format_actions.items():
-                should_check = (fmt_key.strip().upper() == target_fmt)
+                should_check = fmt_key.strip().upper() == target_fmt
                 if actf.isChecked() != should_check:
                     actf.blockSignals(True)
                     actf.setChecked(should_check)

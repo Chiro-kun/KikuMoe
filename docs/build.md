@@ -116,7 +116,7 @@ Builds are automated via Forgejo Actions (`.forgejo/workflows/build.yml`). Pushi
 
 ```python
 class PlayerNew:
-    on_event = None   # callable(event: str, data=None)
+    on_event = None  # callable(event: str, data=None)
 
     def play(self, url: str): ...
     def pause(self): ...
@@ -133,9 +133,10 @@ class PlayerNew:
 ```python
 try:
     from audio.player_new import PlayerNew
+
     self._player = PlayerNew(...)
 except Exception:
-    ...   # fall through to the next backend
+    ...  # fall through to the next backend
 ```
 
 3. If the backend needs dedicated settings, add the keys to `core/constants.py` and the corresponding controls to `ui/settings_dialog.py`.

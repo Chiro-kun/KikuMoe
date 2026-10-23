@@ -96,4 +96,3 @@ def test_setup_ssl_environment(monkeypatch):
     default_ctx = ssl._create_default_https_context()
     assert isinstance(default_ctx, ssl.SSLContext)
     assert default_ctx.check_hostname is True
-
