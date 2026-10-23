@@ -348,3 +348,42 @@ def test_settings_dialog_four_tabs(qapp):
     assert dlg.category_bar._selected == 3
     assert dlg.pages.currentIndex() == 3
     dlg.close()
+
+
+def test_settings_prewarm_and_logo_cache(qapp):
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QWidget
+
+    from core.constants import APP_SETTINGS, ORG_NAME
+    from core.i18n import I18n
+    from ui.about_dialog import _APP_LOGO_CACHE, AboutWidget
+    from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+
+    w = AboutWidget()
+    assert _APP_LOGO_CACHE is not None
+    assert not _APP_LOGO_CACHE.isNull()
+    w.close()
+
+    class DummyPlayer(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.i18n = I18n("it")
+            self.player = None
+            self.settings = QSettings(ORG_NAME, APP_SETTINGS)
+            self._view_stack = SlidingStackedWidget(self)
+            self._settings_dlg = None
+
+        def _prewarm_settings(self):
+            if self._settings_dlg is not None:
+                return
+            dlg = SettingsDialog(self, embedded=True)
+            self._settings_dlg = dlg
+            self._view_stack.addWidget(dlg)
+            self._view_stack._render_snapshot(dlg)
+
+    p = DummyPlayer()
+    p._prewarm_settings()
+    assert p._settings_dlg is not None
+    assert p._view_stack.count() == 1
+    p._prewarm_settings()
+    p.close()

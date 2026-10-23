@@ -156,6 +156,7 @@ def get_os_info() -> str:
 
 
 _RADIO_ICONS_CACHE: Dict[str, QPixmap] = {}
+_APP_LOGO_CACHE: Optional[QPixmap] = None
 
 
 class AboutActionButton(QPushButton):
@@ -753,18 +754,23 @@ class AboutWidget(QWidget):
             self.btn_truckersfm.setToolTip(URL_TRUCKERSFM)
 
     def _load_app_logo(self) -> None:
+        global _APP_LOGO_CACHE
+        if _APP_LOGO_CACHE is not None and not _APP_LOGO_CACHE.isNull():
+            self._logo_lbl.setPixmap(_APP_LOGO_CACHE)
+            return
+
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         logo_path = os.path.join(root_dir, "icons", "Kikumoe - no txt.png")
         if os.path.isfile(logo_path):
             pix = QPixmap(logo_path)
             if not pix.isNull():
-                scaled = pix.scaled(
+                _APP_LOGO_CACHE = pix.scaled(
                     44,
                     44,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
-                self._logo_lbl.setPixmap(scaled)
+                self._logo_lbl.setPixmap(_APP_LOGO_CACHE)
                 return
         # Fallback placeholder
         self._logo_lbl.setText("🌸")

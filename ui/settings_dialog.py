@@ -1194,12 +1194,27 @@ class SettingsDialog(QDialog):
         body_layout.addWidget(footer_frame)
 
         outer_layout.addLayout(body_layout, 1)
-        QTimer.singleShot(140, self._ensure_devices_populated)
+        if embedded:
+            # When embedded, defer audio device enumeration to idle
+            # so it never interrupts transitions
+            QTimer.singleShot(350, self._ensure_devices_populated)
+        else:
+            QTimer.singleShot(140, self._ensure_devices_populated)
 
     def _ensure_devices_populated(self) -> None:
-        if not self._devices_populated:
-            self._devices_populated = True
-            self._populate_audio_devices()
+        if self._devices_populated:
+            return
+        # If the view stack is currently performing a slide transition, delay populating devices
+        host_stack = getattr(self.parent(), "_view_stack", None)
+        if (
+            host_stack is not None
+            and getattr(host_stack, "_anim_timer", None)
+            and host_stack._anim_timer.isActive()
+        ):
+            QTimer.singleShot(100, self._ensure_devices_populated)
+            return
+        self._devices_populated = True
+        self._populate_audio_devices()
 
     def set_tab(self, idx: int, animated: bool = False) -> None:
         """Programmatically switch to tab index (0=General, 1=Audio, 2=Advanced, 3=Info)."""
