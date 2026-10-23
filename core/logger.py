@@ -9,6 +9,9 @@ _DEFAULT_LEVEL = logging.INFO
 
 _debug_enabled = False
 _created_loggers: list = []
+_startup_debug = False
+_startup_set = False
+_logger_created_hooks: list = []
 
 
 class _SafeTextStream:
@@ -85,14 +88,53 @@ def set_debug(enabled: bool) -> None:
     get_logger() call picks up the correct level.  Already-created loggers are
     updated in-place as well.
     """
-    global _debug_enabled
+    global _debug_enabled, _startup_debug, _startup_set
     _debug_enabled = bool(enabled)
+    if not _startup_set:
+        _startup_debug = _debug_enabled
+        _startup_set = True
     level = logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL
     for lg in _created_loggers:
         try:
             lg.setLevel(level)
         except Exception:
             pass
+
+
+def is_debug() -> bool:
+    """Return True if debug mode is currently active."""
+    return _debug_enabled
+
+
+def set_logger_level(level: int) -> None:
+    """Set the logging level dynamically for all created and future KikuMoe loggers."""
+    global _debug_enabled, _DEFAULT_LEVEL
+    _debug_enabled = level <= logging.DEBUG
+    _DEFAULT_LEVEL = level
+    for lg in _created_loggers:
+        try:
+            lg.setLevel(level)
+        except Exception:
+            pass
+
+
+def restore_default_level() -> None:
+    """Restore the logging level to the startup configuration."""
+    global _DEFAULT_LEVEL
+    _DEFAULT_LEVEL = logging.DEBUG if _startup_debug else logging.INFO
+    set_debug(_startup_debug)
+
+
+def register_logger_hook(hook) -> None:
+    """Register a callback invoked whenever a new logger is configured via get_logger()."""
+    if hook not in _logger_created_hooks:
+        _logger_created_hooks.append(hook)
+
+
+def unregister_logger_hook(hook) -> None:
+    """Unregister a logger creation callback."""
+    if hook in _logger_created_hooks:
+        _logger_created_hooks.remove(hook)
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
@@ -111,4 +153,9 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
         logger.setLevel(logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL)
         logger.propagate = False
         _created_loggers.append(logger)
+        for hook in list(_logger_created_hooks):
+            try:
+                hook(logger)
+            except Exception:
+                pass
     return logger

@@ -193,15 +193,35 @@ def test_smooth_progress_bar_and_dev_console(qapp):
     bar.set_buffering_active(False)
     assert bar._buffering_active is False
 
-    console = DevConsole()
+    import logging
+
+    from core.logger import get_logger, is_debug
+
+    log = get_logger("KikuMoeTest")
+    console = DevConsole(logger=log)
     console.open()
     assert console.is_open() is True
+    assert is_debug() is True
+    assert log.isEnabledFor(logging.DEBUG) is True
+
+    log.debug("[UI] volume_changed -> 42")
+    qapp.processEvents()
+    assert "[DEBUG] [UI] volume_changed -> 42" in (
+        console._console_text.toPlainText() if console._console_text else ""
+    )
+
+    if console._level_combo is not None:
+        console._level_combo.setCurrentText("INFO")
+    qapp.processEvents()
+    assert is_debug() is False
+    assert log.isEnabledFor(logging.DEBUG) is False
     console._on_toggle_pause()
     assert console._paused is True
     console._on_toggle_pause()
     assert console._paused is False
     console.close()
     assert console.is_open() is False
+    assert is_debug() is False
 
 
 def test_glass_combo_box_rendering_and_layout(qapp):

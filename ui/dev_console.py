@@ -314,6 +314,7 @@ class DevConsole(QObject):
         self._logging_active = False
         self._preopen_buffer: list[str] = []
         self._show_dev = False
+        self._selected_level_text = "DEBUG"
 
     def _t(self, key: str, default: Optional[str] = None):
         try:
@@ -381,9 +382,23 @@ class DevConsole(QObject):
                         self._logger.addHandler(self._log_handler)
                         self._attached_loggers.append(self._logger)
 
+                from core.logger import _created_loggers, register_logger_hook
+
+                for lg in _created_loggers:
+                    if isinstance(lg, logging.Logger) and self._log_handler not in lg.handlers:
+                        lg.addHandler(self._log_handler)
+                        self._attached_loggers.append(lg)
+
+                register_logger_hook(self._on_logger_created)
+
                 for name, lg in list(logging.Logger.manager.loggerDict.items()):
                     if isinstance(lg, logging.Logger):
-                        if str(name).startswith("listenmoe") or str(name).startswith("kikumoe"):
+                        low_name = str(name).lower()
+                        if (
+                            low_name.startswith("listenmoe")
+                            or low_name.startswith("kikumoe")
+                            or low_name.startswith("player")
+                        ):
                             if self._log_handler not in lg.handlers:
                                 lg.addHandler(self._log_handler)
                                 self._attached_loggers.append(lg)
@@ -393,7 +408,23 @@ class DevConsole(QObject):
             pass
         self._logging_active = True
 
+    def _on_logger_created(self, logger: logging.Logger) -> None:
+        try:
+            if self._log_handler is not None and logger not in self._attached_loggers:
+                if self._log_handler not in logger.handlers:
+                    logger.addHandler(self._log_handler)
+                self._attached_loggers.append(logger)
+        except Exception:
+            pass
+
     def deactivate_logging(self) -> None:
+        try:
+            from core.logger import restore_default_level, unregister_logger_hook
+
+            unregister_logger_hook(self._on_logger_created)
+            restore_default_level()
+        except Exception:
+            pass
         try:
             if (
                 not getattr(self, "_logging_active", False)
@@ -636,8 +667,10 @@ class DevConsole(QObject):
 
         self._level_combo = GlassComboBox()
         self._level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR"])
-        self._level_combo.setCurrentText("DEBUG")
+        target_lvl = getattr(self, "_selected_level_text", "DEBUG")
+        self._level_combo.setCurrentText(target_lvl)
         self._level_combo.currentTextChanged.connect(self._on_level_changed)
+        self._on_level_changed(target_lvl)
         self._level_combo.setToolTip(self._t("dev_console_level", "Level filter"))
         self._level_combo.setFixedWidth(115)
         tb_lay.addWidget(self._level_combo)
@@ -749,6 +782,12 @@ class DevConsole(QObject):
 
     def close(self):
         try:
+            from core.logger import restore_default_level
+
+            restore_default_level()
+        except Exception:
+            pass
+        try:
             if self._console_dialog:
                 try:
                     self._console_dialog.close()
@@ -762,12 +801,24 @@ class DevConsole(QObject):
 
     def _on_dialog_closed(self, *args, **kwargs):
         try:
+            from core.logger import restore_default_level
+
+            restore_default_level()
+        except Exception:
+            pass
+        try:
             self._console_dialog = None
             self._console_text = None
         except Exception:
             pass
 
     def _on_dialog_destroyed(self, *args, **kwargs):
+        try:
+            from core.logger import restore_default_level
+
+            restore_default_level()
+        except Exception:
+            pass
         try:
             self._console_dialog = None
             self._console_text = None
@@ -866,6 +917,7 @@ class DevConsole(QObject):
 
     def _on_level_changed(self, level_text: str):
         try:
+            self._selected_level_text = level_text
             level_map = {
                 "DEBUG": logging.DEBUG,
                 "INFO": logging.INFO,
@@ -875,6 +927,27 @@ class DevConsole(QObject):
             lvl = level_map.get(level_text, logging.DEBUG)
             if self._log_handler is not None:
                 self._log_handler.setLevel(lvl)
+
+            from core.logger import set_logger_level
+
+            set_logger_level(lvl)
+
+            if self._logger is not None and isinstance(self._logger, logging.Logger):
+                try:
+                    self._logger.setLevel(lvl)
+                except Exception:
+                    pass
+
+            for lg in list(self._attached_loggers):
+                try:
+                    lg.setLevel(lvl)
+                except Exception:
+                    pass
+
+            try:
+                logging.getLogger().setLevel(lvl)
+            except Exception:
+                pass
         except Exception:
             pass
 
