@@ -23,9 +23,13 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             libmpv-dev ffmpeg file wget \
-            libglib2.0-0 libgl1 libegl1 \
-            libxkbcommon0 libdbus-1-3 \
-            libfontconfig1 libfreetype6
+            libglib2.0-0 libgl1 libegl1 libdbus-1-3 \
+            libfontconfig1 libfreetype6 \
+            libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 \
+            libxcb-xinerama0 libxcb-xkb1
 
       - name: Install Poetry & project deps
         run: |
