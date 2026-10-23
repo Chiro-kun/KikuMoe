@@ -5,12 +5,14 @@ on:
     branches:
       - devel
       - main
+      - redesign
     tags:
       - 'v*'
   pull_request:
     branches:
       - devel
       - main
+      - redesign
   workflow_dispatch:
 
 permissions:
@@ -19,7 +21,7 @@ permissions:
 jobs:
   build-linux:
     name: Build Linux AppImage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -94,6 +96,7 @@ jobs:
           Copy-Item "dist\KikuMoe-$appVersion.exe" -Destination "$zipDir\KikuMoe.exe"
           Copy-Item "FFMPEG.bat" -Destination "$zipDir\FFMPEG.bat"
           Copy-Item "README.md" -Destination "$zipDir\README.md"
+          Copy-Item "CHANGELOG.md" -Destination "$zipDir\CHANGELOG.md"
           Copy-Item "LICENSE" -Destination "$zipDir\LICENSE"
           Compress-Archive -Path "$zipDir\*" -DestinationPath "dist\KikuMoe-$appVersion-Windows-x64.zip" -Force
 
@@ -112,7 +115,7 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [build-linux, build-windows]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download all build artifacts

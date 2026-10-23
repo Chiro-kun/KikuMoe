@@ -50,6 +50,7 @@ from core.config import STREAMS
 from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
+    APP_VERSION,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -1951,7 +1952,9 @@ class ListenMoePlayer(QWidget):
                 return
             if parts.port not in (None, 443):
                 return
-            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/2.0.0-beta1"})
+            req = urllib.request.Request(
+                cover_url, headers={"User-Agent": f"KikuMoe/{APP_VERSION}"}
+            )
             ssl_ctx = None
             try:
                 ssl_ctx = get_ssl_context()

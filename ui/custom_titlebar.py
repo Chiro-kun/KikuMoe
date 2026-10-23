@@ -302,9 +302,9 @@ class _BrandTitleLabel(QLabel):
 
 
 class _VersionBadgeLabel(QLabel):
-    """Custom-painted version pill badge ('2.0.0-beta1') vertically and horizontally centered."""
+    """Custom-painted version pill badge ('2.0.0-beta2') vertically and horizontally centered."""
 
-    def __init__(self, text: str = "2.0.0-beta1", parent: QWidget | None = None) -> None:
+    def __init__(self, text: str = "2.0.0-beta2", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setFixedHeight(_TITLE_BAR_HEIGHT)
         font = QFont("Segoe UI")
@@ -347,7 +347,7 @@ class _VersionBadgeLabel(QLabel):
 
 
 class CustomTitleBar(QFrame):
-    """Cyber-Moe CSD title bar: [Logo] KIKUMOE [2.0.0-beta1] · [—] [□] [×]."""
+    """Cyber-Moe CSD title bar: [Logo] KIKUMOE [2.0.0-beta2] · [—] [□] [×]."""
 
     HEIGHT = _TITLE_BAR_HEIGHT
 
@@ -371,7 +371,7 @@ class CustomTitleBar(QFrame):
         self._brand_label = _BrandTitleLabel("KIKUMOE", self)
         layout.addWidget(self._brand_label)
 
-        self._ver_badge = _VersionBadgeLabel("2.0.0-beta1", self)
+        self._ver_badge = _VersionBadgeLabel("2.0.0-beta2", self)
         layout.addWidget(self._ver_badge)
 
         # 3. Spacer (song title removed from title bar as requested)

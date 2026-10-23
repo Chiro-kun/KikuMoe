@@ -5,16 +5,18 @@ on:
     branches:
       - devel
       - main
+      - redesign
   pull_request:
     branches:
       - devel
       - main
+      - redesign
   workflow_dispatch:
 
 jobs:
   lint-and-typecheck:
     name: Lint & Type Check (Ruff & Mypy)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

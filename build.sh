@@ -10,6 +10,6 @@ echo "Running: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 cd "$PROJECT_ROOT"
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
-VERSION="$(grep -oP '(?<=version:\s).+' "$PROJECT_ROOT/version.yml" | tr -d '[:space:]' || echo '2.0.0-beta1')"
+VERSION="$(grep -oP '(?<=version:\s).+' "$PROJECT_ROOT/version.yml" | tr -d '[:space:]' || echo '2.0.0-beta2')"
 echo "Done. Output:"
 echo "  dist/KikuMoe-${VERSION}"
