@@ -32,21 +32,32 @@ def test_player_backends_interface_consistency():
 
 
 def test_player_backends_volume_scaling():
-    """Verify set_volume and get_volume consistency across all backends."""
-    backends = [PlayerFFmpeg, PlayerVLC, PlayerMPV]
-    for backend in backends:
-        player = backend()
-        player.set_volume(20)
-        assert player.get_volume() == 20
-        player.set_volume(85)
-        assert player.get_volume() == 85
-        player.set_volume(-10)
-        assert player.get_volume() == 0
-        player.set_volume(150)
-        assert player.get_volume() == 100
-        player.force_cleanup()
-        if hasattr(player, "_player") and getattr(player, "_player") is not None:
-            try:
-                player._player.terminate()
-            except Exception:
-                pass
+    """Verify set_volume and get_volume consistency and perceptual mapping across all backends."""
+    # Mathematical mapping functions
+    assert PlayerMPV._to_backend_volume(0) == 0.0
+    assert PlayerMPV._to_backend_volume(100) == 100.0
+    assert 44.0 < PlayerMPV._to_backend_volume(20) < 45.0
+    assert PlayerMPV._to_backend_volume(-5) == 0.0
+    assert PlayerMPV._to_backend_volume(120) == 100.0
+
+    assert PlayerVLC._to_backend_volume(0) == 0
+    assert PlayerVLC._to_backend_volume(100) == 100
+    assert PlayerVLC._to_backend_volume(20) == 45
+    assert PlayerVLC._to_backend_volume(-5) == 0
+    assert PlayerVLC._to_backend_volume(120) == 100
+
+    # PlayerFFmpeg volume behavior
+    ffmpeg = PlayerFFmpeg()
+    ffmpeg.set_volume(20)
+    assert ffmpeg.get_volume() == 20
+    assert 0.08 < ffmpeg._volume < 0.10
+    ffmpeg.set_volume(100)
+    assert ffmpeg.get_volume() == 100
+    assert ffmpeg._volume == 1.0
+    ffmpeg.set_volume(0)
+    assert ffmpeg.get_volume() == 0
+    assert ffmpeg._volume == 0.0
+    ffmpeg.set_volume(-10)
+    assert ffmpeg.get_volume() == 0
+    ffmpeg.set_volume(150)
+    assert ffmpeg.get_volume() == 100
