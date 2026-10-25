@@ -98,3 +98,4 @@ Prima delle ottimizzazioni introdotte nel piano di riproducibilità (`linux-buil
 1. **Repository FFmpeg LGPL**: Il repository upstream `BtbN/FFmpeg-Builds` è stato impiegato come default poiché il fork `yt-dlp/FFmpeg-Builds` distribuisce solo pacchetti `gpl`. Lo script `fetch-ffmpeg.sh` supporta comunque `FFMPEG_REPO` e `FFMPEG_VARIANT` configurabili con fallback trasparente a `gpl`.
 2. **Ricerca runtime FFmpeg**: KikuMoe controlla in ordine: variabile d'ambiente `FFMPEG_PATH`, cartella dell'eseguibile (`exe_dir`), cartella `_MEIPASS`, e infine `PATH` di sistema. Con il layout AppImage onedir + symlink `_internal/ffmpeg`, la compatibilità è garantita in qualsiasi scenario di invocazione.
 3. **Argomento `--version`**: Implementato direttamente all'ingresso di `main()` in `KikuMoe.py`, consentendo smoke test istantanei in ambienti headless CI senza dipendere da server display X11/Wayland.
+

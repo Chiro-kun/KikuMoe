@@ -109,3 +109,4 @@ echo "[fetch-ffmpeg] Successfully installed FFmpeg to $TARGET"
 if command -v du &>/dev/null; then
     echo "[fetch-ffmpeg] Final binary size: $(du -h "$TARGET" | cut -f1)"
 fi
+
