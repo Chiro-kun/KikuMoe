@@ -76,11 +76,11 @@ echo "[build-minimal-ffmpeg] Configuring minimal audio-only features..."
     --disable-swscale \
     --disable-postproc \
     --enable-protocol=file,http,https,tcp,tls \
-    --enable-demuxer=ogg,mp3,aac,flac \
-    --enable-decoder=vorbis,opus,mp3,mp3float,aac,flac \
+    --enable-demuxer=ogg,mp3,aac,flac,pcm_s16le,s16le,wav \
+    --enable-decoder=vorbis,opus,mp3,mp3float,aac,flac,pcm_s16le \
     --enable-parser=vorbis,opus,mpegaudio,aac,flac \
     --enable-encoder=pcm_s16le \
-    --enable-muxer=s16le,null \
+    --enable-muxer=pcm_s16le,s16le,wav,null \
     --enable-filter=aresample,aformat \
     --enable-openssl \
     --pkg-config-flags="--static" \
@@ -108,4 +108,8 @@ fi
 # Quick validation
 echo "[build-minimal-ffmpeg] Verifying binary execution..."
 "$TARGET" -version | head -2
+echo "[build-minimal-ffmpeg] Enabled muxers:"
+"$TARGET" -muxers | grep -E "s16|pcm|wav" || true
+echo "[build-minimal-ffmpeg] Enabled decoders:"
+"$TARGET" -decoders | grep -E "vorbis|opus|mp3|aac" || true
 
