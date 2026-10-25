@@ -61,6 +61,12 @@ def _write_crash_log(exc: BaseException) -> str:
 
 
 def main() -> int:
+    if "--version" in sys.argv or "-v" in sys.argv:
+        from core.constants import APP_NAME, APP_VERSION
+
+        print(f"{APP_NAME} {APP_VERSION}")
+        return 0
+
     if "--debug" in sys.argv:
         sys.argv = [a for a in sys.argv if a != "--debug"]
         from core.logger import set_debug
