@@ -129,11 +129,27 @@ a = Analysis(
         "PyQt6.QtNfc",
         "PyQt6.QtRemoteObjects",
         "PyQt6.QtSpatialAudio",
+        "PyQt6.QtPrintSupport",
+        "PyQt6.QtDesigner",
+        "PyQt6.QtHelp",
+        "PyQt6.QtCharts",
+        "PyQt6.QtOpenGLWidgets",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     noarchive=False,
 )
+
+# Filter out unused Qt translation files (*.qm) from a.datas to optimize bundle size
+a.datas = [
+    d
+    for d in a.datas
+    if not (
+        d[0].endswith(".qm")
+        or "translations" in d[1].replace("\\", "/").split("/")
+        or "translations" in d[0].replace("\\", "/").split("/")
+    )
+]
 # On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, VLC)
 # and standard C++ runtimes (libstdc++, libgcc_s) per AppImage standards.
 # When bundled into PyInstaller/AppImage, these libraries conflict with the host's
