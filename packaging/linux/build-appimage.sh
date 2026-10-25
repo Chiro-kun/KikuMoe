@@ -143,6 +143,21 @@ if [[ ! -x "$APPIMAGETOOL" ]]; then
     chmod +x "$APPIMAGETOOL"
 fi
 
+# Print footprint analysis before packaging into AppImage
+echo ""
+echo "=== AppDir Footprint Analysis ==="
+if command -v du &>/dev/null; then
+    echo "Total uncompressed AppDir size: $(du -sh "$APPDIR" | cut -f1)"
+    echo ""
+    echo "--- Top 30 Largest Files in AppDir ---"
+    find "$APPDIR" -type f -exec du -h {} + | sort -rh | head -30
+    echo ""
+    echo "--- Directory Breakdown (depth 2) ---"
+    du -h -d 2 "$APPDIR" | sort -rh | head -10
+fi
+echo "=================================="
+echo ""
+
 # Build AppImage with Zstandard level 19 compression
 echo "Running appimagetool with zstd level 19 compression..."
 export ARCH

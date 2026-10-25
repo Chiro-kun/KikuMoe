@@ -21,6 +21,14 @@ if [[ -f "$LINUX_FFMPEG" && -d "$PROJECT_ROOT/dist/KikuMoe" ]]; then
     chmod +x "$PROJECT_ROOT/dist/KikuMoe/ffmpeg"
 fi
 
+if [[ -d "$PROJECT_ROOT/dist/KikuMoe" && $(command -v du 2>/dev/null) ]]; then
+    echo ""
+    echo "=== Top 15 Largest Files in dist/KikuMoe ==="
+    find "$PROJECT_ROOT/dist/KikuMoe" -type f -exec du -h {} + | sort -rh | head -15 || true
+    echo "==========================================="
+    echo ""
+fi
+
 VERSION="$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' "$PROJECT_ROOT/version.yml" | head -1)"
 echo "Done. Output:"
 echo "  dist/KikuMoe/KikuMoe (v${VERSION:-2.0.0-beta2})"
