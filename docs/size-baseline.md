@@ -29,73 +29,44 @@ Prima delle ottimizzazioni introdotte nel piano di riproducibilità (`linux-buil
 
 ---
 
-## Piano di Riduzione e Risultati
+## Mappatura dei File nel Bundle (Risultati Misurati in CI - Run 40240250958)
 
-| Componente | Configurazione Baseline | Nuova Configurazione | Risparmio Previsto |
-|---|---|---|---|
-| **Modalità PyInstaller** | `onefile` (273 MB) | `onedir` (`dist/KikuMoe/`) | Elimina duplicazione / estrazione `/tmp` |
-| **FFmpeg Backend** | `gpl` latest unstripped (~92 MB) | `linux64-lgpl` pinned + stripped (~35-42 MB) | ~50 MB risparmiati |
-| **Compressione AppImage** | gzip standard | `zstd -Xcompression-level 19` | Compressione superiore + decompress. ultra-veloce |
-| **Moduli Qt & Traduzioni** | Tutti i moduli PyQt6 inclusi | Exclude mirati + potatura translations in `a.datas` | ~30-45 MB risparmiati |
-| **Dimensione AppImage Stimata** | ~200-210 MB | **~75-95 MB** | **Riduzione >50%** |
+L'analisi dell'impronta (`AppDir Footprint Analysis`) ha rivelato che il bundle decompresso conteneva ~390 MB di file:
 
----
-
-## Dettaglio Implementazione e Verifiche per Task
-
-### Task 0 — Baseline e Documentazione
-- Creazione della presente analisi in `docs/size-baseline.md`.
-- Censimento dei pesi storici di build e delle cause del footprint eccessivo.
-
-### Task 1 — `packaging/linux/fetch-ffmpeg.sh`
-- **Script**: Bash con `set -euo pipefail`.
-- **Repository e Tag**: Fissato a `BtbN/FFmpeg-Builds` con tag `autobuild-2026-10-22-13-06` (fornisce release `linux64-lgpl` statiche, a differenza del fork `yt-dlp/FFmpeg-Builds` che compila esclusivamente `gpl`).
-- **Verifica e Ottimizzazione**:
-  - Download di `checksums.sha256` e verifica rigorosa con `sha256sum -c`.
-  - Estrazione esclusiva di `*/bin/ffmpeg`.
-  - Esecuzione di `strip --strip-unneeded` per rimuovere tabelle di debug ed ELF headers ridondanti.
-  - Installazione con permessi 755 in `packaging/linux/ffmpeg`.
-  - Idempotenza completa: se il binario esiste ed è eseguibile, l'operazione termina con successo immediato.
-- **Integrazione**: Sostituito il download manuale inline in `build.sh` e nei workflow CI.
-
-### Task 2 — `kikumoe.spec`: onedir su Linux
-- **Linux**: Configurato con `EXE(..., exclude_binaries=True, name="KikuMoe", upx=False, strip=False)` e `COLLECT(..., strip=False, upx=False, name="KikuMoe")`. Genera la cartella `dist/KikuMoe/` contenente l'eseguibile e `_internal/`.
-- **Windows**: Invariato come eseguibile singolo portatile (`onefile`), con `upx=False, strip=False`.
-- **Beneficio**: Elimina l'estrazione a runtime da parte del bootloader PyInstaller verso cartelle temporanee `/tmp/_MEI*` dentro l'AppImage montata.
-
-### Task 3 — `packaging/linux/build-appimage.sh`
-- Accetta la directory del bundle (default `dist/KikuMoe`).
-- Copia l'intero bundle in `$APPDIR/usr/bin/` con `cp -a`.
-- Posiziona `ffmpeg` in `usr/bin/ffmpeg` (già nel PATH esportato da `AppRun`) e symlink a `usr/bin/_internal/ffmpeg` per soddisfare ricerche relative sia a `sys.executable` sia a `sys._MEIPASS`.
-- `appimagetool`: Pinned alla versione `1.9.1` con checksum SHA256 (`ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0`).
-- Compressione: Chiamata con `--comp zstd --mksquashfs-opt -Xcompression-level --mksquashfs-opt 19`.
-- Metainfo: Consolidata singola copia in `usr/share/metainfo/me.chiro.kikumoe.metainfo.xml`.
-
-### Task 4 — Gruppo Poetry `build` e `build.sh`
-- Aggiunto in `pyproject.toml` il gruppo dedicato `[tool.poetry.group.build.dependencies]` contenente `pyinstaller` e `pyinstaller-hooks-contrib`.
-- Aggiornato `poetry.lock`.
-- `build.sh` esegue `cd "$PROJECT_ROOT"` prima di invocare `poetry install --only main,build` (escludendo `pytest`, `mypy`, `ruff` dal setup di build).
-- Al termine copia `packaging/linux/ffmpeg` in `dist/KikuMoe/ffmpeg` se presente e notifica il percorso finale.
-
-### Task 5 — Workflow CI Modernizzati (GitHub Actions & Forgejo)
-- **Permessi minimi**: `permissions: contents: read` a livello workflow; `contents: write` circoscritto esclusivamente al job `release`.
-- **Concorrenza**: `concurrency: group: ${{ github.workflow }}-${{ github.ref }}`, con `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`.
-- **Cache**: `setup-python` con `cache: poetry` e Poetry fissato a `2.5.1` via `pipx`.
-- **Job Linux**: Rimosso `ffmpeg` da `apt-get install`, utilizzo di `fetch-ffmpeg.sh`, e smoke test automatico:
-  `chmod +x dist/*.AppImage && QT_QPA_PLATFORM=offscreen timeout 20 dist/*.AppImage --appimage-extract-and-run --version`
-- **Supporto `--version` in KikuMoe.py**: Aggiunto parsing CLI di `--version` e `-v` che stampa nome e versione ritornando codice 0 senza caricare la GUI o i thread audio. Aggiunto test dedicato in `tests/test_cli.py`.
-- **Job Windows**: Aggiunta verifica hash SHA256 (`d16ea67bcc46d4ee9170f05b322d7184768f216f458bef089c3397a6beaff83e`) del pacchetto 7z di MPV scaricato da shinchiro.
-- **Upload Artifact**: Configurato `if-no-files-found: error` e `retention-days: 7`.
-- **Job Release**: Step di validazione che richiede corrispondenza esatta tra tag Git (`GITHUB_REF_NAME`) e `v` + versione in `version.yml`.
-
-### Task 6 — Potatura Qt e Filtro Traduzioni
-- **Moduli esclusi**: Esclusi da `Analysis` i moduli non importati dal progetto (`QtPrintSupport`, `QtDesigner`, `QtHelp`, `QtCharts`, `QtOpenGLWidgets` oltre a quelli multimediali/webengine/qml già potati). `QtSvg` e `QtDBus` mantenuti per rendering icone SVG e tray/notifiche desktop.
-- **Filtro traduzioni**: Filtrate da `a.datas` tutte le voci `.qm` e percorsi `translations/` di Qt, dato che KikuMoe impiega il proprio modulo `core/i18n.py` (dizionari IT/EN).
+1. **FFmpeg Statico LGPL** (140 MB):
+   - `/usr/bin/ffmpeg`: 140 MB uncompressed (la voce principale dell'intero pacchetto).
+2. **Codec e Librerie Transitive di Sistema** (~159 MB uncompressed):
+   - `libicudata.so.70` (29 MB - doppione dell'ICU di sistema)
+   - `libflite_cmu_us_*` (16.5 MB - sintesi vocale text-to-speech)
+   - `libx265.so.199` (16 MB - encoder video HEVC)
+   - `libcodec2.so.1.0` (15 MB - codec vocale radio)
+   - `libavcodec.so.58` (15 MB - codec video di Ubuntu)
+   - `librsvg-2.so.2` (11 MB - rendering SVG GNOME)
+   - `libgtk-3.so.0` (8.2 MB - toolkit grafico GTK3)
+   - `libplacebo.so.192` (7.3 MB - shader GPU per MPV)
+   - `liblapack.so.3` (7.3 MB - algebra lineare scientifica)
+   - `libaom.so.3` (5.2 MB - decoder video AV1)
+   - `libQt6Pdf.so.6` (5.2 MB - modulo PDF Qt)
+   - `libavfilter.so.7` (4.6 MB - filtri video di sistema)
+   - `libvpx.so.7` (3.1 MB - decoder video VP8/VP9)
+   - `libgfortran.so.5` (2.9 MB - runtime GNU Fortran)
+   - `libavformat.so.58` (2.6 MB - demuxer di sistema)
+3. **Runtime Essenziale di KikuMoe & PyQt6** (~75 MB uncompressed):
+   - `libicudata.so.73` (31 MB) + `libicui18n.so.73` (4.3 MB) + `libicuuc.so.73` (2.5 MB) di Qt6
+   - `libpython3.12.so.1.0` (29 MB)
+   - `libQt6Gui.so.6` (10 MB) + `libQt6Widgets.so.6` (7.4 MB) + `libQt6Core.so.6` (6.6 MB)
+   - Binding PyQt6 (`QtWidgets`, `QtCore`, `QtGui` = ~16 MB)
+   - `libcrypto.so.3` (4.3 MB)
 
 ---
 
-## Note e Ipotesi Esplicite
-1. **Repository FFmpeg LGPL**: Il repository upstream `BtbN/FFmpeg-Builds` è stato impiegato come default poiché il fork `yt-dlp/FFmpeg-Builds` distribuisce solo pacchetti `gpl`. Lo script `fetch-ffmpeg.sh` supporta comunque `FFMPEG_REPO` e `FFMPEG_VARIANT` configurabili con fallback trasparente a `gpl`.
-2. **Ricerca runtime FFmpeg**: KikuMoe controlla in ordine: variabile d'ambiente `FFMPEG_PATH`, cartella dell'eseguibile (`exe_dir`), cartella `_MEIPASS`, e infine `PATH` di sistema. Con il layout AppImage onedir + symlink `_internal/ffmpeg`, la compatibilità è garantita in qualsiasi scenario di invocazione.
-3. **Argomento `--version`**: Implementato direttamente all'ingresso di `main()` in `KikuMoe.py`, consentendo smoke test istantanei in ambienti headless CI senza dipendere da server display X11/Wayland.
+## Interventi di Bonifica (Commit `73a21f8`)
+- **Rimozione di `libmpv-dev` dal job `build-linux`**: PyInstaller non ha più accesso a `libmpv.so` dell'ambiente CI di compilazione, troncando l'albero di dipendenze di tutte le 15 librerie video parassite.
+- **Filtro `_should_exclude_binary` in `kikumoe.spec`**: Esclusione categorica di `libmpv`, `libav*`, `libx26*`, `libcodec2`, `libplacebo`, `libflite*`, `liblapack`, `libgfortran`, `libgtk*`, `librsvg*`, `libQt6Pdf*`, e di `libicu*.so.70` di sistema (preservando l'ICU `.73` di PyQt6).
+- **Risultato atteso**: Riduzione di ~160 MB decompressi (~40-50 MB compressi), portando l'AppImage a **~120-130 MB**.
 
+---
+
+## Task 7 (Opzionale) — FFmpeg Minimale solo-audio
+- Qualora si desideri ridurre ulteriormente le dimensioni sotto i **~60-70 MB**, la voce #1 rimasta è `usr/bin/ffmpeg` (140 MB).
+- Compilando un binario statico dedicato con `--disable-everything` e solo i decoder MP3/Vorbis/Opus e supporto HTTPS (GnuTLS/mbedTLS), la dimensione scenderebbe a soli **~5-8 MB**.
