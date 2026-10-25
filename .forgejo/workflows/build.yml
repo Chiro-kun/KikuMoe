@@ -27,7 +27,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            file wget curl binutils portaudio19-dev \
+            file wget curl binutils gcc make pkg-config libssl-dev portaudio19-dev \
             libglib2.0-0 libgl1 libegl1 libdbus-1-3 \
             libfontconfig1 libfreetype6 \
             libxkbcommon0 libxkbcommon-x11-0 \
@@ -41,10 +41,14 @@ jobs:
           pip install poetry==2.5.1
           poetry install --only main,build
 
-      - name: Fetch static FFmpeg
-        env:
-          FFMPEG_TAG: 'autobuild-2026-10-22-13-06'
-        run: bash packaging/linux/fetch-ffmpeg.sh
+      - name: Build minimal audio FFmpeg
+        run: bash packaging/linux/build-minimal-ffmpeg.sh packaging/linux/ffmpeg
+
+      - name: Verify minimal FFmpeg live stream decoding
+        run: |
+          ./packaging/linux/ffmpeg -version | head -2
+          timeout 15 ./packaging/linux/ffmpeg -i https://listen.moe/stream -f s16le -t 3 -loglevel error - > /dev/null
+          timeout 15 ./packaging/linux/ffmpeg -i https://listen.moe/fallback -f s16le -t 3 -loglevel error - > /dev/null
 
       - name: Build PyInstaller onedir bundle
         run: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec

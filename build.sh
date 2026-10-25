@@ -4,10 +4,14 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_ROOT"
 
-# Fetch static ffmpeg if missing on Linux for self-contained audio playback
+# Fetch or build static ffmpeg if missing on Linux for self-contained audio playback
 LINUX_FFMPEG="$PROJECT_ROOT/packaging/linux/ffmpeg"
 if [[ ! -x "$LINUX_FFMPEG" ]]; then
-    bash "$PROJECT_ROOT/packaging/linux/fetch-ffmpeg.sh" "$LINUX_FFMPEG"
+    if [[ "${USE_MINIMAL_FFMPEG:-1}" == "1" ]] && command -v gcc &>/dev/null && command -v make &>/dev/null; then
+        bash "$PROJECT_ROOT/packaging/linux/build-minimal-ffmpeg.sh" "$LINUX_FFMPEG"
+    else
+        bash "$PROJECT_ROOT/packaging/linux/fetch-ffmpeg.sh" "$LINUX_FFMPEG"
+    fi
 fi
 
 echo "Installing dependencies via Poetry..."
