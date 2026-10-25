@@ -28,4 +28,3 @@ def test_cli_short_version_flag(
     assert exit_code == 0
     captured = capsys.readouterr()
     assert f"{APP_NAME} {APP_VERSION}" in captured.out
-
