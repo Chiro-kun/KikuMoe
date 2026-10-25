@@ -95,12 +95,17 @@ def log_audio_diagnostics(log: logging.Logger) -> None:
         pa_status = f"Failed ({e})"
 
     # MPV
-    from audio.player_mpv import _found_libmpv, mpv
+    from audio.player_mpv import _found_libmpv, _mpv_import_error, mpv
 
     if mpv is not None:
         mpv_status = f"Ready ({_found_libmpv or 'system library'})"
     else:
-        mpv_status = f"Unavailable ({_found_libmpv or 'libmpv not found'})"
+        err_msg = ""
+        if _mpv_import_error:
+            cause = getattr(_mpv_import_error, "__cause__", None)
+            cause_str = f" - cause: {cause}" if cause else ""
+            err_msg = f" - {type(_mpv_import_error).__name__}: {_mpv_import_error}{cause_str}"
+        mpv_status = f"Unavailable ({_found_libmpv or 'libmpv not found'}{err_msg})"
 
     # VLC
     from audio.player_vlc import vlc

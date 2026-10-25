@@ -264,3 +264,45 @@ def test_kikumoe_spec_audio_excludes():
     ]
     for lib in expected_excludes:
         assert f'"{lib}"' in spec_content, f"kikumoe.spec missing expected exclude: {lib}"
+
+
+def test_smooth_progress_bar_live_mode():
+    """Verify SmoothProgressBar supports live mode toggling and state inspection."""
+    import os
+
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.main_window import SmoothProgressBar
+
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    _ = QApplication.instance() or QApplication(["pytest"])
+
+    bar = SmoothProgressBar()
+    assert not bar.is_live_mode()
+
+    bar.set_live_mode(True)
+    assert bar.is_live_mode()
+    assert bar._live_mode is True
+
+    bar.set_live_mode(False)
+    assert not bar.is_live_mode()
+    assert bar._live_mode is False
+
+
+def test_audio_diagnostics_mpv_error_formatting(monkeypatch):
+    """Verify log_audio_diagnostics formats MPV error details cleanly when unavailable."""
+    import logging
+
+    from audio.diagnostics import log_audio_diagnostics
+
+    logger = logging.getLogger("TestMpvDiag")
+    monkeypatch.setattr("audio.diagnostics._IS_WIN32", False)
+    monkeypatch.setattr("audio.player_mpv.mpv", None)
+    monkeypatch.setattr(
+        "audio.player_mpv._mpv_import_error",
+        OSError("Cannot open shared object file: No such file"),
+    )
+    monkeypatch.setattr("audio.player_mpv._found_libmpv", "/usr/lib/libmpv.so.2.5.0")
+
+    # Should run and log without raising any exception
+    log_audio_diagnostics(logger)

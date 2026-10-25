@@ -109,6 +109,7 @@ class SmoothProgressBar(QWidget):
         self._buffering_active = False
         self._buffering_indeterminate = False
         self._buffering_percent = 0
+        self._live_mode = False
         self._launch_progress = 1.0
         self._pulse_ring = 1.0
         self._shimmer_phase = 0.0
@@ -174,6 +175,16 @@ class SmoothProgressBar(QWidget):
         self._buffering_percent = max(0, min(100, int(percent)))
         self.update()
 
+    def set_live_mode(self, live: bool) -> None:
+        self._live_mode = bool(live)
+        if self._live_mode:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+        self.update()
+
+    def is_live_mode(self) -> bool:
+        return bool(self._live_mode)
+
     def _tick_anim(self) -> None:
         still_running = False
         if self._launch_progress < 1.0:
@@ -182,8 +193,9 @@ class SmoothProgressBar(QWidget):
         if self._pulse_ring < 1.0:
             self._pulse_ring = min(1.0, self._pulse_ring + 0.045)
             still_running = True
-        if self._buffering_active:
-            self._shimmer_phase = (self._shimmer_phase + 0.032) % 1.0
+        if self._buffering_active or self._live_mode:
+            phase_step = 0.016 if self._live_mode else 0.032
+            self._shimmer_phase = (self._shimmer_phase + phase_step) % 1.0
             still_running = True
         if self._display_ratio is not None:
             target_r = max(0.0, min(1.0, self._value / max(1, self._max)))
@@ -246,6 +258,38 @@ class SmoothProgressBar(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(grad)
             painter.drawRect(QRectF(cx, track_y, comet_w, track_h))
+            painter.restore()
+            painter.end()
+            return
+
+        # 2b. Live Stream Ambient Wave (when duration is unknown / 0)
+        if self._live_mode and not self._buffering_active:
+            wave_w = max(55.0, usable_w * 0.40)
+            travel = usable_w + wave_w
+            cx = margin_x - wave_w + (self._shimmer_phase * travel)
+
+            painter.save()
+            clip_path = QPainterPath()
+            clip_path.addRoundedRect(track_rect, track_r, track_r)
+            painter.setClipPath(clip_path)
+
+            grad = QLinearGradient(cx, 0.0, cx + wave_w, 0.0)
+            c0 = QColor(self._accent_color)
+            c0.setAlpha(0)
+            c1 = QColor(self._accent_color)
+            c1.setAlpha(170)
+            c2 = QColor("#ff7eb6")
+            c2.setAlpha(220)
+            c3 = QColor(self._accent_color)
+            c3.setAlpha(0)
+            grad.setColorAt(0.0, c0)
+            grad.setColorAt(0.35, c1)
+            grad.setColorAt(0.65, c2)
+            grad.setColorAt(1.0, c3)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(grad)
+            painter.drawRect(QRectF(cx, track_y, wave_w, track_h))
             painter.restore()
             painter.end()
             return
@@ -1393,6 +1437,7 @@ class ListenMoePlayer(QWidget):
                     self._current_duration_seconds is not None
                     and self._current_duration_seconds > 0
                 ):
+                    self.song_progress.set_live_mode(False)
                     # Multiplier (1000) for sub-second smoothness
                     self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
 
@@ -1413,6 +1458,7 @@ class ListenMoePlayer(QWidget):
                     self.song_progress.show()
                 else:
                     self.song_progress.setValue(0)
+                    self.song_progress.set_live_mode(True)
                     self.song_progress.show()
 
             self.label_refresh.emit()
@@ -1548,11 +1594,19 @@ class ListenMoePlayer(QWidget):
                 return
 
             if dur <= 0:
-                # Live stream or unknown duration: ticker is alive but doesn't update bar
-                now_int = int(now)
-                if now_int != getattr(self, "_last_live_log", 0) and now_int % 30 == 0:
-                    self._last_live_log = now_int
-                    self.log.debug(f"[DEV] Song ticker: LIVE MODE (title={self._current_title})")
+                # Live stream or unknown duration: ticker is alive, count up elapsed seconds
+                now_synced = now + getattr(self, "_clock_sync_offset", 0)
+                elapsed_raw = max(0.0, now_synced - epoch)
+                current_int_sec = int(elapsed_raw)
+                if current_int_sec != getattr(self, "_last_integer_second", -1):
+                    self._last_integer_second = current_int_sec
+                    if current_int_sec % 30 == 0:
+                        self.log.debug(
+                            "[DEV] Song ticker: LIVE MODE (title=%s, elapsed=%ds)",
+                            self._current_title,
+                            current_int_sec,
+                        )
+                    self.update_now_playing_label()
                 return
 
             # Use synced clock: now + clock_sync_offset
@@ -2844,6 +2898,18 @@ class ListenMoePlayer(QWidget):
         try:
             if getattr(self, "_current_duration_seconds", None) == 0:
                 time_text = self.t("live_mode")
+                if getattr(self, "_current_start_epoch", None) is not None:
+                    try:
+                        import time
+
+                        now = time.time() + getattr(self, "_clock_sync_offset", 0)
+                        elapsed = max(0.0, now - self._current_start_epoch)
+                        if hasattr(self, "song_elapsed_label"):
+                            self.song_elapsed_label.setText(self._format_mmss(int(elapsed)))
+                    except Exception:
+                        pass
+                elif hasattr(self, "song_elapsed_label"):
+                    self.song_elapsed_label.setText("0:00")
             elif self._current_duration_seconds and int(self._current_duration_seconds) > 0:
                 # Prefer remaining time only if start timestamp is plausible;
                 # otherwise show total duration
