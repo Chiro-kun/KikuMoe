@@ -61,6 +61,7 @@ echo "[build-minimal-ffmpeg] Configuring minimal audio-only features..."
     --enable-small \
     --enable-pthreads \
     --enable-network \
+    --disable-x86asm \
     --disable-ffplay \
     --disable-ffprobe \
     --disable-avdevice \
