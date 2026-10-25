@@ -15,7 +15,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-TARGET="${1:-$REPO_ROOT/packaging/linux/ffmpeg}"
+if [[ "${1:-}" != "" ]]; then
+    if [[ "$1" = /* ]]; then
+        TARGET="$1"
+    else
+        TARGET="$REPO_ROOT/$1"
+    fi
+else
+    TARGET="$REPO_ROOT/packaging/linux/ffmpeg"
+fi
 FFMPEG_REPO="${FFMPEG_REPO:-BtbN/FFmpeg-Builds}"
 FFMPEG_TAG="${FFMPEG_TAG:-autobuild-2026-10-22-13-06}"
 FFMPEG_VARIANT="${FFMPEG_VARIANT:-lgpl}"
