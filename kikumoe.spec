@@ -180,22 +180,52 @@ if _IS_WIN32:
     if mfst.exists():
         exe_kwargs["manifest"] = str(mfst)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    name=f"KikuMoe-{app_version}",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,
-    disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    argv_emulation=False,
-    **exe_kwargs,
-)
+    # Windows build: single executable (onefile)
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name=f"KikuMoe-{app_version}",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        argv_emulation=False,
+        **exe_kwargs,
+    )
+else:
+    # Linux build: directory mode (onedir) to avoid redundant extraction and compression
+    # inside AppImage SquashFS. Output: dist/KikuMoe/KikuMoe and dist/KikuMoe/_internal/
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="KikuMoe",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        argv_emulation=False,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="KikuMoe",
+    )
