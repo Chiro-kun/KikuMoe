@@ -75,7 +75,7 @@ echo "[build-minimal-ffmpeg] Configuring minimal audio-only features..."
     --disable-avdevice \
     --disable-swscale \
     --disable-postproc \
-    --enable-protocol=file,http,https,tcp,tls \
+    --enable-protocol=file,http,https,tcp,tls,pipe,crypto \
     --enable-demuxer=ogg,mp3,aac,flac,pcm_s16le,s16le,wav \
     --enable-decoder=vorbis,opus,mp3,mp3float,aac,flac,pcm_s16le \
     --enable-parser=vorbis,opus,mpegaudio,aac,flac \
@@ -108,6 +108,8 @@ fi
 # Quick validation
 echo "[build-minimal-ffmpeg] Verifying binary execution..."
 "$TARGET" -version | head -2
+echo "[build-minimal-ffmpeg] Enabled protocols:"
+"$TARGET" -protocols | grep -E "http|https|pipe|file" || true
 echo "[build-minimal-ffmpeg] Enabled muxers:"
 "$TARGET" -muxers | grep -E "s16|pcm|wav" || true
 echo "[build-minimal-ffmpeg] Enabled decoders:"
