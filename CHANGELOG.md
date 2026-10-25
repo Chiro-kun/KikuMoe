@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta2] - 2026-10-23
 
 ### Added
+- **Linux Audio Startup Diagnostics**: Automated probing of active sound daemons (PipeWire socket, PulseAudio server, ALSA) and audio backend readiness (FFmpeg binary, PortAudio host APIs, MPV, VLC) logged on startup and inspectable in the Developer Console.
+- **Standalone Static FFmpeg Bundling**: Bundled static `ffmpeg` directly into PyInstaller's frozen binary (`sys._MEIPASS`) and automated static FFmpeg download in `build.sh` for self-contained Linux builds.
+- **Persistent File Logging & History Buffer**: Added rotating log file handler (`kikumoe.log`) in platform data directories and an in-memory ring buffer (1000 lines) replayed upon opening the Developer Console.
 - **Powered By Section**: New cards in Settings (Info tab) and About dialog featuring brand direct links to supported radio stream services (LISTEN.moe, etc.) with vector logos.
 - **Telegram Channel Link**: Added official Telegram link button with custom vector plane icon in the About section.
 - **Micro-Interactions**: Smooth 60 FPS click-bounce animations (`0.90 -> 1.04 -> 1.0`) on all action, link, and copy buttons across the UI.
@@ -24,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI / Build Triggers**: Added the `redesign` branch directly to GitHub Actions and Forgejo CI workflow triggers to enable automated builds on both tags and branch pushes.
 
 ### Fixed
+- **Linux AppImage Audio Playback**:
+  - Excluded conflicting low-level system audio libraries (`libasound`, `libpulse*`, `libjack`, `libpipewire*`, `libspa*`, `libasound_module*`) in `kikumoe.spec`, forcing dynamic binding to host ALSA/PipeWire/PulseAudio plugins.
+  - Bundled standalone static `ffmpeg` in AppImage (`usr/bin/ffmpeg`) and added search paths in `PlayerFFmpeg`.
+  - Added multi-output driver fallback (`--aout=pulse,alsa`) for VLC on Linux.
+- **Silent Audio Failures & Error Visibility**:
+  - Promoted FFmpeg process termination, exit codes, and `stderr` error output from `DEBUG` to `ERROR` in `PlayerFFmpeg`.
+  - Promoted VLC and MPV initialization and playback failure exceptions to `ERROR`, ensuring all streaming issues are visible in `kikumoe.log` and the Developer Console.
+- **Typing & Event Override Signatures (Pylance)**:
+  - Corrected Qt event override parameter signatures (`enterEvent(self, event)`, `mousePressEvent(self, a0)`, `mouseMoveEvent(self, a0)`, `setChecked(self, a0)`, `eventFilter(self, a0, a1)`, `showEvent(self, a0)`) across `custom_titlebar.py`, `settings_dialog.py`, `dev_console.py`, and `about_dialog.py`.
+  - Added null safety checks on optional Qt mouse and key events.
 - **Settings Animation Stutter (#72)**: Pre-warmed settings panel widgets during application startup idle and cached SVG/PNG brand assets in memory, reducing first-click opening time from ~330 ms to < 10 ms.
 - **Settings Dialog Closing Delay**: Streamlined dialog destruction and animation callbacks for instantaneous, lag-free close interactions.
 - **Layout & Sizing Stability**:

@@ -53,6 +53,17 @@ mkdir -p "$APPDIR/usr/share/metainfo"
 cp "$BINARY" "$APPDIR/usr/bin/KikuMoe"
 chmod +x "$APPDIR/usr/bin/KikuMoe"
 
+# Bundle static ffmpeg into AppDir if present in packaging/linux
+if [[ -f "$LINUX_PKG/ffmpeg" ]]; then
+    echo "Bundling static ffmpeg into AppDir..."
+    cp "$LINUX_PKG/ffmpeg" "$APPDIR/usr/bin/ffmpeg"
+    chmod +x "$APPDIR/usr/bin/ffmpeg"
+elif command -v ffmpeg &>/dev/null; then
+    echo "Copying host ffmpeg into AppDir..."
+    cp "$(command -v ffmpeg)" "$APPDIR/usr/bin/ffmpeg" || true
+    chmod +x "$APPDIR/usr/bin/ffmpeg" || true
+fi
+
 # Desktop file and icon at AppDir root (required by appimagetool)
 cp "$LINUX_PKG/me.chiro.kikumoe.desktop" "$APPDIR/me.chiro.kikumoe.desktop"
 cp "$LINUX_PKG/kikumoe.png" "$APPDIR/kikumoe.png"
@@ -100,6 +111,7 @@ if [ -z "$SSL_CERT_DIR" ]; then
         fi
     done
 fi
+export PATH="$HERE/usr/bin:$PATH"
 exec "$HERE/usr/bin/KikuMoe" "$@"
 APPRUN_EOF
 chmod +x "$APPDIR/AppRun"

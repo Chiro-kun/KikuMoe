@@ -4,17 +4,20 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
+vlc: Any = None
 try:
-    import vlc
+    import vlc as _vlc_module
+
+    vlc = _vlc_module
 except Exception:
-    vlc = None  # type: ignore
+    vlc = None
 
 
 class PlayerVLC:
@@ -29,8 +32,8 @@ class PlayerVLC:
         self._network_caching_ms: int | None = (
             int(network_caching_ms) if network_caching_ms is not None else None
         )
-        self.instance: vlc.Instance | None = None
-        self.player: vlc.MediaPlayer | None = None
+        self.instance: Any | None = None
+        self.player: Any | None = None
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
@@ -134,10 +137,16 @@ class PlayerVLC:
                     "--live-caching=1000",  # Small live caching for smooth playback
                 ]
             )
-            # On Linux, route audio through PulseAudio (covers PipeWire via pipewire-pulse).
-            # This ensures VLC uses PipeWire when pipewire-pulse is active.
+            # On Linux, prefer PulseAudio if the socket or daemon is active,
+            # but allow libvlc to fall back to ALSA rather than forcing pulse exclusively.
             if not _IS_WIN32:
-                inst_opts.append("--aout=pulse")
+                uid = getattr(os, "getuid", lambda: 1000)()
+                pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR", f"/run/user/{uid}")
+                has_pipewire = os.path.exists(os.path.join(pw_sock, "pipewire-0"))
+                pulse_native = os.path.join(f"/run/user/{uid}", "pulse", "native")
+                has_pulse = os.path.exists(pulse_native) or bool(os.environ.get("PULSE_SERVER"))
+                if has_pulse or has_pipewire:
+                    inst_opts.append("--aout=pulse,alsa")
             # Set HTTP User-Agent globally for VLC instance
             if getattr(self, "_user_agent", None):
                 inst_opts.append(f"--http-user-agent={self._user_agent}")
@@ -154,7 +163,7 @@ class PlayerVLC:
             self.player = self.instance.media_player_new()
             if self.player is None:
                 self._init_error = "media_player_new() creation failed"
-                self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
+                self.log.error("[BACKEND] PlayerVLC: %s", self._init_error)
                 return
             self.log.debug("[DEBUG] _init_vlc: instance and player created OK")
             try:
@@ -177,7 +186,7 @@ class PlayerVLC:
             self.log.debug("[DEBUG] _init_vlc: ready")
         except Exception as e:
             self._init_error = f"VLC initialization error: {e}"
-            self.log.debug("[DEBUG] _init_vlc: exception: %s", e)
+            self.log.error("[BACKEND] PlayerVLC: %s", self._init_error)
             self.instance = None
             self.player = None
             self._ready = False
@@ -266,7 +275,10 @@ class PlayerVLC:
     def play_url(self, url: str) -> bool:
         self.log.debug("[DEBUG] play_url: url=%s", url)
         if not self.is_ready():
-            self.log.debug("[DEBUG] play_url: not ready, emitting libvlc_init_failed")
+            self.log.error(
+                "[BACKEND] PlayerVLC: play_url called but backend is not ready (%s)",
+                self._init_error or "not initialized",
+            )
             self._emit("libvlc_init_failed", None)
             return False
         try:
@@ -277,7 +289,7 @@ class PlayerVLC:
             try:
                 st = self.player.get_state()
                 self.log.debug("[DEBUG] play_url: current state=%s", st)
-                active = st in (
+                active = vlc is not None and st in (
                     vlc.State.Playing,
                     vlc.State.Buffering,
                     vlc.State.Opening,
@@ -296,7 +308,7 @@ class PlayerVLC:
             self.log.debug("[DEBUG] play_url: creating media")
             media = self.instance.media_new(url)
             if media is None:
-                self.log.debug("[DEBUG] play_url: media_new returned None")
+                self.log.error("[BACKEND] PlayerVLC: media_new(%s) returned None", url)
                 self._stopping = False
                 self._emit("error", None)
                 return False
@@ -312,12 +324,12 @@ class PlayerVLC:
             ret = self.player.play()
             self.log.debug("[DEBUG] play_url: play() returned %s", ret)
             if ret != 0:
-                self.log.debug("[DEBUG] play_url: play() returned error code %s", ret)
+                self.log.error("[BACKEND] PlayerVLC: play() returned error code %s", ret)
                 self._emit("error", None)
                 return False
             return True
         except Exception as e:
-            self.log.debug("[DEBUG] play_url: exception: %s", e)
+            self.log.error("[BACKEND] PlayerVLC: play_url exception: %s", e)
             self._stopping = False
             self._emit("error", None)
             return False
@@ -394,7 +406,8 @@ class PlayerVLC:
         if not self.is_ready():
             return False
         try:
-            assert self.player is not None
+            if vlc is None or self.player is None:
+                return False
             st = self.player.get_state()
             return st in (vlc.State.Playing, vlc.State.Buffering, vlc.State.Opening)
         except Exception:
@@ -437,6 +450,9 @@ class PlayerVLC:
             # that they do not schedule a spurious extra restart in the UI.
             if self._stopping:
                 return
+            self.log.error(
+                "[BACKEND] PlayerVLC: MediaPlayerEncounteredError event received from libVLC"
+            )
             self._emit("error", None)
 
     # -------- Dettagli/diagnostica VLC --------

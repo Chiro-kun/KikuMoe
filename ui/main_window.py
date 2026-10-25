@@ -905,6 +905,14 @@ class ListenMoePlayer(QWidget):
         Respects the KEY_AUDIO_BACKEND setting; defaults to auto (FFmpeg → MPV → VLC).
         Also synchronizes initial volume and mute states.
         """
+        if not _IS_WIN32:
+            try:
+                from audio.diagnostics import log_audio_diagnostics
+
+                log_audio_diagnostics(self.log)
+            except Exception as diag_err:
+                self.log.debug("[STARTUP] Audio diagnostics error: %s", diag_err)
+
         self.player = self._create_player(on_event=self._on_player_event)
 
         if not getattr(self.player, "is_ready", lambda: False)():
@@ -1288,6 +1296,12 @@ class ListenMoePlayer(QWidget):
                 self._ui_paused = False
                 self._update_tray_controls()
             elif c in ("error", "libvlc_init_failed"):
+                player_cls = (
+                    getattr(self.player, "__class__", type(self.player)).__name__
+                    if hasattr(self, "player")
+                    else "Unknown"
+                )
+                self.log.error("[UI] Playback event '%s' from player backend %s", code, player_cls)
                 # Se il backend audio non e' pronto, non e' un errore di rete transitorio:
                 # non ritentare.
                 if (

@@ -256,10 +256,10 @@ class BackToPlayerButton(QPushButton):
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -268,7 +268,7 @@ class BackToPlayerButton(QPushButton):
         super().leaveEvent(a0)
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
             self._anim_step = 1
             self._scale = 0.88
@@ -457,10 +457,10 @@ class GlassComboBox(QComboBox):
         self.update()
         super().hidePopup()
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -552,9 +552,9 @@ class AnimatedToggleSwitch(QCheckBox):
         self._anim_timer.timeout.connect(self._tick_anim)
         self.toggled.connect(self._on_toggled)
 
-    def setChecked(self, checked: bool) -> None:
-        super().setChecked(checked)
-        self._progress = 1.0 if checked else 0.0
+    def setChecked(self, a0: bool) -> None:
+        super().setChecked(a0)
+        self._progress = 1.0 if a0 else 0.0
         self.update()
 
     def _on_toggled(self, checked: bool) -> None:
@@ -571,10 +571,10 @@ class AnimatedToggleSwitch(QCheckBox):
             self._progress += diff * 0.34
         self.update()
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -718,26 +718,27 @@ class SettingsCategoryBar(QWidget):
                 self._slide_timer.start()
             self.update()
 
-    def mouseMoveEvent(self, e) -> None:
-        n = max(1, len(self._labels))
-        seg_w = self.width() / float(n)
-        idx = int(e.position().x() // seg_w)
-        idx = max(0, min(n - 1, idx))
-        if idx != self._hover_idx:
-            self._hover_idx = idx
-            self.update()
-        super().mouseMoveEvent(e)
+    def mouseMoveEvent(self, a0) -> None:
+        if a0 is not None:
+            n = max(1, len(self._labels))
+            seg_w = self.width() / float(n)
+            idx = int(a0.position().x() // seg_w)
+            idx = max(0, min(n - 1, idx))
+            if idx != self._hover_idx:
+                self._hover_idx = idx
+                self.update()
+        super().mouseMoveEvent(a0)
 
     def leaveEvent(self, a0) -> None:
         self._hover_idx = -1
         self.update()
         super().leaveEvent(a0)
 
-    def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton and self._labels:
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton and self._labels:
             n = len(self._labels)
             seg_w = self.width() / float(n)
-            idx = int(e.position().x() // seg_w)
+            idx = int(a0.position().x() // seg_w)
             idx = max(0, min(n - 1, idx))
             if idx != self._selected:
                 self._selected = idx
@@ -746,7 +747,7 @@ class SettingsCategoryBar(QWidget):
                 self._slide_timer.start()
                 self.tab_changed.emit(idx)
                 self.update()
-        super().mousePressEvent(e)
+        super().mousePressEvent(a0)
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
@@ -1456,11 +1457,13 @@ class SettingsDialog(QDialog):
         try:
             self._save_settings()
             host = self._host_window or self.window()
-            if host and hasattr(host, "open_dev_console"):
-                try:
-                    host.open_dev_console(host)
-                except TypeError:
-                    host.open_dev_console()
+            if host is not None:
+                open_console = getattr(host, "open_dev_console", None)
+                if callable(open_console):
+                    try:
+                        open_console(host)
+                    except TypeError:
+                        open_console()
         except Exception:
             pass
 
@@ -1510,9 +1513,9 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
 
-    def showEvent(self, event):
+    def showEvent(self, a0):
         try:
-            super().showEvent(event)
+            super().showEvent(a0)
         except Exception:
             pass
         if not self._embedded:

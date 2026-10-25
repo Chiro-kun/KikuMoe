@@ -110,13 +110,32 @@ a = Analysis(
     win_private_assemblies=False,
     noarchive=False,
 )
-# On Linux, PyInstaller auto-detects libvlc.so.5 / libvlccore.so.9 via ctypes
-# analysis and bundles them — but without the full VLC plugin tree and runtime
-# dependencies (libdbus, libsystemd, audio plugins…), the bundled copy cannot
-# initialise audio output.  Remove them so the system-installed VLC is used
-# end-to-end, which is what the comment above already intends.
+# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, VLC).
+# When bundled into PyInstaller/AppImage, these libraries conflict with the host's
+# ALSA plugins, PipeWire, and PulseAudio daemons, causing audio initialization to fail.
+# Excluding them forces the application to load them directly from the host system.
 if not _IS_WIN32:
-    a.binaries = [b for b in a.binaries if not b[0].startswith(("libvlc", "libvlccore"))]
+    _linux_audio_excludes = (
+        "libvlc",
+        "libvlccore",
+        "libasound",
+        "libpulse",
+        "libpulse-simple",
+        "libpulsecommon",
+        "libjack",
+        "libpipewire",
+        "libspa",
+        "libasound_module",
+    )
+    a.binaries = [
+        b for b in a.binaries
+        if not any(b[0].startswith(prefix) for prefix in _linux_audio_excludes)
+    ]
+
+    # Bundle standalone static ffmpeg into the frozen binary if present
+    _linux_ffmpeg = repo_root / "packaging" / "linux" / "ffmpeg"
+    if _linux_ffmpeg.is_file():
+        a.binaries.append(("ffmpeg", str(_linux_ffmpeg), "BINARY"))
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

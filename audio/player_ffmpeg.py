@@ -36,6 +36,9 @@ def _find_ffmpeg_bin() -> str:
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
         candidates.append(exe_dir / ("ffmpeg.exe" if _IS_WIN32 else "ffmpeg"))
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / ("ffmpeg.exe" if _IS_WIN32 else "ffmpeg"))
     else:
         try:
             repo_root = Path(__file__).resolve().parent.parent
@@ -98,6 +101,13 @@ class PlayerFFmpeg:
         self._init_error = None
         if pyaudio is None:
             self._init_error = "pyaudio module not installed or unavailable"
+            self.log.warning("[BACKEND] PlayerFFmpeg: %s", self._init_error)
+            return
+        if not self._check_ffmpeg():
+            self._init_error = (
+                f"ffmpeg executable not found in PATH or app directory ('{self._ffmpeg_bin}')"
+            )
+            self.log.warning("[BACKEND] PlayerFFmpeg: %s", self._init_error)
             return
         try:
             with silence_stderr():
@@ -109,6 +119,7 @@ class PlayerFFmpeg:
                 self._linux_preferred_device = None
         except Exception as e:
             self._init_error = f"PyAudio initialization error: {e}"
+            self.log.error("[BACKEND] PlayerFFmpeg: %s", self._init_error)
             self._ready = False
 
     def _detect_linux_output_device(self) -> int | None:
@@ -169,7 +180,7 @@ class PlayerFFmpeg:
         return None
 
     def is_ready(self) -> bool:
-        return bool(self._ready and pyaudio is not None)
+        return bool(self._ready and pyaudio is not None and self._check_ffmpeg())
 
     def reinitialize(
         self, libvlc_path: str | None = None, network_caching_ms: int | None = None
@@ -600,8 +611,8 @@ class PlayerFFmpeg:
                         e,
                     )
 
-            self.log.debug(
-                "[DEBUG] _open_pyaudio_stream: all rates failed for device %s, retry default",
+            self.log.warning(
+                "[BACKEND] PlayerFFmpeg: all rates failed for device %s, fallback to default",
                 device_idx,
             )
 
@@ -691,7 +702,7 @@ class PlayerFFmpeg:
             # Check ffmpeg availability
             self.log.debug("[DEBUG] _stream_worker: checking ffmpeg availability")
             if not self._check_ffmpeg():
-                self.log.debug("[DEBUG] _stream_worker: ffmpeg not available")
+                self.log.error("[BACKEND] PlayerFFmpeg: ffmpeg is not available")
                 self._emit("error", None)
                 return
 
@@ -702,7 +713,9 @@ class PlayerFFmpeg:
                     device_idx = self._get_output_device_index()
                     self._audio_stream, stream_rate = self._open_pyaudio_stream(device_idx)
                     try:
-                        if hasattr(self._audio_stream, "start_stream"):
+                        if self._audio_stream is not None and hasattr(
+                            self._audio_stream, "start_stream"
+                        ):
                             self._audio_stream.start_stream()
                             self.log.debug(
                                 "[DEBUG] _stream_worker: PyAudio stream started at rate=%d",
@@ -713,11 +726,11 @@ class PlayerFFmpeg:
                             "[DEBUG] _stream_worker: could not start PyAudio stream: %s", se
                         )
                 except Exception as e:
-                    self.log.debug("[DEBUG] _stream_worker: failed to open PyAudio stream: %s", e)
+                    self.log.error("[BACKEND] PlayerFFmpeg: failed to open PyAudio stream: %s", e)
                     self._emit("error", None)
                     return
             else:
-                self.log.debug("[DEBUG] _stream_worker: PyAudio instance not ready")
+                self.log.error("[BACKEND] PlayerFFmpeg: PyAudio instance is not ready")
                 self._emit("error", None)
                 return
 
@@ -856,7 +869,7 @@ class PlayerFFmpeg:
                         self._ffmpeg_process.pid,
                     )
                 except Exception as e:
-                    self.log.debug("[DEBUG] _stream_worker: failed to start ffmpeg: %s", e)
+                    self.log.error("[BACKEND] PlayerFFmpeg: failed to launch ffmpeg process: %s", e)
                     self._ffmpeg_process = None
                     continue
 
@@ -916,14 +929,15 @@ class PlayerFFmpeg:
                             except Exception:
                                 pass
                             forced_error_ref["v"] = True
-                            try:
-                                p.terminate()
-                                p.wait(timeout=1.0)
-                            except Exception:
+                            if p is not None:
                                 try:
-                                    p.kill()
+                                    p.terminate()
+                                    p.wait(timeout=1.0)
                                 except Exception:
-                                    pass
+                                    try:
+                                        p.kill()
+                                    except Exception:
+                                        pass
                             break
                         time.sleep(0.5)
 
@@ -945,19 +959,24 @@ class PlayerFFmpeg:
                         break
                     if proc.poll() is not None:
                         code = proc.poll()
-                        self.log.debug(
-                            "[DEBUG] _stream_worker: ffmpeg process ended with code: %s", code
-                        )
                         err = b""
                         try:
                             if proc.stderr:
                                 err = proc.stderr.read() or b""  # type: ignore[assignment]
-                                if err:
-                                    self.log.debug(
-                                        "[DEBUG] ffmpeg stderr: %s", err.decode(errors="ignore")
-                                    )
                         except Exception as e:
                             self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
+                        err_text = err.decode(errors="ignore").strip()
+                        if code not in (0, None) or err_text:
+                            self.log.error(
+                                "[BACKEND] PlayerFFmpeg: FFmpeg process exited with code %s: %s",
+                                code,
+                                err_text or "no stderr output",
+                            )
+                        else:
+                            self.log.debug(
+                                "[DEBUG] _stream_worker: ffmpeg process ended normally (code: %s)",
+                                code,
+                            )
                         try:
                             if "forced_error_ref" in locals() and forced_error_ref.get("v"):
                                 forced_error = True
@@ -1083,11 +1102,14 @@ class PlayerFFmpeg:
 
             if not self._stop_requested:
                 if forced_error:
-                    self.log.debug("[DEBUG] _stream_worker: emitting error due to forced_error")
+                    self.log.error(
+                        "[BACKEND] PlayerFFmpeg: stream failed or stalled; emitting error"
+                    )
                     self._emit("error", None)
                 elif not started_streaming:
-                    self.log.debug(
-                        "[DEBUG] _stream_worker: connection failed before data (all attempts)"
+                    self.log.error(
+                        "[BACKEND] PlayerFFmpeg: connection failed before receiving audio data"
+                        " (all attempts); emitting error"
                     )
                     self._emit("error", None)
                 else:
@@ -1098,7 +1120,9 @@ class PlayerFFmpeg:
                 self._emit("stopped", None)
 
         except Exception as e:
-            self.log.debug("[DEBUG] _stream_worker: outer exception: %s", e)
+            self.log.error(
+                "[BACKEND] PlayerFFmpeg: unhandled exception in stream worker thread: %s", e
+            )
             if not self._stop_requested:
                 self._emit("error", None)
         finally:

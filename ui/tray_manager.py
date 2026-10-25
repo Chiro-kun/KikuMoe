@@ -578,9 +578,10 @@ class TrayManager(QObject):
     def _nudge_menu_left(self):
         """Sposta il menu della tray a sinistra per evitare overflow dei sottomenu."""
         try:
-            menu = self._tray.contextMenu()
-            if menu:
-                QTimer.singleShot(0, lambda: self._do_nudge(menu))
+            if self._tray is not None:
+                menu = self._tray.contextMenu()
+                if menu:
+                    QTimer.singleShot(0, lambda: self._do_nudge(menu))
         except Exception:
             pass
 

@@ -334,7 +334,7 @@ class PlayerMPV:
         linux_ao: str | None = None
         if not _IS_WIN32:
             try:
-                uid = os.getuid()  # type: ignore[attr-defined]
+                uid = getattr(os, "getuid", lambda: 1000)()
                 pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR", f"/run/user/{uid}")
                 if os.path.exists(os.path.join(pw_sock, "pipewire-0")):
                     linux_ao = "pipewire,pulse,alsa"
@@ -342,33 +342,46 @@ class PlayerMPV:
                     linux_ao = "pulse,alsa"
             except Exception:
                 linux_ao = "pulse,alsa"
+        kwargs: dict = {}
         try:
             lib_path = _found_libmpv
             if lib_path:
                 self.log.info("[BACKEND] PlayerMPV: using libmpv at %s", lib_path)
 
-            kwargs: dict = dict(
+            def _mpv_log_handler(loglevel: str, component: str, message: str) -> None:
+                lvl = (loglevel or "").lower()
+                clean = f"[{component}] {message.strip()}"
+                if lvl in ("fatal", "error"):
+                    self.log.error("[MPV] %s", clean)
+                elif lvl == "warn":
+                    self.log.warning("[MPV] %s", clean)
+                else:
+                    self.log.debug("[MPV] %s", clean)
+
+            kwargs = dict(
                 vid="no",
                 terminal=False,
-                quiet=True,
+                log_handler=_mpv_log_handler,
+                loglevel="warn",
                 user_agent=self._user_agent,
             )
             if linux_ao:
                 kwargs["ao"] = linux_ao
-            self._player = mpv.MPV(**kwargs)
-            self._player.volume = self._to_backend_volume(self._volume)
-            self._player.mute = self._muted
+            player = mpv.MPV(**kwargs)
+            self._player = player
+            player.volume = self._to_backend_volume(self._volume)
+            player.mute = self._muted
 
-            @self._player.event_callback("start-file")
+            @player.event_callback("start-file")
             def _on_start(event):
                 self._stopping = False
                 self._emit("opening", None)
 
-            @self._player.event_callback("file-loaded")
+            @player.event_callback("file-loaded")
             def _on_loaded(event):
                 self._emit("playing", None)
 
-            @self._player.event_callback("end-file")
+            @player.event_callback("end-file")
             def _on_end(event):
                 # If stop()/force_cleanup() set the flag, absorb this event —
                 # 'stopped' was already emitted by the calling method.
@@ -381,7 +394,7 @@ class PlayerMPV:
                 # Guard against string/enum forms in future python-mpv versions.
                 reason = getattr(event, "reason", None)
                 try:
-                    reason_int = int(reason)
+                    reason_int = int(reason) if reason is not None else -1
                 except Exception:
                     reason_int = -1
                 reason_str = str(reason).lower()
@@ -393,11 +406,14 @@ class PlayerMPV:
                 ):
                     self._emit("stopped", None)
                 elif reason_int == _MPV_END_ERROR or "error" in reason_str:
+                    self.log.error(
+                        "[BACKEND] PlayerMPV: playback ended with error (reason=%s)", reason
+                    )
                     self._emit("error", None)
                 else:
                     self._emit("ended", None)
 
-            @self._player.property_observer("cache-buffering-state")
+            @player.property_observer("cache-buffering-state")
             def _on_cache(name, value):
                 if value is not None:
                     try:
@@ -420,13 +436,16 @@ class PlayerMPV:
                 try:
                     self.log.debug("[DEBUG] PlayerMPV: retrying without ao preference")
                     kwargs.pop("ao")
-                    self._player = mpv.MPV(**kwargs)
-                    self._player.volume = self._to_backend_volume(self._volume)
-                    self._player.mute = self._muted
+                    player = mpv.MPV(**kwargs)
+                    self._player = player
+                    player.volume = self._to_backend_volume(self._volume)
+                    player.mute = self._muted
                     self._ready = True
                 except Exception as e2:
                     self._init_error = str(e2)
-                    self.log.debug("[DEBUG] PlayerMPV: retry also failed: %s", e2)
+                    self.log.error(
+                        "[BACKEND] PlayerMPV: retry without ao preference also failed: %s", e2
+                    )
                     self._player = None
                     self._ready = False
             else:

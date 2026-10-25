@@ -22,7 +22,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            libmpv-dev ffmpeg file wget \
+            libmpv-dev ffmpeg file wget portaudio19-dev \
             libglib2.0-0 libgl1 libegl1 libdbus-1-3 \
             libfontconfig1 libfreetype6 \
             libxkbcommon0 libxkbcommon-x11-0 \
@@ -35,6 +35,16 @@ jobs:
         run: |
           pip install poetry
           poetry install --with dev
+
+      - name: Download static ffmpeg on the fly
+        run: |
+          FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
+          echo "Downloading static ffmpeg from $FFMPEG_URL..."
+          wget -q "$FFMPEG_URL" -O ffmpeg.tar.xz
+          tar -xf ffmpeg.tar.xz --wildcards '*/bin/ffmpeg' --strip-components=2
+          mv ffmpeg packaging/linux/ffmpeg
+          chmod +x packaging/linux/ffmpeg
+          rm -f ffmpeg.tar.xz
 
       - name: Build PyInstaller binary
         run: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec

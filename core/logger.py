@@ -1,8 +1,11 @@
+from __future__ import annotations
+
+import collections
 import contextlib
 import logging
 import os
 import sys
-from typing import Optional
+from logging.handlers import RotatingFileHandler
 
 _DEFAULT_FORMAT = "[%(levelname)s] %(message)s"
 _DEFAULT_LEVEL = logging.INFO
@@ -13,6 +16,91 @@ _startup_debug = False
 _startup_set = False
 _logger_created_hooks: list = []
 
+_RECENT_LOGS_MAX = 1000
+_recent_logs: collections.deque[str] = collections.deque(maxlen=_RECENT_LOGS_MAX)
+
+
+class _RingBufferHandler(logging.Handler):
+    """In-memory handler buffering recent log records so UI/DevConsole can inspect past logs."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            _recent_logs.append(msg)
+        except Exception:
+            pass
+
+
+_ring_handler = _RingBufferHandler()
+_ring_handler.setFormatter(logging.Formatter(_DEFAULT_FORMAT))
+_ring_handler.setLevel(logging.DEBUG)
+
+
+def get_recent_logs() -> list[str]:
+    """Return a list of recent log lines captured since application launch."""
+    return list(_recent_logs)
+
+
+def get_log_dir() -> str:
+    """Return the platform-specific directory where KikuMoe stores logs and data.
+    Falls back to current directory or tempdir if the standard path is unwritable."""
+    import tempfile
+
+    candidates = []
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if local_app_data:
+            candidates.append(os.path.join(local_app_data, "KikuMoe"))
+    else:
+        xdg_data = os.environ.get("XDG_DATA_HOME", "")
+        if xdg_data:
+            candidates.append(os.path.join(xdg_data, "KikuMoe"))
+        else:
+            candidates.append(os.path.join(os.path.expanduser("~"), ".local", "share", "KikuMoe"))
+
+    candidates.append(os.path.abspath("."))
+    candidates.append(tempfile.gettempdir())
+
+    for dir_path in candidates:
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            test_file = os.path.join(dir_path, ".kikumoe_write_test")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(test_file)
+            return dir_path
+        except Exception:
+            continue
+
+    return os.path.abspath(".")
+
+
+def get_log_file_path() -> str:
+    """Return the absolute path to the main application log file."""
+    return os.path.join(get_log_dir(), "kikumoe.log")
+
+
+_file_handler: RotatingFileHandler | None = None
+
+
+def _get_shared_file_handler() -> RotatingFileHandler | None:
+    global _file_handler
+    if _file_handler is None:
+        try:
+            log_path = get_log_file_path()
+            _file_handler = RotatingFileHandler(
+                log_path, maxBytes=1024 * 1024, backupCount=2, encoding="utf-8"
+            )
+            file_fmt = logging.Formatter(
+                "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            _file_handler.setFormatter(file_fmt)
+            _file_handler.setLevel(logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL)
+        except Exception:
+            _file_handler = None
+    return _file_handler
+
 
 class _SafeTextStream:
     """Proxy stream that avoids UnicodeEncodeError on Windows cp1252 terminals."""
@@ -21,6 +109,8 @@ class _SafeTextStream:
         self._stream = stream
 
     def write(self, text: str) -> int:
+        if self._stream is None:
+            return len(text)
         try:
             return int(self._stream.write(text))
         except UnicodeEncodeError:
@@ -31,12 +121,16 @@ class _SafeTextStream:
             return int(self._stream.write(safe))
 
     def flush(self) -> None:
+        if self._stream is None:
+            return
         try:
             self._stream.flush()
         except Exception:
             pass
 
     def isatty(self) -> bool:
+        if self._stream is None:
+            return False
         try:
             return bool(self._stream.isatty())
         except Exception:
@@ -114,6 +208,11 @@ def set_debug(enabled: bool) -> None:
         _startup_debug = _debug_enabled
         _startup_set = True
     level = logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL
+    if _file_handler is not None:
+        try:
+            _file_handler.setLevel(level)
+        except Exception:
+            pass
     for lg in _created_loggers:
         try:
             lg.setLevel(level)
@@ -131,6 +230,11 @@ def set_logger_level(level: int) -> None:
     global _debug_enabled, _DEFAULT_LEVEL
     _debug_enabled = level <= logging.DEBUG
     _DEFAULT_LEVEL = level
+    if _file_handler is not None:
+        try:
+            _file_handler.setLevel(level)
+        except Exception:
+            pass
     for lg in _created_loggers:
         try:
             lg.setLevel(level)
@@ -157,8 +261,8 @@ def unregister_logger_hook(hook) -> None:
         _logger_created_hooks.remove(hook)
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """Return a configured logger writing to stdout.
+def get_logger(name: str | None = None) -> logging.Logger:
+    """Return a configured logger writing to stdout and persistent log file.
 
     The effective level is DEBUG when debug mode is active (see set_debug()),
     and INFO otherwise.  Duplicate handlers are never added on repeated calls.
@@ -170,6 +274,14 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
         formatter = logging.Formatter(_DEFAULT_FORMAT)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+
+        fh = _get_shared_file_handler()
+        if fh is not None and fh not in logger.handlers:
+            logger.addHandler(fh)
+
+        if _ring_handler not in logger.handlers:
+            logger.addHandler(_ring_handler)
+
         logger.setLevel(logging.DEBUG if _debug_enabled else _DEFAULT_LEVEL)
         logger.propagate = False
         _created_loggers.append(logger)

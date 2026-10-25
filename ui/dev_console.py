@@ -46,7 +46,7 @@ class _QtStream(QObject):
     def __init__(self, append_fn):
         super().__init__()
         try:
-            self.text_emitted.connect(append_fn, Qt.ConnectionType.QueuedConnection)
+            self.text_emitted.connect(append_fn, type=Qt.ConnectionType.QueuedConnection)  # type: ignore[call-arg]
         except Exception:
             pass
 
@@ -92,9 +92,9 @@ class _ConsolePillToggle(QCheckBox):
         self._anim_timer.timeout.connect(self._tick_anim)
         self.toggled.connect(self._on_toggled)
 
-    def setChecked(self, checked: bool) -> None:
-        super().setChecked(checked)
-        self._progress = 1.0 if checked else 0.0
+    def setChecked(self, a0: bool) -> None:
+        super().setChecked(a0)
+        self._progress = 1.0 if a0 else 0.0
         self.update()
 
     def _on_toggled(self, _checked: bool) -> None:
@@ -111,10 +111,10 @@ class _ConsolePillToggle(QCheckBox):
             self._progress += diff * 0.34
         self.update()
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -214,10 +214,10 @@ class _ConsoleActionButton(QPushButton):
         self._role = role
         self.update()
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -225,7 +225,7 @@ class _ConsoleActionButton(QPushButton):
         super().leaveEvent(a0)
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._step = 1
             self._scale = 0.90
             if not self._timer.isActive():
@@ -756,6 +756,12 @@ class DevConsole(QObject):
             pass
 
         try:
+            from core.logger import get_recent_logs
+
+            past_logs = get_recent_logs()
+            if past_logs:
+                for past_line in past_logs:
+                    self._append_console(past_line + "\n")
             if getattr(self, "_preopen_buffer", None):
                 buffered = "".join(self._preopen_buffer)
                 self._preopen_buffer.clear()

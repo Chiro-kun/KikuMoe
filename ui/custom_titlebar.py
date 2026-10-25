@@ -48,10 +48,10 @@ class _WinCtrlButton(QPushButton):
         self._kind = kind
         self.update()
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -59,7 +59,7 @@ class _WinCtrlButton(QPushButton):
         super().leaveEvent(a0)
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._anim_step = 1
             self._scale = 0.82
             self._anim_timer.start()
@@ -423,21 +423,25 @@ class CustomTitleBar(QFrame):
             self._btn_max.set_kind("max")
             self._btn_max.setToolTip("Ingrandisci")
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             wh = self._window.windowHandle()
             if wh is not None and wh.startSystemMove():
                 return
             self._drag_offset = (
-                event.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
+                a0.globalPosition().toPoint() - self._window.frameGeometry().topLeft()
             )
 
-    def mouseMoveEvent(self, event) -> None:
-        if event.buttons() & Qt.MouseButton.LeftButton and hasattr(self, "_drag_offset"):
-            self._window.move(event.globalPosition().toPoint() - self._drag_offset)
+    def mouseMoveEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and a0.buttons() & Qt.MouseButton.LeftButton
+            and hasattr(self, "_drag_offset")
+        ):
+            self._window.move(a0.globalPosition().toPoint() - self._drag_offset)
 
-    def mouseDoubleClickEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mouseDoubleClickEvent(self, a0) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             self._toggle_maximize()
 
     def _toggle_maximize(self) -> None:
@@ -456,9 +460,9 @@ class _GripPositioner(QObject):
         window.installEventFilter(self)
         self._reposition(window)
 
-    def eventFilter(self, obj: QObject | None, event: QEvent | None) -> bool:
-        if event and event.type() == QEvent.Type.Resize and isinstance(obj, QWidget):
-            self._reposition(obj)
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a1 and a1.type() == QEvent.Type.Resize and isinstance(a0, QWidget):
+            self._reposition(a0)
         return False
 
     def _reposition(self, window: QWidget) -> None:

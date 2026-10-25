@@ -67,6 +67,11 @@ def main() -> int:
 
         set_debug(True)
 
+    from core.logger import get_log_file_path, get_logger
+
+    log = get_logger("Startup")
+    log.info("Starting KikuMoe... Logging to: %s", get_log_file_path())
+
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("KikuMoe")

@@ -6,7 +6,7 @@ and runtime system diagnostics with animated action buttons and authentic brand 
 
 import os
 import platform
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from PyQt6.QtCore import PYQT_VERSION_STR, QByteArray, QPointF, QRectF, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
@@ -225,10 +225,10 @@ class AboutActionButton(QPushButton):
         self._icon_kind = kind
         self.update()
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
@@ -237,7 +237,7 @@ class AboutActionButton(QPushButton):
         super().leaveEvent(a0)
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
             self._step = 1
             self._scale = 0.90
@@ -397,7 +397,7 @@ class AboutWidget(QWidget):
         self._apply_widget_stylesheet()
 
         # ================= 1. Header Card (Brand & Identity) =================
-        card_header, header_lay = self._make_card()
+        card_header, header_lay, _ = self._make_card()
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(12)
@@ -448,8 +448,9 @@ class AboutWidget(QWidget):
         main_layout.addWidget(card_header)
 
         # ================= 2. Authors & Credits Card =================
-        card_credits, credits_lay = self._make_card(self.i18n.t("about_authors_section"))
-        self._card_credits_hdr = credits_lay.itemAt(0).widget()
+        card_credits, credits_lay, self._card_credits_hdr = self._make_card(
+            self.i18n.t("about_authors_section")
+        )
 
         # Authors Row
         auth_row = QHBoxLayout()
@@ -475,8 +476,9 @@ class AboutWidget(QWidget):
         main_layout.addWidget(card_credits)
 
         # ================= 3. Repositories & Links Card =================
-        card_links, links_lay = self._make_card(self.i18n.t("about_links_section"))
-        self._card_links_hdr = links_lay.itemAt(0).widget()
+        card_links, links_lay, self._card_links_hdr = self._make_card(
+            self.i18n.t("about_links_section")
+        )
 
         btns_row = QHBoxLayout()
         btns_row.setContentsMargins(0, 2, 0, 2)
@@ -517,8 +519,9 @@ class AboutWidget(QWidget):
         main_layout.addWidget(card_links)
 
         # ================= 4. Powered By / Radio Stations Card =================
-        card_powered, powered_lay = self._make_card(self.i18n.t("about_powered_by_section"))
-        self._card_powered_hdr = powered_lay.itemAt(0).widget()
+        card_powered, powered_lay, self._card_powered_hdr = self._make_card(
+            self.i18n.t("about_powered_by_section")
+        )
 
         # Row 1: LISTEN.moe, Gensokyo, Anison
         row_radios_1 = QHBoxLayout()
@@ -589,8 +592,7 @@ class AboutWidget(QWidget):
         main_layout.addWidget(card_powered)
 
         # ================= 5. System Diagnostics Card =================
-        card_sys, sys_lay = self._make_card(self.i18n.t("about_sys_section"))
-        self._card_sys_hdr = sys_lay.itemAt(0).widget()
+        card_sys, sys_lay, self._card_sys_hdr = self._make_card(self.i18n.t("about_sys_section"))
 
         # Grid-like 2-column info layout
         diag_col_row = QHBoxLayout()
@@ -775,7 +777,9 @@ class AboutWidget(QWidget):
         self._logo_lbl.setStyleSheet("font-size: 28px; background: transparent;")
 
     @staticmethod
-    def _make_card(section_title: Optional[str] = None):
+    def _make_card(
+        section_title: Optional[str] = None,
+    ) -> Tuple[QFrame, QVBoxLayout, Optional[QLabel]]:
         card = QFrame()
         card.setObjectName("settingsCard")
         card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -783,11 +787,12 @@ class AboutWidget(QWidget):
         lay.setContentsMargins(13, 10, 13, 11)
         lay.setSpacing(7)
 
+        hdr: Optional[QLabel] = None
         if section_title:
             hdr = QLabel(section_title)
             hdr.setObjectName("settingsSectionHeader")
             lay.addWidget(hdr)
-        return card, lay
+        return card, lay, hdr
 
 
 class AboutDialog(QDialog):
@@ -846,7 +851,7 @@ class AboutDialog(QDialog):
             pass
 
     def keyPressEvent(self, a0) -> None:
-        if a0.key() == Qt.Key.Key_Escape:
+        if a0 is not None and a0.key() == Qt.Key.Key_Escape:
             self.close()
             return
         super().keyPressEvent(a0)

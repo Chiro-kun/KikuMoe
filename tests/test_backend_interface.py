@@ -159,3 +159,108 @@ def test_player_ffmpeg_sample_rate_negotiation(monkeypatch):
     assert stream == "fake_stream"
     assert rate == 44100
     assert 48000 in fake_pa.opened_rates
+
+
+def test_player_ffmpeg_is_ready_requires_ffmpeg(monkeypatch):
+    """Verify PlayerFFmpeg.is_ready() returns False when ffmpeg is not available."""
+    from audio.player_ffmpeg import PlayerFFmpeg
+
+    player = PlayerFFmpeg()
+    monkeypatch.setattr(player, "_check_ffmpeg", lambda: False)
+    assert not player.is_ready()
+
+
+def test_logger_file_and_ring_buffer():
+    """Verify logger writes to log file and captures lines in recent logs buffer."""
+    import os
+
+    from core.logger import _SafeTextStream, get_log_file_path, get_logger, get_recent_logs
+
+    log_path = get_log_file_path()
+    assert log_path.endswith("kikumoe.log")
+
+    lg = get_logger("TestLogger")
+    test_msg = "UniqueTestMessage_42_AudioCheck"
+    lg.info(test_msg)
+
+    # Check ring buffer
+    recent = get_recent_logs()
+    assert any(test_msg in line for line in recent)
+
+    # Check file
+    assert os.path.isfile(log_path)
+    with open(log_path, encoding="utf-8") as f:
+        file_content = f.read()
+    assert test_msg in file_content
+
+    # Safe text stream with None
+    stream = _SafeTextStream(None)
+    assert stream.write("hello") == 5
+    assert not stream.isatty()
+
+
+def test_player_ffmpeg_meipass_discovery(monkeypatch):
+    """Verify _find_ffmpeg_bin resolves ffmpeg from sys._MEIPASS when frozen."""
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from audio.player_ffmpeg import _find_ffmpeg_bin
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fake_ffmpeg = Path(tmp_dir) / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+        fake_ffmpeg.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "_MEIPASS", str(tmp_dir), raising=False)
+        monkeypatch.delenv("FFMPEG_PATH", raising=False)
+
+        found = _find_ffmpeg_bin()
+        assert found == str(fake_ffmpeg.resolve())
+
+
+def test_linux_audio_diagnostics_probe(monkeypatch):
+    """Verify probe_linux_audio_environment and log_audio_diagnostics execute safely."""
+    import logging
+    import tempfile
+    from pathlib import Path
+
+    from audio.diagnostics import log_audio_diagnostics, probe_linux_audio_environment
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        fake_pw = tmp_path / "pipewire-0"
+        fake_pw.write_text("", encoding="utf-8")
+
+        monkeypatch.setenv("PIPEWIRE_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setenv("PULSE_SERVER", "unix:/tmp/pulse-socket")
+        monkeypatch.setenv("SSL_CERT_FILE", "/fake/cert.pem")
+
+        env = probe_linux_audio_environment()
+        assert env["pipewire"] is True
+        assert env["pulseaudio"] is True
+        assert env["ssl_cert_file"] == "/fake/cert.pem"
+
+        # Ensure log_audio_diagnostics runs without exception
+        logger = logging.getLogger("TestAudioDiag")
+        monkeypatch.setattr("audio.diagnostics._IS_WIN32", False)
+        log_audio_diagnostics(logger)
+
+
+def test_kikumoe_spec_audio_excludes():
+    """Verify that kikumoe.spec includes necessary Linux host audio library excludes."""
+    with open("kikumoe.spec", encoding="utf-8") as f:
+        spec_content = f.read()
+
+    expected_excludes = [
+        "libvlc",
+        "libvlccore",
+        "libasound",
+        "libpulse",
+        "libjack",
+        "libpipewire",
+        "libspa",
+        "libasound_module",
+    ]
+    for lib in expected_excludes:
+        assert f'"{lib}"' in spec_content, f"kikumoe.spec missing expected exclude: {lib}"
