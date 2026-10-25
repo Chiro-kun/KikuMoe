@@ -99,3 +99,4 @@ fi
 # Quick validation
 echo "[build-minimal-ffmpeg] Verifying binary execution..."
 "$TARGET" -version | head -2
+
