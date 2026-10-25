@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Log Spam Reduction (#71)**: Downgraded `volume_changed` event messages from `INFO` to `DEBUG` to eliminate console and terminal flooding during volume slider drag.
 - **Tagline & Localization**: Updated application tagline and descriptions across Italian and English translations to cover web radio, music, and local playback capabilities.
 - **CI / Build Triggers**: Added the `redesign` branch directly to GitHub Actions and Forgejo CI workflow triggers to enable automated builds on both tags and branch pushes.
+- **Binary Size Optimization**: Excluded unused heavy Qt6 modules (`QtQml`, `QtQuick`, `QtPdf`, `QtSql`, `QtXml`, `QtBluetooth`, etc.) and stdlib modules (`tkinter`, `unittest`, `pydoc`, `sqlite3`) in `kikumoe.spec`, and eliminated duplicate ffmpeg bundling inside the onefile payload in favor of AppDir placement, drastically reducing Linux executable and AppImage size.
 
 ### Fixed
 - **Progress Bar Freeze on Untimed Tracks**: Fixed an issue where receiving a song with `dur == 0` caused `_on_song_tick` to return immediately, leaving the progress bar static at 0% and freezing the elapsed time text.

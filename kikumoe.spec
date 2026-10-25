@@ -105,12 +105,37 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[str(repo_root / "pyi_rthook_vlc.py")],
-    excludes=[],
+    excludes=[
+        "tkinter",
+        "unittest",
+        "pydoc",
+        "sqlite3",
+        "PyQt6.QtQml",
+        "PyQt6.QtQuick",
+        "PyQt6.QtQuickWidgets",
+        "PyQt6.QtPdf",
+        "PyQt6.QtPdfWidgets",
+        "PyQt6.QtSql",
+        "PyQt6.QtXml",
+        "PyQt6.QtBluetooth",
+        "PyQt6.QtTest",
+        "PyQt6.QtSensors",
+        "PyQt6.QtPositioning",
+        "PyQt6.QtWebChannel",
+        "PyQt6.QtWebEngineCore",
+        "PyQt6.QtWebEngineWidgets",
+        "PyQt6.QtMultimedia",
+        "PyQt6.QtMultimediaWidgets",
+        "PyQt6.QtNfc",
+        "PyQt6.QtRemoteObjects",
+        "PyQt6.QtSpatialAudio",
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     noarchive=False,
 )
-# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, VLC).
+# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, VLC)
+# and standard C++ runtimes (libstdc++, libgcc_s) per AppImage standards.
 # When bundled into PyInstaller/AppImage, these libraries conflict with the host's
 # ALSA plugins, PipeWire, and PulseAudio daemons, causing audio initialization to fail.
 # Excluding them forces the application to load them directly from the host system.
@@ -134,11 +159,8 @@ if not _IS_WIN32:
         if not any(b[0].startswith(prefix) for prefix in _linux_audio_excludes)
     ]
 
-    # Bundle standalone static ffmpeg into the frozen binary if present
-    _linux_ffmpeg = repo_root / "packaging" / "linux" / "ffmpeg"
-    if _linux_ffmpeg.is_file():
-        a.binaries.append(("ffmpeg", str(_linux_ffmpeg), "BINARY"))
-
+# Note: Static ffmpeg on Linux is bundled into AppDir usr/bin/ffmpeg (or next to the
+# executable) rather than packed inside a.binaries, saving ~90MB of duplication.
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # Windows-only EXE metadata (icon, version resource, manifest)

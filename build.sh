@@ -31,6 +31,11 @@ echo "Running: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 cd "$PROJECT_ROOT"
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
+if [[ -f "$LINUX_FFMPEG" ]]; then
+    cp "$LINUX_FFMPEG" "$PROJECT_ROOT/dist/ffmpeg"
+    chmod +x "$PROJECT_ROOT/dist/ffmpeg" || true
+fi
+
 VERSION="$(grep -oP '(?<=version:\s).+' "$PROJECT_ROOT/version.yml" | tr -d '[:space:]' || echo '2.0.0-beta2')"
 echo "Done. Output:"
 echo "  dist/KikuMoe-${VERSION}"

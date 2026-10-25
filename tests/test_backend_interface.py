@@ -268,6 +268,23 @@ def test_kikumoe_spec_audio_excludes():
         assert f'"{lib}"' in spec_content, f"kikumoe.spec missing expected exclude: {lib}"
 
 
+def test_kikumoe_spec_unused_module_excludes():
+    """Verify that kikumoe.spec excludes heavy unused Qt6/stdlib modules to minimize binary size."""
+    with open("kikumoe.spec", encoding="utf-8") as f:
+        spec_content = f.read()
+
+    expected_module_excludes = [
+        "PyQt6.QtQml",
+        "PyQt6.QtQuick",
+        "PyQt6.QtPdf",
+        "PyQt6.QtSql",
+        "PyQt6.QtXml",
+        "tkinter",
+    ]
+    for mod in expected_module_excludes:
+        assert f'"{mod}"' in spec_content, f"kikumoe.spec missing expected module exclude: {mod}"
+
+
 def test_smooth_progress_bar_live_mode():
     """Verify SmoothProgressBar supports live mode toggling and state inspection."""
     import os
