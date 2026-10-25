@@ -11,17 +11,16 @@ if [[ ! -x "$LINUX_FFMPEG" ]]; then
 fi
 
 echo "Installing dependencies via Poetry..."
-poetry install --with dev
+poetry install --only main,build
 
 echo "Running: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec"
-cd "$PROJECT_ROOT"
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
-if [[ -f "$LINUX_FFMPEG" ]]; then
-    cp "$LINUX_FFMPEG" "$PROJECT_ROOT/dist/ffmpeg"
-    chmod +x "$PROJECT_ROOT/dist/ffmpeg" || true
+if [[ -f "$LINUX_FFMPEG" && -d "$PROJECT_ROOT/dist/KikuMoe" ]]; then
+    cp "$LINUX_FFMPEG" "$PROJECT_ROOT/dist/KikuMoe/ffmpeg"
+    chmod +x "$PROJECT_ROOT/dist/KikuMoe/ffmpeg"
 fi
 
-VERSION="$(grep -oP '(?<=version:\s).+' "$PROJECT_ROOT/version.yml" | tr -d '[:space:]' || echo '2.0.0-beta2')"
+VERSION="$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' "$PROJECT_ROOT/version.yml" | head -1)"
 echo "Done. Output:"
-echo "  dist/KikuMoe-${VERSION}"
+echo "  dist/KikuMoe/KikuMoe (v${VERSION:-2.0.0-beta2})"
