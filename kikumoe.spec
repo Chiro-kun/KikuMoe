@@ -126,6 +126,8 @@ if not _IS_WIN32:
         "libpipewire",
         "libspa",
         "libasound_module",
+        "libstdc++",
+        "libgcc_s",
     )
     a.binaries = [
         b for b in a.binaries

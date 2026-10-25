@@ -261,6 +261,8 @@ def test_kikumoe_spec_audio_excludes():
         "libpipewire",
         "libspa",
         "libasound_module",
+        "libstdc++",
+        "libgcc_s",
     ]
     for lib in expected_excludes:
         assert f'"{lib}"' in spec_content, f"kikumoe.spec missing expected exclude: {lib}"
