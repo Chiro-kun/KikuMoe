@@ -150,15 +150,34 @@ a.datas = [
         or "translations" in d[0].replace("\\", "/").split("/")
     )
 ]
-# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, VLC)
-# and standard C++ runtimes (libstdc++, libgcc_s) per AppImage standards.
-# When bundled into PyInstaller/AppImage, these libraries conflict with the host's
-# ALSA plugins, PipeWire, and PulseAudio daemons, causing audio initialization to fail.
-# Excluding them forces the application to load them directly from the host system.
+# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, PipeWire),
+# host multimedia backends (libvlc, libmpv - loaded from host dynamically via ctypes),
+# transitive video codecs/encoders/engines pulled by host libmpv (libav*, libx265, libcodec2,
+# libplacebo, libflite, liblapack, libgfortran, libgtk-3, librsvg), unused Qt libraries
+# (libQt6Pdf, libQt6Quick, libQt6Qml), and C++ runtimes per AppImage standards.
 if not _IS_WIN32:
-    _linux_audio_excludes = (
+    _linux_binary_excludes = (
         "libvlc",
         "libvlccore",
+        "libmpv",
+        "libavcodec",
+        "libavformat",
+        "libavfilter",
+        "libavutil",
+        "libswresample",
+        "libswscale",
+        "libpostproc",
+        "libplacebo",
+        "libx264",
+        "libx265",
+        "libcodec2",
+        "libaom",
+        "libvpx",
+        "libflite",
+        "liblapack",
+        "libgfortran",
+        "libgtk-3",
+        "librsvg-2",
         "libasound",
         "libpulse",
         "libpulse-simple",
@@ -169,11 +188,21 @@ if not _IS_WIN32:
         "libasound_module",
         "libstdc++",
         "libgcc_s",
+        "libQt6Pdf",
+        "libQt6Quick",
+        "libQt6Qml",
     )
-    a.binaries = [
-        b for b in a.binaries
-        if not any(b[0].startswith(prefix) for prefix in _linux_audio_excludes)
-    ]
+
+    def _should_exclude_binary(dest_name: str) -> bool:
+        base = os.path.basename(dest_name)
+        if any(base.startswith(prefix) for prefix in _linux_binary_excludes):
+            return True
+        # Exclude system ICU (e.g. libicudata.so.70), preserving Qt's own ICU (under PyQt6/)
+        if base.startswith("libicu") and not dest_name.startswith("PyQt6/"):
+            return True
+        return False
+
+    a.binaries = [b for b in a.binaries if not _should_exclude_binary(b[0])]
 
 # Note: Static ffmpeg on Linux is bundled into AppDir usr/bin/ffmpeg (or next to the
 # executable) rather than packed inside a.binaries, saving ~90MB of duplication.

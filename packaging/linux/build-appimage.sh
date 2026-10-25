@@ -150,7 +150,7 @@ if command -v du &>/dev/null; then
     echo "Total uncompressed AppDir size: $(du -sh "$APPDIR" | cut -f1)"
     echo ""
     echo "--- Top 30 Largest Files in AppDir ---"
-    find "$APPDIR" -type f -exec du -h {} + | sort -rh | head -30
+    find "$APPDIR" -type f -exec du -h {} + 2>/dev/null | sort -rh 2>/dev/null | head -n 30 || true
     echo ""
     echo "--- Directory Breakdown (depth 2) ---"
     du -h -d 2 "$APPDIR" | sort -rh | head -10
