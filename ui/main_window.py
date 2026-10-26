@@ -46,7 +46,7 @@ from PyQt6.QtWidgets import (
 from audio.player_ffmpeg import PlayerFFmpeg
 from audio.player_mpv import PlayerMPV
 from audio.player_vlc import PlayerVLC
-from core.config import STREAMS, get_station_config, get_station_stream_url
+from core.config import STATIONS, STREAMS, get_station_config, get_station_stream_url
 from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
@@ -1548,9 +1548,9 @@ class ListenMoePlayer(QWidget):
         self.set_radio_provider(station_id, channel)
 
     def set_radio_provider(self, provider: str, channel: Optional[str] = None) -> None:
-        """Switch active radio station (listenmoe, gensokyo, anison) and optional channel."""
+        """Switch active radio station and optional channel."""
         clean_id = (provider or "").strip().lower()
-        if clean_id not in ("listenmoe", "gensokyo", "anison"):
+        if clean_id not in STATIONS:
             clean_id = DEFAULT_STATION
 
         old_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))

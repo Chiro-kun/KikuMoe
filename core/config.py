@@ -149,6 +149,9 @@ def get_station_stream_url(
     url = streams.get(fmt_key)
     if url:
         return str(url)
+    default_fmt = str(station.get("default_format", "")).strip()
+    if default_fmt and default_fmt in streams:
+        return str(streams[default_fmt])
     if streams:
         return str(next(iter(streams.values())))
 

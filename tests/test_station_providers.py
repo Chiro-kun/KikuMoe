@@ -351,6 +351,18 @@ def test_station_ui_integration(monkeypatch):
         assert player._current_radio_provider == "anison"
         assert "ANISON.FM" in player.station_pill.get_display_title()
         assert "anison.fm" in player.get_selected_stream_url()
+
+        # Switch to Neuro 21: station_pill updates title
+        player.set_radio_provider("neuro21")
+        assert player._current_radio_provider == "neuro21"
+        assert "Neuro 21" in player.station_pill.get_display_title()
+        assert "twinskaraoke.com" in player.get_selected_stream_url()
+
+        # Switch to TruckersFM: station_pill updates title
+        player.set_radio_provider("truckersfm")
+        assert player._current_radio_provider == "truckersfm"
+        assert "TruckersFM" in player.station_pill.get_display_title()
+        assert "truckers.fm" in player.get_selected_stream_url()
     finally:
         player.deleteLater()
 
