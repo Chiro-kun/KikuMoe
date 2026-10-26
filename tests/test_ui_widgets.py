@@ -435,6 +435,13 @@ def test_close_confirm_dialog(qapp):
     assert dlg3.action == "cancel"
     dlg3.close()
 
+    # 4. Entrance animation
+    dlg_anim = CloseConfirmDialog()
+    dlg_anim.show()
+    assert dlg_anim._entrance_animated is True
+    assert dlg_anim._anim_group is not None
+    dlg_anim.close()
+
 
 def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
     """Verify starting sleep timer does not spawn detached top-level labels or windows."""

@@ -2,8 +2,27 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPainterPath, QPen
+from typing import Callable
+
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QParallelAnimationGroup,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+)
+from PyQt6.QtGui import (
+    QCloseEvent,
+    QColor,
+    QIcon,
+    QKeyEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QShowEvent,
+)
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -75,6 +94,9 @@ class CloseConfirmDialog(QDialog):
 
         self.action: str = "cancel"  # "tray" | "quit" | "cancel"
         self.remember: bool = False
+        self._anim_group: QParallelAnimationGroup | None = None
+        self._entrance_animated: bool = False
+        self._is_closing: bool = False
 
         self._apply_dialog_stylesheet()
 
@@ -179,20 +201,106 @@ class CloseConfirmDialog(QDialog):
         except Exception:
             pass
 
+    def showEvent(self, a0: QShowEvent | None) -> None:
+        super().showEvent(a0)
+        self._animate_entrance()
+
+    def _animate_entrance(self) -> None:
+        if self._entrance_animated:
+            return
+        self._entrance_animated = True
+
+        target_pos = self.pos()
+        start_pos = QPoint(target_pos.x(), target_pos.y() - 10)
+
+        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
+            self._anim_group.stop()
+
+        self.setWindowOpacity(0.0)
+        self.move(start_pos)
+
+        group = QParallelAnimationGroup(self)
+
+        anim_pos = QPropertyAnimation(self, b"pos", group)
+        anim_pos.setDuration(190)
+        anim_pos.setStartValue(start_pos)
+        anim_pos.setEndValue(target_pos)
+        anim_pos.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        anim_op = QPropertyAnimation(self, b"windowOpacity", group)
+        anim_op.setDuration(180)
+        anim_op.setStartValue(0.0)
+        anim_op.setEndValue(1.0)
+        anim_op.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        def _on_entrance_finished() -> None:
+            self.setWindowOpacity(1.0)
+            self.move(target_pos)
+
+        group.finished.connect(_on_entrance_finished)
+        self._anim_group = group
+        group.start()
+
+    def _animate_exit(self, callback: Callable[[], None]) -> None:
+        if self._is_closing:
+            return
+        self._is_closing = True
+
+        if not self.isVisible():
+            callback()
+            return
+
+        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
+            self._anim_group.stop()
+
+        group = QParallelAnimationGroup(self)
+
+        anim_pos = QPropertyAnimation(self, b"pos", group)
+        anim_pos.setDuration(120)
+        anim_pos.setStartValue(self.pos())
+        anim_pos.setEndValue(QPoint(self.x(), self.y() - 8))
+        anim_pos.setEasingCurve(QEasingCurve.Type.InCubic)
+
+        anim_op = QPropertyAnimation(self, b"windowOpacity", group)
+        anim_op.setDuration(120)
+        anim_op.setStartValue(self.windowOpacity())
+        anim_op.setEndValue(0.0)
+        anim_op.setEasingCurve(QEasingCurve.Type.InCubic)
+
+        def _finish() -> None:
+            callback()
+
+        group.finished.connect(_finish)
+        self._anim_group = group
+        group.start()
+
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        if self._is_closing:
+            if a0:
+                a0.accept()
+            return
+        if not self.isVisible():
+            if a0:
+                a0.accept()
+            return
+        if a0:
+            a0.ignore()
+        self._on_cancel()
+
     def _on_tray(self) -> None:
         self.action = "tray"
         self.remember = self.cb_remember.isChecked()
-        self.accept()
+        self._animate_exit(super().accept)
 
     def _on_quit(self) -> None:
         self.action = "quit"
         self.remember = self.cb_remember.isChecked()
-        self.accept()
+        self._animate_exit(super().accept)
 
     def _on_cancel(self) -> None:
         self.action = "cancel"
         self.remember = False
-        self.reject()
+        self._animate_exit(super().reject)
 
     def keyPressEvent(self, a0: QKeyEvent | None) -> None:
         if a0 is not None:
