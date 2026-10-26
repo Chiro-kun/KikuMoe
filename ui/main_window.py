@@ -2055,6 +2055,8 @@ class ListenMoePlayer(QWidget):
             "twinskaraoke.com",
             "truckers.fm",
             "cdn.truckers.fm",
+            "i.scdn.co",
+            "scdn.co",
         }
     )
 

@@ -5,12 +5,14 @@ from __future__ import annotations
 from core.config import STATIONS, get_station_config, get_station_stream_url
 from network.providers.anison_provider import AnisonProvider
 from network.providers.gensokyo_provider import GensokyoProvider
+from network.providers.neuro21_provider import Neuro21Provider
+from network.providers.truckersfm_provider import TruckersFMProvider
 from network.station_manager import StationManager
 
 
 def test_station_definitions_integrity():
     """Verify all defined stations contain required metadata, formats, and valid streams."""
-    expected_stations = ["listenmoe", "gensokyo", "anison"]
+    expected_stations = ["listenmoe", "gensokyo", "anison", "neuro21", "truckersfm"]
     for s_id in expected_stations:
         assert s_id in STATIONS
         cfg = get_station_config(s_id)
@@ -44,7 +46,24 @@ def test_station_stream_url_resolution():
     anison_url = get_station_stream_url("anison", fmt="MP3 320k")
     assert anison_url == "https://pool.anison.fm/AniSonFM(320)"
 
-    # 4. Fallback on invalid station or format
+    # 4. Neuro 21
+    neuro_mp3 = get_station_stream_url("neuro21", fmt="MP3 320k")
+    assert neuro_mp3 == "https://radio.twinskaraoke.com/listen/neuro_21/radio.mp3"
+
+    neuro_opus = get_station_stream_url("neuro21", fmt="Opus 128k")
+    assert neuro_opus == "https://radio.twinskaraoke.com/listen/neuro_21/radio.ogg"
+
+    # 5. TruckersFM
+    truckers_320 = get_station_stream_url("truckersfm", fmt="MP3 320k")
+    assert truckers_320 == "https://live.truckers.fm/"
+
+    truckers_128 = get_station_stream_url("truckersfm", fmt="MP3 128k")
+    assert truckers_128 == "https://live.truckers.fm/radio-128"
+
+    truckers_64 = get_station_stream_url("truckersfm", fmt="AAC 64k")
+    assert truckers_64 == "https://live.truckers.fm/radio-64"
+
+    # 6. Fallback on invalid station or format
     fallback_url = get_station_stream_url("nonexistent_radio", fmt="InvalidFormat")
     assert fallback_url.startswith("http")
 
@@ -157,9 +176,141 @@ def test_station_manager_orchestration():
     assert mgr.current_station_id == "anison"
     assert mgr.get_stream_url() == "https://pool.anison.fm/AniSonFM(320)"
 
+    # Switch to Neuro 21
+    changed3 = mgr.set_station("neuro21")
+    assert changed3 is True
+    assert mgr.current_station_id == "neuro21"
+    assert mgr.get_stream_url() == "https://radio.twinskaraoke.com/listen/neuro_21/radio.mp3"
+    assert isinstance(mgr._active_provider, Neuro21Provider)
+
+    # Switch to TruckersFM
+    changed4 = mgr.set_station("truckersfm")
+    assert changed4 is True
+    assert mgr.current_station_id == "truckersfm"
+    assert mgr.get_stream_url() == "https://live.truckers.fm/"
+    assert isinstance(mgr._active_provider, TruckersFMProvider)
+
     # Clean shutdown
     mgr.stop()
     assert mgr._active_provider is None
+
+
+def test_neuro21_metadata_parsing():
+    """Verify Neuro21Provider accurately extracts AzuraCast track info, end epoch, and artwork."""
+    received = []
+
+    def mock_on_now_playing(title, artist, duration, start_epoch, art_url):
+        received.append((title, artist, duration, start_epoch, art_url))
+
+    provider = Neuro21Provider(
+        on_now_playing=mock_on_now_playing,
+        on_error_text=lambda _: None,
+    )
+
+    sample_data = {
+        "station": {"id": 1, "name": "Neuro 21"},
+        "now_playing": {
+            "elapsed": 100,
+            "remaining": 79,
+            "sh_id": 9999,
+            "played_at": 1793050000,
+            "duration": 179,
+            "song": {
+                "id": "abc123",
+                "text": "MARINA - Oh No! (Neuro)",
+                "artist": "MARINA",
+                "title": "Oh No! (Neuro)",
+                "art": "https://radio.twinskaraoke.com/api/station/neuro_21/art/9115408a.jpg",
+            },
+        },
+    }
+
+    provider._parse_and_emit(sample_data)
+
+    assert len(received) == 1
+    title, artist, duration, start_epoch, art_url = received[0]
+    assert title == "Oh No! (Neuro)"
+    assert artist == "MARINA"
+    assert duration == 179
+    assert start_epoch == 1793050000 + 179  # expected track end timestamp
+    assert art_url == "https://radio.twinskaraoke.com/api/station/neuro_21/art/9115408a.jpg"
+
+
+def test_truckersfm_radiocloud_parsing():
+    """Verify TruckersFMProvider parses RadioCloud current song API with Spotify CDN artwork."""
+    received = []
+
+    def mock_on_now_playing(title, artist, duration, start_epoch, art_url):
+        received.append((title, artist, duration, start_epoch, art_url))
+
+    provider = TruckersFMProvider(
+        on_now_playing=mock_on_now_playing,
+        on_error_text=lambda _: None,
+    )
+
+    sample_data = {
+        "status": "success",
+        "data": {
+            "playback_id": 896494,
+            "id": 1357,
+            "artist": "Calvin Harris, Ellie Goulding",
+            "title": "Outside",
+            "album_art": "https://i.scdn.co/image/ab67616d00001e02063c048e9ef6bd021b744756",
+            "link": "https://open.spotify.com/track/7MmG8p0F9N3C4AXdK6o6Eb",
+            "played_at": 1793050614,
+        },
+    }
+
+    success = provider._parse_and_emit_radiocloud(sample_data)
+    assert success is True
+    assert len(received) == 1
+
+    title, artist, duration, start_epoch, art_url = received[0]
+    assert title == "Outside"
+    assert artist == "Calvin Harris, Ellie Goulding"
+    assert duration == 0  # Live stream counter mode
+    assert start_epoch == 1793050614.0
+    assert art_url == "https://i.scdn.co/image/ab67616d00001e02063c048e9ef6bd021b744756"
+
+
+def test_truckersfm_icecast_fallback_parsing():
+    """Verify TruckersFMProvider parses native Icecast JSON fallback."""
+    received = []
+
+    def mock_on_now_playing(title, artist, duration, start_epoch, art_url):
+        received.append((title, artist, duration, start_epoch, art_url))
+
+    provider = TruckersFMProvider(
+        on_now_playing=mock_on_now_playing,
+        on_error_text=lambda _: None,
+    )
+
+    sample_icecast = {
+        "icestats": {
+            "source": [
+                {
+                    "mount": "/radio-128",
+                    "title": "Olivia Rodrigo, Chappell Roan - expectations",
+                    "ice-bitrate": 128,
+                },
+                {
+                    "mount": "/radio",
+                    "title": "Olivia Rodrigo, Chappell Roan - expectations",
+                    "ice-bitrate": 320,
+                },
+            ]
+        }
+    }
+
+    success = provider._parse_and_emit_icecast(sample_icecast)
+    assert success is True
+    assert len(received) == 1
+
+    title, artist, duration, start_epoch, art_url = received[0]
+    assert title == "expectations"
+    assert artist == "Olivia Rodrigo, Chappell Roan"
+    assert duration == 0
+    assert art_url is None
 
 
 def test_station_ui_integration(monkeypatch):
@@ -315,3 +466,53 @@ def test_station_providers_deduplicate_now_playing_events():
     sample_a2 = {"full_duration": 210, "duration": 200, "on_air": "Anime 2 - Song 2"}
     a_prov._parse_and_emit(sample_a2)
     assert len(a_events) == 2
+
+    # NEURO 21 dedup test
+    n_events = []
+    n_prov = Neuro21Provider(
+        on_now_playing=lambda *args: n_events.append(args), on_error_text=lambda _: None
+    )
+    sample_n = {
+        "now_playing": {
+            "duration": 200,
+            "played_at": 1793050000,
+            "song": {"id": "song_1", "title": "Synth Track", "artist": "Neuro"},
+        }
+    }
+    n_prov._parse_and_emit(sample_n)
+    assert len(n_events) == 1
+    # Duplicate poll
+    n_prov._parse_and_emit(sample_n)
+    assert len(n_events) == 1
+    # Changed song
+    sample_n2 = {
+        "now_playing": {
+            "duration": 180,
+            "played_at": 1793050200,
+            "song": {"id": "song_2", "title": "Cyber Track", "artist": "Neuro"},
+        }
+    }
+    n_prov._parse_and_emit(sample_n2)
+    assert len(n_events) == 2
+
+    # TRUCKERSFM dedup test (RadioCloud & Icecast)
+    t_events = []
+    t_prov = TruckersFMProvider(
+        on_now_playing=lambda *args: t_events.append(args), on_error_text=lambda _: None
+    )
+    sample_t = {
+        "status": "success",
+        "data": {"id": 101, "title": "Drive 1", "artist": "Artist 1", "played_at": 1793050000},
+    }
+    t_prov._parse_and_emit_radiocloud(sample_t)
+    assert len(t_events) == 1
+    # Duplicate poll
+    t_prov._parse_and_emit_radiocloud(sample_t)
+    assert len(t_events) == 1
+    # Changed song
+    sample_t2 = {
+        "status": "success",
+        "data": {"id": 102, "title": "Drive 2", "artist": "Artist 2", "played_at": 1793050200},
+    }
+    t_prov._parse_and_emit_radiocloud(sample_t2)
+    assert len(t_events) == 2

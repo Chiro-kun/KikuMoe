@@ -9,7 +9,13 @@ from __future__ import annotations
 import logging
 
 from core.config import get_station_config, get_station_stream_url
-from core.constants import DEFAULT_STATION, STATION_ANISON, STATION_GENSOKYO
+from core.constants import (
+    DEFAULT_STATION,
+    STATION_ANISON,
+    STATION_GENSOKYO,
+    STATION_NEURO21,
+    STATION_TRUCKERSFM,
+)
 from network.providers.anison_provider import AnisonProvider
 from network.providers.base_provider import (
     BaseMetadataProvider,
@@ -19,6 +25,8 @@ from network.providers.base_provider import (
 )
 from network.providers.gensokyo_provider import GensokyoProvider
 from network.providers.listenmoe_provider import ListenMoeProvider
+from network.providers.neuro21_provider import Neuro21Provider
+from network.providers.truckersfm_provider import TruckersFMProvider
 
 logger = logging.getLogger("kikumoe.station_manager")
 
@@ -110,6 +118,18 @@ class StationManager:
             )
         elif station_id == STATION_ANISON:
             self._active_provider = AnisonProvider(
+                on_now_playing=self.on_now_playing,
+                on_error_text=self.on_error_text,
+                on_status_text=self.on_status_text,
+            )
+        elif station_id == STATION_NEURO21:
+            self._active_provider = Neuro21Provider(
+                on_now_playing=self.on_now_playing,
+                on_error_text=self.on_error_text,
+                on_status_text=self.on_status_text,
+            )
+        elif station_id == STATION_TRUCKERSFM:
+            self._active_provider = TruckersFMProvider(
                 on_now_playing=self.on_now_playing,
                 on_error_text=self.on_error_text,
                 on_status_text=self.on_status_text,

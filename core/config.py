@@ -72,6 +72,40 @@ STATIONS: dict[str, dict[str, Any]] = {
         "metadata_url": "https://anison.fm/status.php?widget=true&layer=1",
         "homepage": "https://en.anison.fm/",
     },
+    "neuro21": {
+        "id": "neuro21",
+        "name": "Neuro 21",
+        "icon": "radio_neuro21.png",
+        "has_channels": False,
+        "channels": [],
+        "formats": ["MP3 320k", "Opus 128k"],
+        "default_channel": "",
+        "default_format": "MP3 320k",
+        "streams": {
+            "MP3 320k": "https://radio.twinskaraoke.com/listen/neuro_21/radio.mp3",
+            "Opus 128k": "https://radio.twinskaraoke.com/listen/neuro_21/radio.ogg",
+        },
+        "metadata_url": "https://radio.twinskaraoke.com/api/nowplaying/neuro_21",
+        "homepage": "https://radio.twinskaraoke.com/",
+    },
+    "truckersfm": {
+        "id": "truckersfm",
+        "name": "TruckersFM",
+        "icon": "radio_truckersfm.png",
+        "has_channels": False,
+        "channels": [],
+        "formats": ["MP3 320k", "MP3 128k", "AAC 64k"],
+        "default_channel": "",
+        "default_format": "MP3 320k",
+        "streams": {
+            "MP3 320k": "https://live.truckers.fm/",
+            "MP3 128k": "https://live.truckers.fm/radio-128",
+            "AAC 64k": "https://live.truckers.fm/radio-64",
+        },
+        "metadata_url": "https://truckers.fm/api/radiocloud/song/current",
+        "fallback_metadata_url": "https://live.truckers.fm/status-json.xsl",
+        "homepage": "https://truckers.fm/",
+    },
 }
 
 

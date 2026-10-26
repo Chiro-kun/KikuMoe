@@ -78,6 +78,8 @@ from core.constants import (
     STATION_ANISON,
     STATION_GENSOKYO,
     STATION_LISTENMOE,
+    STATION_NEURO21,
+    STATION_TRUCKERSFM,
 )
 from core.i18n import I18n
 from core.logger import silence_stderr
@@ -923,6 +925,8 @@ class SettingsDialog(QDialog):
         self.cmb_station.addItem("LISTEN.moe", userData=STATION_LISTENMOE)
         self.cmb_station.addItem("Gensokyo Radio", userData=STATION_GENSOKYO)
         self.cmb_station.addItem("ANISON.FM", userData=STATION_ANISON)
+        self.cmb_station.addItem("Neuro 21", userData=STATION_NEURO21)
+        self.cmb_station.addItem("TruckersFM", userData=STATION_TRUCKERSFM)
         saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
         for i in range(self.cmb_station.count()):
             if self.cmb_station.itemData(i) == saved_station:
