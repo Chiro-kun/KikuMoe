@@ -61,10 +61,37 @@ def _write_crash_log(exc: BaseException) -> str:
 
 
 def main() -> int:
+    if "--help" in sys.argv or "-h" in sys.argv:
+        from core.constants import APP_NAME, APP_VERSION
+
+        print(f"{APP_NAME} v{APP_VERSION} - LISTEN.moe Desktop Client")
+        print("\nUsage: KikuMoe [options]")
+        print("\nOptions:")
+        print("  -v, --version      Show application version and exit")
+        print("  --check-audio      Run audio subsystem diagnostics and exit")
+        print("  --debug            Enable debug logging")
+        print("  -h, --help         Show this help message and exit")
+        return 0
+
     if "--version" in sys.argv or "-v" in sys.argv:
         from core.constants import APP_NAME, APP_VERSION
 
         print(f"{APP_NAME} {APP_VERSION}")
+        return 0
+
+    if "--check-audio" in sys.argv:
+        from audio.diagnostics import log_audio_diagnostics
+        from core.logger import get_logger
+
+        log = get_logger("CheckAudio")
+        status = log_audio_diagnostics(log)
+        print("\n--- Audio Diagnostic Summary ---")
+        for k, v in status.items():
+            print(f"  {k}: {v}")
+        if "Missing" in status.get("ffmpeg", ""):
+            return 1
+        if status.get("portaudio", "").startswith("Failed"):
+            return 1
         return 0
 
     if "--debug" in sys.argv:

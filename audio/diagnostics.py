@@ -46,20 +46,18 @@ def probe_linux_audio_environment() -> dict[str, Any]:
     }
 
 
-def log_audio_diagnostics(log: logging.Logger) -> None:
+def log_audio_diagnostics(log: logging.Logger) -> dict[str, str]:
     """Logs a concise, human-readable summary of host audio servers and backend readiness."""
-    if _IS_WIN32:
-        return
+    if not _IS_WIN32:
+        env = probe_linux_audio_environment()
+        pw_str = f"Active ({env['pipewire_socket']})" if env["pipewire"] else "Not detected"
+        pa_str = f"Active ({env['pulse_server']})" if env["pulseaudio"] else "Not detected"
+        cert_str = env["ssl_cert_file"]
 
-    env = probe_linux_audio_environment()
-    pw_str = f"Active ({env['pipewire_socket']})" if env["pipewire"] else "Not detected"
-    pa_str = f"Active ({env['pulse_server']})" if env["pulseaudio"] else "Not detected"
-    cert_str = env["ssl_cert_file"]
-
-    log.info("[STARTUP] Linux Audio Environment:")
-    log.info("  - PipeWire:   %s", pw_str)
-    log.info("  - PulseAudio: %s", pa_str)
-    log.info("  - SSL CA:     %s", cert_str)
+        log.info("[STARTUP] Linux Audio Environment:")
+        log.info("  - PipeWire:   %s", pw_str)
+        log.info("  - PulseAudio: %s", pa_str)
+        log.info("  - SSL CA:     %s", cert_str)
 
     # Check backends
     from audio.player_ffmpeg import _find_ffmpeg_bin
@@ -85,8 +83,13 @@ def log_audio_diagnostics(log: logging.Logger) -> None:
                     info = pa.get_host_api_info_by_index(i)
                     if isinstance(info, dict):
                         apis.append(str(info.get("name", "")))
-                def_dev = pa.get_default_output_device_info()
-                def_name = def_dev.get("name", "Unknown") if isinstance(def_dev, dict) else "None"
+                def_name = "None"
+                try:
+                    def_dev = pa.get_default_output_device_info()
+                    if isinstance(def_dev, dict):
+                        def_name = def_dev.get("name", "Unknown")
+                except Exception as dev_err:
+                    def_name = f"No default output device ({dev_err})"
                 api_labels = ", ".join(apis) if apis else "None"
                 pa_status = f"Ready (APIs: {api_labels}; Default: {def_name})"
             finally:
@@ -120,3 +123,9 @@ def log_audio_diagnostics(log: logging.Logger) -> None:
     log.info("  - PortAudio: %s", pa_status)
     log.info("  - MPV:       %s", mpv_status)
     log.info("  - VLC:       %s", vlc_status)
+    return {
+        "ffmpeg": ffmpeg_status,
+        "portaudio": pa_status,
+        "mpv": mpv_status,
+        "vlc": vlc_status,
+    }

@@ -18,10 +18,12 @@ from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
+_pyaudio_import_error: BaseException | None = None
 try:
     import pyaudio
-except Exception:
+except Exception as e:
     pyaudio = None  # type: ignore
+    _pyaudio_import_error = e
 
 
 def _find_ffmpeg_bin() -> str:
@@ -100,7 +102,8 @@ class PlayerFFmpeg:
         self._ready = False
         self._init_error = None
         if pyaudio is None:
-            self._init_error = "pyaudio module not installed or unavailable"
+            err_details = f": {_pyaudio_import_error}" if _pyaudio_import_error else ""
+            self._init_error = f"pyaudio module not installed or unavailable{err_details}"
             self.log.warning("[BACKEND] PlayerFFmpeg: %s", self._init_error)
             return
         if not self._check_ffmpeg():

@@ -77,31 +77,51 @@ if not _IS_WIN32:
     if _linux_icon.exists():
         datas.append((str(_linux_icon), "icons"))
 
-# VLC bundling (Windows: bundle DLLs; Linux: system-installed VLC is used directly)
-vlc_binaries = []
+# Backend binaries (Windows: bundle VLC & MPV DLLs; Linux: bundle PortAudio & JACK libraries)
+binaries_list = []
 if _IS_WIN32:
     vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files\VideoLAN\VLC")
     libvlc = vlc_dir / "libvlc.dll"
     libvlccore = vlc_dir / "libvlccore.dll"
     plugins_dir = vlc_dir / "plugins"
     if libvlc.exists():
-        vlc_binaries.append((str(libvlc), "."))
+        binaries_list.append((str(libvlc), "."))
         if libvlccore.exists():
-            vlc_binaries.append((str(libvlccore), "."))
+            binaries_list.append((str(libvlccore), "."))
         if plugins_dir.is_dir():
             datas.append((str(plugins_dir), "plugins"))
             
     # Include the MPV DLL and its sibling runtime dependencies.
-    vlc_binaries.extend((str(dll), ".") for dll in sorted(packaging_win.glob("*.dll")))
+    binaries_list.extend((str(dll), ".") for dll in sorted(packaging_win.glob("*.dll")))
+else:
+    # On Linux, explicitly collect libportaudio and libjack so that the frozen AppImage
+    # has self-contained PortAudio support without relying on host dev packages or JACK.
+    for lib_pattern in ("libportaudio.so*",):
+        for search_dir in (
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib64",
+            "/usr/lib",
+            "/usr/local/lib",
+        ):
+            search_path = Path(search_dir)
+            if search_path.is_dir():
+                found = False
+                for match in sorted(search_path.glob(lib_pattern)):
+                    if match.is_file():
+                        binaries_list.append((str(match), "."))
+                        found = True
+                        break
+                if found:
+                    break
 
 block_cipher = None
 
 a = Analysis(
     [str(repo_root / "KikuMoe.py")],
     pathex=[str(repo_root)],
-    binaries=vlc_binaries,
+    binaries=binaries_list,
     datas=datas,
-    hiddenimports=["certifi", "mpv"],
+    hiddenimports=["certifi", "mpv", "pyaudio", "_portaudio"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[str(repo_root / "pyi_rthook_vlc.py")],

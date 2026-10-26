@@ -55,6 +55,19 @@ echo "Populating AppDir from $BUNDLE..."
 cp -a "$BUNDLE/." "$APPDIR/usr/bin/"
 chmod +x "$APPDIR/usr/bin/KikuMoe"
 
+# Verify PyAudio native extension and libraries
+echo "Verifying PyAudio bundling in AppDir..."
+if find "$APPDIR/usr/bin" -name "*_portaudio*" | grep -q .; then
+    echo "PyAudio native extension (_portaudio) found."
+else
+    echo "WARNING: PyAudio native extension (_portaudio) not found in AppDir!"
+fi
+if find "$APPDIR/usr/bin" -name "libportaudio*" | grep -q .; then
+    echo "libportaudio found."
+else
+    echo "WARNING: libportaudio not found in AppDir!"
+fi
+
 # Bundle static ffmpeg into AppDir usr/bin (co-located with KikuMoe executable)
 if [[ -f "$LINUX_PKG/ffmpeg" ]]; then
     echo "Bundling static ffmpeg into AppDir usr/bin..."
