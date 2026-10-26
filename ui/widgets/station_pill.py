@@ -2,7 +2,8 @@
 
 Provides a centered, sleek, dark cyber-glass pill button in the HUD header
 that opens an antialiased, perfectly centered popover card for switching stations and channels.
-Eliminates Qt QMenu Windows black corner artifacts and ensures flawless symmetry.
+Features inline channel chips for multi-channel stations (e.g. LISTEN.moe J-POP / K-POP)
+without repeating station entries or truncating text.
 """
 
 from __future__ import annotations
@@ -37,13 +38,138 @@ from core.constants import (
 from ui.themes.cyber_moe import PALETTE
 
 
-class StationPopoverRow(QPushButton):
-    """Interactive row inside the station popover with icon, title, and checkmark."""
+class ChannelChip(QPushButton):
+    """Mini pill chip for selecting a subchannel (e.g. J-POP / K-POP) inside a station row."""
+
+    def __init__(self, channel: str, is_active: bool, parent: QWidget | None = None) -> None:
+        super().__init__(channel, parent)
+        self.channel = channel
+        self.is_active = is_active
+        self._hovered = False
+
+        self.setFixedHeight(22)
+        font = QFont()
+        font.setPointSize(8)
+        font.setBold(True)
+        self.setFont(font)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_style()
+
+    def set_active(self, active: bool) -> None:
+        self.is_active = active
+        self._update_style()
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self._update_style()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self._update_style()
+        super().leaveEvent(event)
+
+    def _update_style(self) -> None:
+        if self.is_active:
+            bg = "#EC186C"
+            fg = "#FFFFFF"
+            border = "1px solid #EC186C"
+        elif self._hovered:
+            bg = "rgba(255, 255, 255, 0.16)"
+            fg = "#FFFFFF"
+            border = "1px solid rgba(255, 255, 255, 0.35)"
+        else:
+            bg = "rgba(255, 255, 255, 0.08)"
+            fg = "#B0B7C9"
+            border = "1px solid rgba(255, 255, 255, 0.12)"
+
+        self.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {bg};
+                color: {fg};
+                border: {border};
+                border-radius: 11px;
+                padding: 0 8px;
+            }}
+            """
+        )
+
+
+class StationRowWithChannels(QWidget):
+    """Station row that features inline channel chips on the right."""
+
+    channel_selected = pyqtSignal(str, str)  # (station_id, channel)
 
     def __init__(
         self,
         station_id: str,
-        channel: str,
+        name: str,
+        channels: list[str],
+        current_station: str,
+        current_channel: str,
+        icon_pm: QPixmap,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.station_id = station_id
+        self.is_current_station = current_station == station_id
+        self.current_channel = current_channel
+        self._hovered = False
+
+        self.setFixedHeight(36)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(8)
+
+        # Left clickable container (Icon + Name)
+        self._left_btn = QPushButton(self)
+        self._left_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        left_layout = QHBoxLayout(self._left_btn)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(16, 16)
+        icon_lbl.setScaledContents(True)
+        icon_lbl.setPixmap(icon_pm)
+        icon_lbl.setStyleSheet("background: transparent; border: none;")
+
+        title_lbl = QLabel(name)
+        font = QFont()
+        font.setPointSize(9)
+        font.setBold(self.is_current_station)
+        title_lbl.setFont(font)
+        fg_col = "#EC186C" if self.is_current_station else "#E6EAF8"
+        title_lbl.setStyleSheet(f"color: {fg_col}; background: transparent; border: none;")
+
+        left_layout.addWidget(icon_lbl)
+        left_layout.addWidget(title_lbl)
+        left_layout.addStretch(1)
+
+        self._left_btn.setStyleSheet("QPushButton { background: transparent; border: none; }")
+        self._left_btn.clicked.connect(
+            lambda _: self.channel_selected.emit(self.station_id, self.current_channel or "J-POP")
+        )
+
+        layout.addWidget(self._left_btn, 1)
+
+        # Inline Channel Chips
+        for ch in channels:
+            is_active = self.is_current_station and (self.current_channel == ch)
+            chip = ChannelChip(ch, is_active, self)
+            chip.clicked.connect(lambda _, c=ch: self.channel_selected.emit(self.station_id, c))
+            layout.addWidget(chip)
+
+
+class SimpleStationRow(QPushButton):
+    """Clean row for stations without subchannels."""
+
+    def __init__(
+        self,
+        station_id: str,
         title: str,
         icon_pm: QPixmap,
         is_selected: bool,
@@ -51,16 +177,15 @@ class StationPopoverRow(QPushButton):
     ) -> None:
         super().__init__(parent)
         self.station_id = station_id
-        self.channel = channel
         self.is_selected = is_selected
         self._hovered = False
 
-        self.setFixedHeight(32)
+        self.setFixedHeight(34)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0)
-        layout.setSpacing(9)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(8)
 
         # Icon
         self._icon_lbl = QLabel()
@@ -105,15 +230,11 @@ class StationPopoverRow(QPushButton):
     def _update_style(self) -> None:
         if self._hovered:
             bg = "rgba(236, 24, 108, 0.22)"
-            txt_color = "#FFFFFF"
         elif self.is_selected:
             bg = "rgba(255, 255, 255, 0.05)"
-            txt_color = "#EC186C"
         else:
             bg = "transparent"
-            txt_color = "#E6EAF8"
 
-        self._title_lbl.setStyleSheet(f"color: {txt_color}; background: transparent; border: none;")
         self.setStyleSheet(
             f"""
             QPushButton {{
@@ -158,27 +279,27 @@ class StationGlassPopover(QWidget):
             else os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "icons")
         )
 
-        self.setFixedWidth(192)
+        self.setFixedWidth(240)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(2)
 
-        # 1. LISTEN.moe channels
+        # 1. Multi-channel stations (e.g. LISTEN.moe with J-POP / K-POP)
         cfg_listen = STATIONS.get(STATION_LISTENMOE, {})
         pm_listen = self._get_icon_pm(str(cfg_listen.get("icon", "listen.png")))
-        for ch in cfg_listen.get("channels", ["J-POP", "K-POP"]):
-            is_sel = current_station == STATION_LISTENMOE and current_channel == ch
-            row = StationPopoverRow(
-                station_id=STATION_LISTENMOE,
-                channel=ch,
-                title=f"LISTEN.moe · {ch}",
-                icon_pm=pm_listen,
-                is_selected=is_sel,
-                parent=self,
-            )
-            row.clicked.connect(lambda _, c=ch: self._on_row_clicked(STATION_LISTENMOE, c))
-            main_layout.addWidget(row)
+        channels_listen = list(cfg_listen.get("channels", ["J-POP", "K-POP"]))
+        row_listen = StationRowWithChannels(
+            station_id=STATION_LISTENMOE,
+            name="LISTEN.moe",
+            channels=channels_listen,
+            current_station=current_station,
+            current_channel=current_channel,
+            icon_pm=pm_listen,
+            parent=self,
+        )
+        row_listen.channel_selected.connect(self._on_select)
+        main_layout.addWidget(row_listen)
 
         # Subtle separator
         sep = QFrame()
@@ -186,23 +307,38 @@ class StationGlassPopover(QWidget):
         sep.setStyleSheet("background-color: rgba(255, 255, 255, 0.08); margin: 3px 6px;")
         main_layout.addWidget(sep)
 
-        # 2. Other stations
+        # 2. Other stations (Gensokyo, ANISON, etc.)
         for st_id, st_cfg in STATIONS.items():
             if st_id == STATION_LISTENMOE:
                 continue
+            has_channels = bool(st_cfg.get("has_channels", False))
+            channels = list(st_cfg.get("channels", []))
             pm = self._get_icon_pm(str(st_cfg.get("icon", "listen.png")))
-            is_sel = current_station == st_id
             name = str(st_cfg.get("name", st_id))
-            row = StationPopoverRow(
-                station_id=st_id,
-                channel="J-POP",
-                title=name,
-                icon_pm=pm,
-                is_selected=is_sel,
-                parent=self,
-            )
-            row.clicked.connect(lambda _, s=st_id: self._on_row_clicked(s, "J-POP"))
-            main_layout.addWidget(row)
+
+            if has_channels and channels:
+                row_multi = StationRowWithChannels(
+                    station_id=st_id,
+                    name=name,
+                    channels=channels,
+                    current_station=current_station,
+                    current_channel=current_channel,
+                    icon_pm=pm,
+                    parent=self,
+                )
+                row_multi.channel_selected.connect(self._on_select)
+                main_layout.addWidget(row_multi)
+            else:
+                is_sel = current_station == st_id
+                row_simple = SimpleStationRow(
+                    station_id=st_id,
+                    title=name,
+                    icon_pm=pm,
+                    is_selected=is_sel,
+                    parent=self,
+                )
+                row_simple.clicked.connect(lambda _, s=st_id: self._on_select(s, "J-POP"))
+                main_layout.addWidget(row_simple)
 
     def _get_icon_pm(self, filename: str) -> QPixmap:
         if self.icon_dir and filename:
@@ -220,7 +356,7 @@ class StationGlassPopover(QWidget):
         fallback.fill(Qt.GlobalColor.transparent)
         return fallback
 
-    def _on_row_clicked(self, station_id: str, channel: str) -> None:
+    def _on_select(self, station_id: str, channel: str) -> None:
         self.station_selected.emit(station_id, channel)
         self.close()
 
