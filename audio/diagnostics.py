@@ -111,12 +111,17 @@ def log_audio_diagnostics(log: logging.Logger) -> dict[str, str]:
         mpv_status = f"Unavailable ({_found_libmpv or 'libmpv not found'}{err_msg})"
 
     # VLC
-    from audio.player_vlc import vlc
+    from audio.player_vlc import _found_libvlc, _vlc_import_error, vlc
 
-    if vlc is not None:
-        vlc_status = "Available (python-vlc loaded)"
+    if _found_libvlc:
+        vlc_status = f"Ready ({_found_libvlc})"
+    elif vlc is not None and _IS_WIN32:
+        vlc_status = "Available (bundled libvlc)"
     else:
-        vlc_status = "Unavailable (python-vlc / libvlc not found)"
+        err_msg = ""
+        if _vlc_import_error:
+            err_msg = f" - {type(_vlc_import_error).__name__}: {_vlc_import_error}"
+        vlc_status = f"Unavailable ({_found_libvlc or 'libvlc not found'}{err_msg})"
 
     log.info("[STARTUP] Audio Backends:")
     log.info("  - FFmpeg:    %s", ffmpeg_status)

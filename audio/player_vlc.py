@@ -11,13 +11,186 @@ from core.logger import get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
-vlc: Any = None
-try:
-    import vlc as _vlc_module
 
-    vlc = _vlc_module
-except Exception:
-    vlc = None
+def _find_libvlc_path() -> str | None:
+    """Cerca la libreria dinamica libvlc (DLL su Windows, .so su Linux, .dylib su macOS)
+    in modo robusto e ne restituisce il percorso assoluto."""
+    env_vlc_path = os.environ.get("VLC_PATH") or os.environ.get("PYTHON_VLC_LIB_PATH")
+    if env_vlc_path and os.path.isfile(env_vlc_path):
+        return str(Path(env_vlc_path).resolve())
+
+    candidate_dirs: list[Path] = []
+
+    for env_var in ("VLC_DIR", "PYTHON_VLC_MODULE_PATH"):
+        env_dir = os.environ.get(env_var)
+        if env_dir:
+            candidate_dirs.append(Path(env_dir))
+
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidate_dirs.append(Path(meipass))
+        exe_dir = Path(sys.executable).resolve().parent
+        candidate_dirs.append(exe_dir)
+        if not _IS_WIN32:
+            candidate_dirs.append(exe_dir.parent / "lib")
+            candidate_dirs.append(exe_dir / "lib")
+    else:
+        script_dir = Path(__file__).resolve().parent
+        repo_root = script_dir.parent
+        candidate_dirs.append(repo_root)
+        candidate_dirs.append(script_dir)
+        if _IS_WIN32:
+            candidate_dirs.append(repo_root / "packaging" / "windows")
+
+    if _IS_WIN32:
+        names = ["libvlc.dll"]
+        candidate_dirs.extend(
+            [
+                Path(r"C:\Program Files\VideoLAN\VLC"),
+                Path(r"C:\Program Files (x86)\VideoLAN\VLC"),
+            ]
+        )
+    elif sys.platform == "darwin":
+        names = ["libvlc.dylib"]
+        candidate_dirs.extend(
+            [
+                Path("/Applications/VLC.app/Contents/MacOS/lib"),
+                Path("/opt/homebrew/lib"),
+                Path("/usr/local/lib"),
+            ]
+        )
+    else:
+        names = ["libvlc.so.5", "libvlc.so.12", "libvlc.so"]
+        candidate_dirs.extend(
+            [
+                Path("/usr/lib"),
+                Path("/usr/lib/x86_64-linux-gnu"),
+                Path("/usr/lib64"),
+                Path("/usr/local/lib"),
+                Path("/app/lib"),
+            ]
+        )
+
+    unique_dirs: list[Path] = []
+    seen = set()
+    for d in candidate_dirs:
+        try:
+            resolved = d.resolve()
+            if resolved not in seen and resolved.is_dir():
+                seen.add(resolved)
+                unique_dirs.append(resolved)
+        except Exception:
+            pass
+
+    for name in names:
+        for d in unique_dirs:
+            candidate = d / name
+            try:
+                if candidate.is_file():
+                    return str(candidate.resolve())
+            except Exception:
+                pass
+
+    if not _IS_WIN32 and sys.platform != "darwin":
+        try:
+            import subprocess
+
+            for ldconfig_bin in ("/sbin/ldconfig", "ldconfig"):
+                try:
+                    res = subprocess.run(
+                        [ldconfig_bin, "-p"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=False,
+                    )
+                    if res.returncode == 0 and res.stdout:
+                        lines = res.stdout.splitlines()
+                        for name in names:
+                            for line in lines:
+                                if name in line and "=>" in line:
+                                    target = line.split("=>", 1)[1].strip()
+                                    if target and os.path.isfile(target):
+                                        return str(Path(target).resolve())
+                        break
+                except (FileNotFoundError, PermissionError):
+                    continue
+        except Exception:
+            pass
+
+    try:
+        import ctypes.util
+
+        lib_name = ctypes.util.find_library("vlc")
+        if lib_name:
+            if os.path.isabs(lib_name) and os.path.isfile(lib_name):
+                return str(Path(lib_name).resolve())
+            for d in unique_dirs:
+                candidate = d / lib_name
+                try:
+                    if candidate.is_file():
+                        return str(candidate.resolve())
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return None
+
+
+_found_libvlc = _find_libvlc_path()
+if _found_libvlc:
+    os.environ["PYTHON_VLC_LIB_PATH"] = _found_libvlc
+    _vlc_dir = str(Path(_found_libvlc).parent)
+    if _IS_WIN32:
+        os.environ["PATH"] = _vlc_dir + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(_vlc_dir)
+            except Exception:
+                pass
+
+_vlc_import_error: Exception | None = None
+_orig_vlc_find_library = None
+if _found_libvlc and not _IS_WIN32:
+    try:
+        import ctypes.util
+
+        _orig_vlc_find_library = ctypes.util.find_library
+
+        def _custom_vlc_find_library(name: str) -> str | None:
+            if name == "vlc":
+                return _found_libvlc
+            return _orig_vlc_find_library(name) if _orig_vlc_find_library else None
+
+        ctypes.util.find_library = _custom_vlc_find_library
+    except Exception:
+        pass
+
+vlc: Any = None
+if not _IS_WIN32 and not _found_libvlc:
+    _vlc_import_error = OSError(
+        "libvlc was not found on this system. Please install VLC "
+        "(e.g. 'sudo pacman -S vlc' on Arch, 'sudo apt install vlc' on Debian/Ubuntu, "
+        "or 'sudo dnf install vlc' on Fedora)."
+    )
+else:
+    try:
+        import vlc as _vlc_module
+
+        vlc = _vlc_module
+    except Exception as e:
+        vlc = None
+        _vlc_import_error = e
+    finally:
+        if _orig_vlc_find_library is not None:
+            try:
+                import ctypes.util
+
+                ctypes.util.find_library = _orig_vlc_find_library
+            except Exception:
+                pass
 
 
 class PlayerVLC:
@@ -53,9 +226,18 @@ class PlayerVLC:
     def _init_vlc(self) -> None:
         self._ready = False
         self._init_error = None
+        if not _IS_WIN32 and not _found_libvlc:
+            self._init_error = (
+                "libvlc was not found on this system. Please install VLC "
+                "(e.g. 'sudo pacman -S vlc' on Arch, 'sudo apt install vlc' on Debian/Ubuntu, "
+                "or 'sudo dnf install vlc' on Fedora)."
+            )
+            self.log.error("[BACKEND] PlayerVLC: %s", self._init_error)
+            return
         if vlc is None:
-            self._init_error = "python-vlc module not installed or unavailable"
-            self.log.debug("[DEBUG] _init_vlc: %s", self._init_error)
+            err = f" ({_vlc_import_error})" if _vlc_import_error else ""
+            self._init_error = f"python-vlc module not installed or unavailable{err}"
+            self.log.error("[BACKEND] PlayerVLC: %s", self._init_error)
             return
         # Setup plugin path if provided by user setting, otherwise detect system plugins
         if self._vlc_path and os.path.isdir(self._vlc_path):

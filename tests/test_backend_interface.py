@@ -339,3 +339,23 @@ def test_kikumoe_spec_retains_libjack_for_portaudio():
     assert '"libjack"' not in excludes_block, (
         "libjack must not be in _linux_binary_excludes; libportaudio2 requires libjack.so.0"
     )
+
+
+def test_audio_diagnostics_vlc_error_formatting(monkeypatch):
+    """Verify log_audio_diagnostics formats VLC status correctly when libvlc is unavailable."""
+    import logging
+
+    from audio.diagnostics import log_audio_diagnostics
+
+    logger = logging.getLogger("TestVLCDiag")
+    monkeypatch.setattr("audio.diagnostics._IS_WIN32", False)
+    monkeypatch.setattr("audio.player_vlc.vlc", None)
+    monkeypatch.setattr(
+        "audio.player_vlc._vlc_import_error",
+        OSError("libvlc was not found on this system"),
+    )
+    monkeypatch.setattr("audio.player_vlc._found_libvlc", None)
+
+    status = log_audio_diagnostics(logger)
+    assert "Unavailable" in status["vlc"]
+    assert "libvlc was not found" in status["vlc"]
