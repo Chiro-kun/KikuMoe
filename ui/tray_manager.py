@@ -4,7 +4,15 @@ from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtGui import QAction, QActionGroup, QFont, QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from core.constants import KEY_CHANNEL, KEY_FORMAT
+from core.constants import (
+    DEFAULT_STATION,
+    KEY_CHANNEL,
+    KEY_FORMAT,
+    KEY_STATION,
+    STATION_ANISON,
+    STATION_GENSOKYO,
+    STATION_LISTENMOE,
+)
 
 
 class TrayManager(QObject):
@@ -21,6 +29,7 @@ class TrayManager(QObject):
         on_show_window: Optional[Callable] = None,
         on_quit: Optional[Callable] = None,
         on_open_settings: Optional[Callable] = None,
+        on_change_station: Optional[Callable[[str], None]] = None,
         on_change_channel: Optional[Callable[[str], None]] = None,
         on_change_format: Optional[Callable[[str], None]] = None,
         on_toggle_play_pause: Optional[Callable] = None,
@@ -42,8 +51,12 @@ class TrayManager(QObject):
 
         self._on_quit = on_quit or default_quit
         self._on_open_settings = on_open_settings
+        self._on_change_station = on_change_station
         self._on_change_channel = on_change_channel
         self._on_change_format = on_change_format
+        self._station_actions: Dict[str, QAction] = {}
+        self._grp_station: Optional[QActionGroup] = None
+        self._act_st: Optional[QAction] = None
         self._on_toggle_play_pause = on_toggle_play_pause
         self._on_stop_stream = on_stop_stream
         self._on_force_stop = on_force_stop
@@ -300,6 +313,53 @@ class TrayManager(QObject):
                     self._act_hdr_prefs.setFont(header_font)
                     menu.addAction(self._act_hdr_prefs)
 
+                    # Stazione (LISTEN.moe / Gensokyo / ANISON)
+                    try:
+                        txt_station = (
+                            self._i18n.t("tray_station") if hasattr(self._i18n, "t") else "Stazione"
+                        )
+                    except Exception:
+                        txt_station = "Stazione"
+                    sub_station = QMenu(txt_station, self._parent)
+                    grp_station = QActionGroup(self._parent)
+                    grp_station.setExclusive(True)
+                    self._grp_station = grp_station
+                    self._station_actions.clear()
+                    try:
+                        current_station = str(
+                            self._parent.settings.value(KEY_STATION, DEFAULT_STATION)
+                        )
+                    except Exception:
+                        current_station = DEFAULT_STATION
+                    station_items = [
+                        ("LISTEN.moe", STATION_LISTENMOE),
+                        ("Gensokyo Radio", STATION_GENSOKYO),
+                        ("ANISON.FM", STATION_ANISON),
+                    ]
+                    for name, s_id in station_items:
+                        acts = QAction(name, self._parent)
+                        acts.setCheckable(True)
+                        acts.setChecked(current_station.lower() == s_id.lower())
+                        if self._on_change_station:
+                            acts.triggered.connect(
+                                lambda checked, v=s_id: (
+                                    checked
+                                    and self._on_change_station
+                                    and self._on_change_station(v)
+                                )
+                            )
+                        grp_station.addAction(acts)
+                        sub_station.addAction(acts)
+                        self._station_actions[s_id] = acts
+                    act_st = menu.addMenu(sub_station)
+                    self._act_st = act_st
+                    if "channel" in self._icons and self._act_st is not None:
+                        self._act_st.setIcon(self._icons["channel"])
+                    try:
+                        sub_station.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
+
                     # Canale (J-POP/K-POP)
                     try:
                         txt_channel = (
@@ -422,7 +482,10 @@ class TrayManager(QObject):
             pass
 
     def sync_stream_settings(
-        self, channel: Optional[str] = None, fmt: Optional[str] = None
+        self,
+        channel: Optional[str] = None,
+        fmt: Optional[str] = None,
+        station: Optional[str] = None,
     ) -> None:
         """Synchronizes the checked state of channel and format actions in the tray menu."""
         try:
@@ -452,6 +515,19 @@ class TrayManager(QObject):
                     actf.blockSignals(True)
                     actf.setChecked(should_check)
                     actf.blockSignals(False)
+
+            if station is None:
+                try:
+                    station = str(self._parent.settings.value(KEY_STATION, DEFAULT_STATION))
+                except Exception:
+                    station = DEFAULT_STATION
+            target_station = str(station).strip().lower()
+            for st_key, acts in self._station_actions.items():
+                should_check = st_key.strip().lower() == target_station
+                if acts.isChecked() != should_check:
+                    acts.blockSignals(True)
+                    acts.setChecked(should_check)
+                    acts.blockSignals(False)
         except Exception:
             pass
 

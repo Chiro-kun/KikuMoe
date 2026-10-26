@@ -56,6 +56,10 @@ def test_tray_manager_initial_sync(qapp):
     tray_mgr.ensure_tray_enabled(True)
 
     # Verifica che le azioni siano state registrate
+    assert "listenmoe" in tray_mgr._station_actions
+    assert "gensokyo" in tray_mgr._station_actions
+    assert "anison" in tray_mgr._station_actions
+    assert tray_mgr._station_actions["listenmoe"].isChecked() is True
     assert "J-POP" in tray_mgr._channel_actions
     assert "K-POP" in tray_mgr._channel_actions
     assert "Vorbis" in tray_mgr._format_actions

@@ -54,8 +54,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.config import get_station_config
 from core.constants import (
     APP_SETTINGS,
+    DEFAULT_STATION,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -68,10 +70,14 @@ from core.constants import (
     KEY_NETWORK_CACHING,
     KEY_SESSION_TIMER_ENABLED,
     KEY_SLEEP_STOP_ON_END,
+    KEY_STATION,
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
     ORG_NAME,
+    STATION_ANISON,
+    STATION_GENSOKYO,
+    STATION_LISTENMOE,
 )
 from core.i18n import I18n
 from core.logger import silence_stderr
@@ -913,6 +919,18 @@ class SettingsDialog(QDialog):
         self.cmb_lang.setFixedWidth(combo_w)
         prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_language"), self.cmb_lang))
 
+        self.cmb_station = GlassComboBox()
+        self.cmb_station.addItem("LISTEN.moe", userData=STATION_LISTENMOE)
+        self.cmb_station.addItem("Gensokyo Radio", userData=STATION_GENSOKYO)
+        self.cmb_station.addItem("ANISON.FM", userData=STATION_ANISON)
+        saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        for i in range(self.cmb_station.count()):
+            if self.cmb_station.itemData(i) == saved_station:
+                self.cmb_station.setCurrentIndex(i)
+                break
+        self.cmb_station.setFixedWidth(combo_w)
+        prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_station"), self.cmb_station))
+
         self.cmb_channel = GlassComboBox()
         self.cmb_channel.addItems(["J-POP", "K-POP"])
         self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, "J-POP"))
@@ -1195,6 +1213,9 @@ class SettingsDialog(QDialog):
         body_layout.addWidget(footer_frame)
 
         outer_layout.addLayout(body_layout, 1)
+        if hasattr(self, "cmb_station"):
+            self.cmb_station.currentIndexChanged.connect(self._on_settings_station_changed)
+            self._on_settings_station_changed()
         if embedded:
             # When embedded, defer audio device enumeration to idle
             # so it never interrupts transitions
@@ -1233,12 +1254,37 @@ class SettingsDialog(QDialog):
         if idx == 1 and not self._devices_populated:
             QTimer.singleShot(210, self._ensure_devices_populated)
 
+    def _on_settings_station_changed(self) -> None:
+        station_id = self.cmb_station.currentData() or DEFAULT_STATION
+        cfg = get_station_config(station_id)
+        has_channels = cfg.get("has_channels", False)
+        if hasattr(self, "cmb_channel"):
+            self.cmb_channel.setEnabled(has_channels)
+
+        if hasattr(self, "cmb_format"):
+            current_fmt = self.cmb_format.currentText()
+            formats = cfg.get("formats", ["Vorbis", "Opus", "MP3"])
+            self.cmb_format.blockSignals(True)
+            self.cmb_format.clear()
+            self.cmb_format.addItems(formats)
+            if current_fmt in formats:
+                self.cmb_format.setCurrentText(current_fmt)
+            else:
+                self.cmb_format.setCurrentText(cfg.get("default_format", formats[0]))
+            self.cmb_format.blockSignals(False)
+
     def reload_from_settings(self) -> None:
         """Fast non-blocking reload of widget values from QSettings."""
         self.settings.sync()
         lang = str(self.settings.value(KEY_LANG, "it"))
         self.i18n.set_lang(lang)
         self.cmb_lang.setCurrentIndex(0 if lang == "it" else 1)
+        saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        for i in range(self.cmb_station.count()):
+            if self.cmb_station.itemData(i) == saved_station:
+                self.cmb_station.setCurrentIndex(i)
+                break
+        self._on_settings_station_changed()
         self.cmb_channel.setCurrentText(str(self.settings.value(KEY_CHANNEL, "J-POP")))
         self.cmb_format.setCurrentText(str(self.settings.value(KEY_FORMAT, "Vorbis")))
         saved_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
@@ -1483,6 +1529,8 @@ class SettingsDialog(QDialog):
             KEY_DEV_CONSOLE_SHOW_DEV, "true" if self.chk_dev_show_dev.isChecked() else "false"
         )
         self.settings.setValue(KEY_LANG, "it" if self.cmb_lang.currentIndex() == 0 else "en")
+        if hasattr(self, "cmb_station"):
+            self.settings.setValue(KEY_STATION, self.cmb_station.currentData() or DEFAULT_STATION)
         self.settings.setValue(KEY_CHANNEL, self.cmb_channel.currentText())
         self.settings.setValue(KEY_FORMAT, self.cmb_format.currentText())
         path = self.txt_vlc_path.text().strip()

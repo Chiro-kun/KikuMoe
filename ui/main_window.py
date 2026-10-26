@@ -46,11 +46,12 @@ from PyQt6.QtWidgets import (
 from audio.player_ffmpeg import PlayerFFmpeg
 from audio.player_mpv import PlayerMPV
 from audio.player_vlc import PlayerVLC
-from core.config import STREAMS
+from core.config import STREAMS, get_station_config, get_station_stream_url
 from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
     APP_VERSION,
+    DEFAULT_STATION,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -67,21 +68,26 @@ from core.constants import (
     KEY_SESSION_TIMER_ENABLED,
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
+    KEY_STATION,
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
     KEY_VOLUME,
     KEY_WINDOW_GEOMETRY,
     ORG_NAME,
+    STATION_ANISON,
+    STATION_GENSOKYO,
+    STATION_LISTENMOE,
 )
 from core.i18n import I18n
 from core.logger import get_logger
 from core.ssl_compat import get_ssl_context
+from network.station_manager import StationManager
 from network.ws_client import NowPlayingWS
 from ui.about_dialog import AboutDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
-from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+from ui.settings_dialog import GlassComboBox, SettingsDialog, SlidingStackedWidget
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.tray_manager import TrayManager
 from ui.widgets.ambient_cover import (
@@ -465,6 +471,7 @@ class ListenMoePlayer(QWidget):
         """Load and prepare application icons for window and tray."""
         try:
             icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icons")
+            self._icon_dir = icon_dir
             style = self.style() or QApplication.style()
             sp = QStyle.StandardPixmap
 
@@ -608,14 +615,14 @@ class ListenMoePlayer(QWidget):
         """
         self._current_radio_provider = "listenmoe"
 
-        # 1. Sub-Header HUD Bar: [LIVE Badge] <--> [J-POP | K-POP] <--> [Settings]
+        # 1. Sub-Header HUD: [LIVE Badge] <-> [Station | Channel] <-> [Settings]
         top_bar = QWidget()
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(0, 0, 0, 0)
         top_bar_layout.setSpacing(6)
 
         left_wing = QWidget()
-        left_wing.setFixedWidth(86)
+        left_wing.setFixedWidth(54)
         left_wing_layout = QHBoxLayout(left_wing)
         left_wing_layout.setContentsMargins(0, 0, 0, 0)
         left_wing_layout.setSpacing(0)
@@ -628,18 +635,43 @@ class ListenMoePlayer(QWidget):
         self.brand_label = QLabel("KIKUMOE")
         self.brand_label.setVisible(False)
 
+        # Center HUD: Station Selector + Channel Switch (when LISTEN.moe is active)
+        center_hud = QWidget()
+        center_hud_layout = QHBoxLayout(center_hud)
+        center_hud_layout.setContentsMargins(0, 0, 0, 0)
+        center_hud_layout.setSpacing(6)
+
+        saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        self._current_radio_provider = saved_station
+
+        self.station_switch = GlassComboBox()
+        self.station_switch.addItem("LISTEN.moe", userData=STATION_LISTENMOE)
+        self.station_switch.addItem("Gensokyo Radio", userData=STATION_GENSOKYO)
+        self.station_switch.addItem("ANISON.FM", userData=STATION_ANISON)
+        for i in range(self.station_switch.count()):
+            if self.station_switch.itemData(i) == self._current_radio_provider:
+                self.station_switch.setCurrentIndex(i)
+                break
+        self.station_switch.setFixedWidth(130)
+        self.station_switch.currentIndexChanged.connect(self._on_hud_station_changed)
+
         saved_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
         self.channel_switch = SegmentedSwitch(
             items=["J-POP", "K-POP"],
             default_index=1 if saved_channel == "K-POP" else 0,
             height=28,
         )
-        self.channel_switch.setFixedWidth(134)
+        self.channel_switch.setFixedWidth(120)
         self.channel_switch.selection_changed.connect(self._on_channel_switch_changed)
-        self.channel_switch.setVisible(self._current_radio_provider == "listenmoe")
+        self.channel_switch.setVisible(self._current_radio_provider == STATION_LISTENMOE)
+
+        center_hud_layout.addStretch(1)
+        center_hud_layout.addWidget(self.station_switch)
+        center_hud_layout.addWidget(self.channel_switch)
+        center_hud_layout.addStretch(1)
 
         right_wing = QWidget()
-        right_wing.setFixedWidth(86)
+        right_wing.setFixedWidth(54)
         right_wing_layout = QHBoxLayout(right_wing)
         right_wing_layout.setContentsMargins(0, 0, 0, 0)
         right_wing_layout.setSpacing(0)
@@ -652,9 +684,7 @@ class ListenMoePlayer(QWidget):
         right_wing_layout.addWidget(self.settings_button)
 
         top_bar_layout.addWidget(left_wing)
-        top_bar_layout.addStretch(1)
-        top_bar_layout.addWidget(self.channel_switch)
-        top_bar_layout.addStretch(1)
+        top_bar_layout.addWidget(center_hud, 1)
         top_bar_layout.addWidget(right_wing)
         self._outer_body_layout.addWidget(top_bar)
         self._outer_body_layout.addWidget(self._view_stack, 1)
@@ -1024,15 +1054,18 @@ class ListenMoePlayer(QWidget):
             self.dev_console = None
 
     def _init_websocket(self):
-        """Configura la connessione WebSocket."""
-        init_channel = self.settings.value(KEY_CHANNEL, "J-POP")
-        self.ws = NowPlayingWS(
+        """Configura StationManager e metadata provider."""
+        init_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        init_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+        self.station_mgr = StationManager(
             on_now_playing=self._on_now_playing,
             on_error_text=self._on_ws_error_text,
-            on_closed_text=self._on_ws_closed_text,
-            ws_url=self._get_ws_url_for_channel(init_channel),
+            on_status_text=self._on_ws_closed_text,
+            initial_station=init_station,
+            initial_channel=init_channel,
         )
-        self.ws.start()
+        self.ws = getattr(self.station_mgr, "_active_provider", None)
+        self.station_mgr.start()
 
     def _init_tray(self):
         """Initialize system tray manager."""
@@ -1043,6 +1076,7 @@ class ListenMoePlayer(QWidget):
                 self.i18n,
                 on_show_window=self.showNormal,
                 on_open_settings=self.open_settings,
+                on_change_station=self.set_radio_provider,
                 on_change_channel=self._tray_change_channel,
                 on_change_format=self._tray_change_format,
                 on_toggle_play_pause=self._tray_toggle_play_pause,
@@ -1225,7 +1259,12 @@ class ListenMoePlayer(QWidget):
                 self._session_timer.stop()
             if hasattr(self, "player") and self.player:
                 self.player.stop()
-            if hasattr(self, "ws") and self.ws:
+            if hasattr(self, "station_mgr") and self.station_mgr:
+                try:
+                    self.station_mgr.stop()
+                except Exception:
+                    pass
+            elif hasattr(self, "ws") and self.ws:
                 ws_stop = getattr(self.ws, "stop", None) or getattr(self.ws, "shutdown", None)
                 if callable(ws_stop):
                     ws_stop()
@@ -1486,11 +1525,55 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _on_hud_station_changed(self, idx: int) -> None:
+        try:
+            if hasattr(self, "station_switch"):
+                station_id = self.station_switch.itemData(idx) or DEFAULT_STATION
+                self.set_radio_provider(station_id)
+        except Exception:
+            pass
+
     def set_radio_provider(self, provider: str) -> None:
-        """Show the J-POP / K-POP switch only when the 'listenmoe' radio is selected."""
-        self._current_radio_provider = (provider or "").strip().lower()
+        """Switch active radio station (listenmoe, gensokyo, anison)."""
+        clean_id = (provider or "").strip().lower()
+        if clean_id not in ("listenmoe", "gensokyo", "anison"):
+            clean_id = DEFAULT_STATION
+
+        old_provider = getattr(self, "_current_radio_provider", DEFAULT_STATION)
+        self._current_radio_provider = clean_id
+        self.settings.setValue(KEY_STATION, clean_id)
+
+        # 1. Update station switch combobox if index differs
+        if hasattr(self, "station_switch"):
+            for i in range(self.station_switch.count()):
+                if self.station_switch.itemData(i) == clean_id:
+                    if self.station_switch.currentIndex() != i:
+                        self.station_switch.blockSignals(True)
+                        self.station_switch.setCurrentIndex(i)
+                        self.station_switch.blockSignals(False)
+                    break
+
+        # 2. Show/hide channel switch based on whether station has channels
+        cfg = get_station_config(clean_id)
         if hasattr(self, "channel_switch"):
-            self.channel_switch.setVisible(self._current_radio_provider == "listenmoe")
+            self.channel_switch.setVisible(cfg.get("has_channels", False))
+
+        # 3. Update station manager and switch playback if playing
+        if hasattr(self, "station_mgr"):
+            changed = self.station_mgr.set_station(clean_id)
+            self.ws = getattr(self.station_mgr, "_active_provider", None)
+
+            if changed and old_provider != clean_id:
+                # Update fallback cover art immediately to station icon while loading track
+                icon_file = cfg.get("icon")
+                if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
+                    icon_path = os.path.join(self._icon_dir, icon_file)
+                    if os.path.isfile(icon_path):
+                        self.ambient_cover.set_cover(QPixmap(icon_path))
+
+                if self.player and self.player.is_playing():
+                    self.log.info(f"[UI] Station changed to '{clean_id}', restarting playback...")
+                    self.play_stream(is_retry=False)
 
     def _on_channel_switch_changed(self, new_channel: str) -> None:
         try:
@@ -2423,6 +2506,7 @@ class ListenMoePlayer(QWidget):
 
             # Salva stato precedente
             was_playing = bool(self.player and self.player.is_playing())
+            prev_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
             prev_channel = self.settings.value(KEY_CHANNEL, "J-POP")
             prev_format = self.settings.value(KEY_FORMAT, "Vorbis")
             prev_path = self.settings.value(KEY_LIBVLC_PATH, "") or None
@@ -2504,6 +2588,9 @@ class ListenMoePlayer(QWidget):
                 # Se canale o formato sono cambiati, riavvia WS/stream
                 # ma mantieni il Now Playing finché non arriva un nuovo evento
                 try:
+                    new_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+                    if new_station != prev_station:
+                        self.set_radio_provider(new_station)
                     new_channel = self.settings.value(KEY_CHANNEL, "J-POP")
                     new_format = self.settings.value(KEY_FORMAT, "Vorbis")
                     if new_channel != prev_channel or new_format != prev_format:
@@ -2813,24 +2900,14 @@ class ListenMoePlayer(QWidget):
             pass
 
     def get_selected_stream_url(self) -> str:
-        """Restituisce l'URL dello stream in base a canale e formato nelle impostazioni."""
+        """Restituisce l'URL dello stream in base a stazione, canale e formato."""
         try:
-            channel = self.settings.value(KEY_CHANNEL, "J-POP")
-            fmt = self.settings.value(KEY_FORMAT, "Vorbis")
-            urls = STREAMS.get(channel)
-            if isinstance(urls, dict):
-                url = urls.get(fmt)
-                if url:
-                    return url
-                # fallback: prova Vorbis, altrimenti il primo disponibile
-                url = urls.get("Vorbis") or (next(iter(urls.values())) if urls else None)
-                if url:
-                    return url
-            # fallback globale noto
-            jpop = STREAMS.get("J-POP", {})
-            return jpop.get("Vorbis") or (
-                next(iter(jpop.values())) if jpop else "https://listen.moe/stream"
+            station = getattr(self, "_current_radio_provider", None) or str(
+                self.settings.value(KEY_STATION, DEFAULT_STATION)
             )
+            channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+            fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+            return get_station_stream_url(station, channel, fmt)
         except Exception:
             return "https://listen.moe/stream"
 

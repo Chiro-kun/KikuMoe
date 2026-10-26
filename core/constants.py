@@ -132,3 +132,9 @@ KEY_CLOSE_TO_TRAY = "close_to_tray"
 KEY_DEV_CONSOLE_SHOW_DEV = "dev_console_show_dev"
 # Audio backend selection: 'auto' | 'ffmpeg' | 'mpv' | 'vlc'
 KEY_AUDIO_BACKEND = "audio_backend"
+# Radio station selection & provider identifiers
+KEY_STATION = "station"
+STATION_LISTENMOE = "listenmoe"
+STATION_GENSOKYO = "gensokyo"
+STATION_ANISON = "anison"
+DEFAULT_STATION = STATION_LISTENMOE
