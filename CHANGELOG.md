@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.0.0-beta2] - 2026-10-23
+## [2.0.0-beta2] - 2026-10-26
 
 ### Added
 - **Linux Audio Startup Diagnostics**: Automated probing of active sound daemons (PipeWire socket, PulseAudio server, ALSA) and audio backend readiness (FFmpeg binary, PortAudio host APIs, MPV, VLC) logged on startup and inspectable in the Developer Console.
 - **Standalone Static FFmpeg Bundling**: Bundled static `ffmpeg` directly into PyInstaller's frozen binary (`sys._MEIPASS`) and automated static FFmpeg download in `build.sh` for self-contained Linux builds.
+- **Minimal Audio-Only FFmpeg Linux Build**: Dedicated compilation recipe (`packaging/linux/build-minimal-ffmpeg.sh`) building a specialized static FFmpeg binary (~15 MB vs ~140 MB full build) tailored specifically for web radio audio streams (PCM, MP3, AAC, FLAC, Opus, Ogg/Vorbis) and protocols (`pipe`, `crypto`, `https`, `tls`).
+- **Headless CLI Flags (`--check-audio`, `--help`)**: Non-GUI command-line interface arguments in `KikuMoe.py` allowing headless verification of system audio daemons, sound backends, and environment diagnostics with standardized process exit codes.
+- **CI Smoke Tests & Footprint Profiling**: Headless automated CI validation on both GitHub Actions and Forgejo CI executing `--check-audio` and `--help` directly against built Linux AppImage artifacts, coupled with automated AppDir footprint and largest file breakdowns.
+- **PyAudio & PortAudio Linux Bundling**: Explicit inclusion of `pyaudio` C-extensions (`_portaudio`), `libportaudio.so.2`, and fallback `libjack.so.0` inside the Linux AppDir, guaranteeing PortAudio availability out-of-the-box even on systems without JACK or pipewire-jack packages.
 - **Persistent File Logging & History Buffer**: Added rotating log file handler (`kikumoe.log`) in platform data directories and an in-memory ring buffer (1000 lines) replayed upon opening the Developer Console.
 - **Powered By Section**: New cards in Settings (Info tab) and About dialog featuring brand direct links to supported radio stream services (LISTEN.moe, etc.) with vector logos.
 - **Telegram Channel Link**: Added official Telegram link button with custom vector plane icon in the About section.
@@ -23,13 +27,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Audio Scaling Tests**: Automated unit tests validating volume scaling and perceptual curve curves across all playback backends.
 
 ### Changed
+- **PyInstaller Onedir Mode on Linux**: Converted Linux packaging from `onefile` to `onedir` in `kikumoe.spec`, eliminating the runtime overhead of unpacking files to `/tmp` on every launch, speeding up startup time and reducing disk churn.
+- **AppImage Zstandard Compression**: Modernized `packaging/linux/build-appimage.sh` with pinned `appimagetool` v1.9.1 and `zstd` level 19 compression, achieving an ultra-compact distribution footprint.
+- **Binary & Asset Stripping**: Excluded unused Qt translations (>15 MB saved), stripped host media codecs (Mesa/GPU, x264, x265, VP8/VP9, AV1), and removed duplicate system ICU libraries from the bundled AppDir.
 - **Perceptual Volume Curve**: Implemented unified power 1.5 volume scaling across MPV, VLC, and FFmpeg backends ($100 \cdot \sqrt{\text{vol}/100}$ for cubic backends, $(\text{vol}/100)^{1.5}$ for FFmpeg amplitude). Low volume settings (< 20%) are now clear, audible, and natural without abrupt drop-offs.
+- **CI / Build Triggers & Concurrency**: Added `concurrency: cancel-in-progress` groups to GitHub and Forgejo CI workflows, and included the `redesign` branch directly in build triggers to enable automated builds on both tags and branch pushes.
+- **Isolated Build Dependency Group**: Introduced `tool.poetry.group.build.dependencies` in `pyproject.toml` isolating PyInstaller and build tooling from runtime dependencies.
 - **Log Spam Reduction (#71)**: Downgraded `volume_changed` event messages from `INFO` to `DEBUG` to eliminate console and terminal flooding during volume slider drag.
 - **Tagline & Localization**: Updated application tagline and descriptions across Italian and English translations to cover web radio, music, and local playback capabilities.
-- **CI / Build Triggers**: Added the `redesign` branch directly to GitHub Actions and Forgejo CI workflow triggers to enable automated builds on both tags and branch pushes.
 - **Binary Size Optimization**: Excluded unused heavy Qt6 modules (`QtQml`, `QtQuick`, `QtPdf`, `QtSql`, `QtXml`, `QtBluetooth`, etc.) and stdlib modules (`tkinter`, `unittest`, `pydoc`, `sqlite3`) in `kikumoe.spec`, and eliminated duplicate ffmpeg bundling inside the onefile payload in favor of AppDir placement, drastically reducing Linux executable and AppImage size.
 
 ### Fixed
+- **Host MPV Dynamic Library Conflicts (Arch / Fedora)**:
+  - Excluded `libssl.so*` and `libcrypto.so*` from the PyInstaller bundle on Linux, resolving `OPENSSL_3.5.0 not found` caused when host `libmpv` dynamically loads host `libcurl.so.4`.
+  - Excluded `libfontconfig.so*` from the PyInstaller bundle on Linux, resolving `undefined symbol: FcConfigSetDefaultSubstitute` when host `libmpv` loads host `libass.so.9` against modern host Fontconfig 2.14+.
+- **Host VLC Dynamic Library Loading & Discovery**:
+  - Implemented `_find_libvlc_path()` to systematically probe system library directories (`/usr/lib`, `/usr/lib64`, `/usr/local/lib`, etc.) and export `PYTHON_VLC_LIB_PATH` prior to `import vlc`.
+  - Updated audio diagnostics to verify `libvlc_new()` instantiation, reporting VLC as `Ready` only when confirmed operational and reporting exact initialization exceptions under `Unavailable` instead of misleading `Available`.
+- **PyAudio Sample Rate Auto-Negotiation**:
+  - Added multi-rate candidate probing (`48000 Hz`, `44100 Hz`, and device default rate) in `PlayerFFmpeg._open_pyaudio_stream`, eliminating audio crackling, pitch distortion, and invalid sample rate errors when connecting to non-48kHz sinks or fallback devices.
+- **Packaging Script Path Resolution**: Fixed relative path ambiguities in `build-minimal-ffmpeg.sh` and `fetch-ffmpeg.sh` by ensuring destination paths are resolved to absolute coordinates.
 - **Progress Bar Freeze on Untimed Tracks**: Fixed an issue where receiving a song with `dur == 0` caused `_on_song_tick` to return immediately, leaving the progress bar static at 0% and freezing the elapsed time text.
 - **Linux AppImage Audio Playback**:
   - Excluded conflicting low-level system audio libraries (`libasound`, `libpulse*`, `libjack`, `libpipewire*`, `libspa*`, `libasound_module*`) and standard C++ runtime (`libstdc++`, `libgcc_s`) in `kikumoe.spec`, forcing dynamic binding to host ALSA/PipeWire/PulseAudio plugins and resolving `GLIBCXX` symbol mismatches with host `libmpv` and `librubberband`.
