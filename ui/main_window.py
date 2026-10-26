@@ -75,8 +75,6 @@ from core.constants import (
     KEY_VOLUME,
     KEY_WINDOW_GEOMETRY,
     ORG_NAME,
-    STATION_ANISON,
-    STATION_GENSOKYO,
     STATION_LISTENMOE,
 )
 from core.i18n import I18n
@@ -87,7 +85,7 @@ from network.ws_client import NowPlayingWS
 from ui.about_dialog import AboutDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
-from ui.settings_dialog import GlassComboBox, SettingsDialog, SlidingStackedWidget
+from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.tray_manager import TrayManager
 from ui.widgets.ambient_cover import (
@@ -97,8 +95,9 @@ from ui.widgets.ambient_cover import (
     LiveEqualizerBadge,
 )
 from ui.widgets.playback_controls import PlaybackControls
-from ui.widgets.segmented_switch import SegmentedSwitch, SettingsIconButton
+from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
+from ui.widgets.station_pill import StationPillButton
 from ui.widgets.status_footer import StatusFooter
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
@@ -615,14 +614,14 @@ class ListenMoePlayer(QWidget):
         """
         self._current_radio_provider = "listenmoe"
 
-        # 1. Sub-Header HUD: [LIVE Badge] <-> [Station | Channel] <-> [Settings]
+        # 1. Sub-Header HUD: [LIVE Badge] <-> [Station Cyber-Pill] <-> [Settings]
         top_bar = QWidget()
         top_bar_layout = QHBoxLayout(top_bar)
         top_bar_layout.setContentsMargins(0, 0, 0, 0)
         top_bar_layout.setSpacing(6)
 
         left_wing = QWidget()
-        left_wing.setFixedWidth(54)
+        left_wing.setFixedWidth(86)
         left_wing_layout = QHBoxLayout(left_wing)
         left_wing_layout.setContentsMargins(0, 0, 0, 0)
         left_wing_layout.setSpacing(0)
@@ -635,43 +634,31 @@ class ListenMoePlayer(QWidget):
         self.brand_label = QLabel("KIKUMOE")
         self.brand_label.setVisible(False)
 
-        # Center HUD: Station Selector + Channel Switch (when LISTEN.moe is active)
+        # Center HUD: Centered Cyber-Pill Station Selector
         center_hud = QWidget()
         center_hud_layout = QHBoxLayout(center_hud)
         center_hud_layout.setContentsMargins(0, 0, 0, 0)
-        center_hud_layout.setSpacing(6)
+        center_hud_layout.setSpacing(0)
 
         saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        saved_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
         self._current_radio_provider = saved_station
 
-        self.station_switch = GlassComboBox()
-        self.station_switch.addItem("LISTEN.moe", userData=STATION_LISTENMOE)
-        self.station_switch.addItem("Gensokyo Radio", userData=STATION_GENSOKYO)
-        self.station_switch.addItem("ANISON.FM", userData=STATION_ANISON)
-        for i in range(self.station_switch.count()):
-            if self.station_switch.itemData(i) == self._current_radio_provider:
-                self.station_switch.setCurrentIndex(i)
-                break
-        self.station_switch.setFixedWidth(130)
-        self.station_switch.currentIndexChanged.connect(self._on_hud_station_changed)
-
-        saved_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
-        self.channel_switch = SegmentedSwitch(
-            items=["J-POP", "K-POP"],
-            default_index=1 if saved_channel == "K-POP" else 0,
-            height=28,
+        self.station_pill = StationPillButton(
+            parent=self,
+            initial_station=saved_station,
+            initial_channel=saved_channel,
+            icon_dir=getattr(self, "_icon_dir", None),
         )
-        self.channel_switch.setFixedWidth(120)
-        self.channel_switch.selection_changed.connect(self._on_channel_switch_changed)
-        self.channel_switch.setVisible(self._current_radio_provider == STATION_LISTENMOE)
+        self.station_pill.station_selected.connect(self._on_station_pill_selected)
+        self.channel_switch = None
 
         center_hud_layout.addStretch(1)
-        center_hud_layout.addWidget(self.station_switch)
-        center_hud_layout.addWidget(self.channel_switch)
+        center_hud_layout.addWidget(self.station_pill)
         center_hud_layout.addStretch(1)
 
         right_wing = QWidget()
-        right_wing.setFixedWidth(54)
+        right_wing.setFixedWidth(86)
         right_wing_layout = QHBoxLayout(right_wing)
         right_wing_layout.setContentsMargins(0, 0, 0, 0)
         right_wing_layout.setSpacing(0)
@@ -1525,46 +1512,39 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def _on_hud_station_changed(self, idx: int) -> None:
-        try:
-            if hasattr(self, "station_switch"):
-                station_id = self.station_switch.itemData(idx) or DEFAULT_STATION
-                self.set_radio_provider(station_id)
-        except Exception:
-            pass
+    def _on_station_pill_selected(self, station_id: str, channel: str) -> None:
+        self.set_radio_provider(station_id, channel)
 
-    def set_radio_provider(self, provider: str) -> None:
-        """Switch active radio station (listenmoe, gensokyo, anison)."""
+    def set_radio_provider(self, provider: str, channel: Optional[str] = None) -> None:
+        """Switch active radio station (listenmoe, gensokyo, anison) and optional channel."""
         clean_id = (provider or "").strip().lower()
         if clean_id not in ("listenmoe", "gensokyo", "anison"):
             clean_id = DEFAULT_STATION
 
-        old_provider = getattr(self, "_current_radio_provider", DEFAULT_STATION)
+        old_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+        target_channel = channel or old_channel
+
         self._current_radio_provider = clean_id
         self.settings.setValue(KEY_STATION, clean_id)
+        if clean_id == STATION_LISTENMOE and channel:
+            self.settings.setValue(KEY_CHANNEL, channel)
 
-        # 1. Update station switch combobox if index differs
-        if hasattr(self, "station_switch"):
-            for i in range(self.station_switch.count()):
-                if self.station_switch.itemData(i) == clean_id:
-                    if self.station_switch.currentIndex() != i:
-                        self.station_switch.blockSignals(True)
-                        self.station_switch.setCurrentIndex(i)
-                        self.station_switch.blockSignals(False)
-                    break
+        # 1. Update station cyber-pill
+        if hasattr(self, "station_pill") and self.station_pill:
+            self.station_pill.update_state(clean_id, target_channel)
 
-        # 2. Show/hide channel switch based on whether station has channels
-        cfg = get_station_config(clean_id)
-        if hasattr(self, "channel_switch"):
-            self.channel_switch.setVisible(cfg.get("has_channels", False))
-
-        # 3. Update station manager and switch playback if playing
+        # 2. Update station manager and switch playback if playing
         if hasattr(self, "station_mgr"):
             changed = self.station_mgr.set_station(clean_id)
+            if clean_id == STATION_LISTENMOE:
+                self.station_mgr.set_channel(target_channel)
             self.ws = getattr(self.station_mgr, "_active_provider", None)
 
-            if changed and old_provider != clean_id:
-                # Update fallback cover art immediately to station icon while loading track
+            station_or_chan_changed = changed or (
+                clean_id == STATION_LISTENMOE and target_channel != old_channel
+            )
+            if station_or_chan_changed:
+                cfg = get_station_config(clean_id)
                 icon_file = cfg.get("icon")
                 if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
                     icon_path = os.path.join(self._icon_dir, icon_file)
@@ -1572,7 +1552,7 @@ class ListenMoePlayer(QWidget):
                         self.ambient_cover.set_cover(QPixmap(icon_path))
 
                 if self.player and self.player.is_playing():
-                    self.log.info(f"[UI] Station changed to '{clean_id}', restarting playback...")
+                    self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
                     self.play_stream(is_retry=False)
 
     def _on_channel_switch_changed(self, new_channel: str) -> None:

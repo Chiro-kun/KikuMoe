@@ -182,22 +182,49 @@ def test_station_ui_integration(monkeypatch):
 
     player = ListenMoePlayer()
     try:
-        # Default is listenmoe, channel_switch should be shown (not hidden)
-        player.set_radio_provider("listenmoe")
+        # Default is listenmoe, station_pill shows LISTEN.moe · J-POP
+        player.set_radio_provider("listenmoe", "J-POP")
         assert player._current_radio_provider == "listenmoe"
-        assert player.channel_switch.isHidden() is False
+        assert "LISTEN.moe" in player.station_pill.get_display_title()
+        assert "J-POP" in player.station_pill.get_display_title()
         assert "listen.moe" in player.get_selected_stream_url()
 
-        # Switch to Gensokyo: channel_switch should be hidden
+        # Switch to Gensokyo: station_pill updates title
         player.set_radio_provider("gensokyo")
         assert player._current_radio_provider == "gensokyo"
-        assert player.channel_switch.isHidden() is True
+        assert "Gensokyo Radio" in player.station_pill.get_display_title()
         assert "gensokyoradio.net" in player.get_selected_stream_url()
 
-        # Switch to ANISON: channel_switch should be hidden
+        # Switch to ANISON: station_pill updates title
         player.set_radio_provider("anison")
         assert player._current_radio_provider == "anison"
-        assert player.channel_switch.isHidden() is True
+        assert "ANISON.FM" in player.station_pill.get_display_title()
         assert "anison.fm" in player.get_selected_stream_url()
     finally:
         player.deleteLater()
+
+
+def test_station_pill_button_state():
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.station_pill import StationPillButton
+
+    _ = QApplication.instance() or QApplication(["pytest"])
+    pill = StationPillButton(initial_station="listenmoe", initial_channel="J-POP")
+    assert "LISTEN.moe" in pill.get_display_title()
+    assert "J-POP" in pill.get_display_title()
+
+    # Update to K-POP
+    pill.update_state("listenmoe", "K-POP")
+    assert "K-POP" in pill.get_display_title()
+
+    # Update to Gensokyo Radio
+    pill.update_state("gensokyo")
+    assert pill.get_current_station() == "gensokyo"
+    assert "Gensokyo Radio" in pill.get_display_title()
+
+    # Update to ANISON.FM
+    pill.update_state("anison")
+    assert pill.get_current_station() == "anison"
+    assert "ANISON.FM" in pill.get_display_title()
+    pill.deleteLater()
