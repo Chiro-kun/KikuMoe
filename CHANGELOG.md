@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0-beta3] - Unreleased
+
+### Added
+- **Multi-Station Radio Engine**: Integrated community web radio stations (Gensokyo Radio Touhou Project streams, ANISON.FM anime streams) alongside LISTEN.moe.
+
+### Changed
+
+### Fixed
+
+---
+
 ## [2.0.0-beta2] - 2026-10-26
 
 ### Added

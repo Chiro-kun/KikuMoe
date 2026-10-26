@@ -24,6 +24,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizeGrip, QWidget
 
+from core.constants import APP_VERSION
+
 _TITLE_BAR_HEIGHT = 38
 _BTN_SIZE = QSize(42, _TITLE_BAR_HEIGHT)
 
@@ -304,7 +306,7 @@ class _BrandTitleLabel(QLabel):
 class _VersionBadgeLabel(QLabel):
     """Custom-painted version pill badge ('2.0.0-beta2') vertically and horizontally centered."""
 
-    def __init__(self, text: str = "2.0.0-beta2", parent: QWidget | None = None) -> None:
+    def __init__(self, text: str = APP_VERSION, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setFixedHeight(_TITLE_BAR_HEIGHT)
         font = QFont("Segoe UI")
@@ -371,7 +373,7 @@ class CustomTitleBar(QFrame):
         self._brand_label = _BrandTitleLabel("KIKUMOE", self)
         layout.addWidget(self._brand_label)
 
-        self._ver_badge = _VersionBadgeLabel("2.0.0-beta2", self)
+        self._ver_badge = _VersionBadgeLabel(APP_VERSION, self)
         layout.addWidget(self._ver_badge)
 
         # 3. Spacer (song title removed from title bar as requested)

@@ -35,4 +35,4 @@ fi
 
 VERSION="$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' "$PROJECT_ROOT/version.yml" | head -1)"
 echo "Done. Output:"
-echo "  dist/KikuMoe/KikuMoe (v${VERSION:-2.0.0-beta2})"
+echo "  dist/KikuMoe/KikuMoe (v${VERSION:-2.0.0-beta3})"
