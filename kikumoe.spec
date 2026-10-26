@@ -96,7 +96,7 @@ if _IS_WIN32:
 else:
     # On Linux, explicitly collect libportaudio and libjack so that the frozen AppImage
     # has self-contained PortAudio support without relying on host dev packages or JACK.
-    for lib_pattern in ("libportaudio.so*",):
+    for lib_pattern in ("libportaudio.so*", "libjack.so*"):
         for search_dir in (
             "/usr/lib/x86_64-linux-gnu",
             "/usr/lib64",
@@ -202,7 +202,7 @@ if not _IS_WIN32:
         "libpulse",
         "libpulse-simple",
         "libpulsecommon",
-        "libjack",
+        # libjack is retained for PortAudio runtime compatibility on systems without JACK
         "libpipewire",
         "libspa",
         "libasound_module",

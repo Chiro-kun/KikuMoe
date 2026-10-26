@@ -257,7 +257,6 @@ def test_kikumoe_spec_audio_excludes():
         "libvlccore",
         "libasound",
         "libpulse",
-        "libjack",
         "libpipewire",
         "libspa",
         "libasound_module",
@@ -325,3 +324,15 @@ def test_audio_diagnostics_mpv_error_formatting(monkeypatch):
 
     # Should run and log without raising any exception
     log_audio_diagnostics(logger)
+
+
+def test_kikumoe_spec_retains_libjack_for_portaudio():
+    """Verify that libjack is NOT in _linux_binary_excludes because libportaudio2
+    requires libjack.so.0 on minimal/PipeWire Linux environments."""
+    with open("kikumoe.spec", encoding="utf-8") as f:
+        spec_content = f.read()
+
+    excludes_block = spec_content.split("_linux_binary_excludes = (")[1].split(")")[0]
+    assert '"libjack"' not in excludes_block, (
+        "libjack must not be in _linux_binary_excludes; libportaudio2 requires libjack.so.0"
+    )

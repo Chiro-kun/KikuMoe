@@ -67,6 +67,26 @@ if find "$APPDIR/usr/bin" -name "libportaudio*" | grep -q .; then
 else
     echo "WARNING: libportaudio not found in AppDir!"
 fi
+if find "$APPDIR/usr/bin" -name "libjack*" | grep -q .; then
+    echo "libjack found."
+else
+    echo "WARNING: libjack not found in AppDir!"
+fi
+
+# Ensure libportaudio and libjack are explicitly copied to _internal if missing
+if [[ -d "$APPDIR/usr/bin/_internal" ]]; then
+    for lib in libportaudio.so.2 libjack.so.0; do
+        if ! find "$APPDIR/usr/bin/_internal" -name "$lib" | grep -q .; then
+            for search_dir in /usr/lib/x86_64-linux-gnu /usr/lib64 /usr/lib; do
+                if [[ -f "$search_dir/$lib" ]]; then
+                    echo "Copying $lib from $search_dir to AppDir _internal..."
+                    cp -P "$search_dir/$lib"* "$APPDIR/usr/bin/_internal/" 2>/dev/null || true
+                    break
+                fi
+            done
+        fi
+    done
+fi
 
 # Bundle static ffmpeg into AppDir usr/bin (co-located with KikuMoe executable)
 if [[ -f "$LINUX_PKG/ffmpeg" ]]; then
