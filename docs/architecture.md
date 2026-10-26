@@ -23,7 +23,7 @@ KikuMoe/                     # Repository root
 ├── build.sh                 # Linux build script (Bash)
 ├── kikumoe.spec             # PyInstaller configuration (cross-platform)
 ├── pyi_rthook_vlc.py        # VLC runtime hook for PyInstaller
-├── FFMPEG.bat               # FFmpeg installer script for Windows
+├── install-ffmpeg.bat       # FFmpeg installer script for Windows
 ├── version.yml              # Current application version
 ├── LICENSE
 ├── README.md                # User documentation

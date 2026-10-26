@@ -64,7 +64,12 @@ def log_audio_diagnostics(log: logging.Logger) -> dict[str, str]:
 
     ffmpeg_path = _find_ffmpeg_bin()
     is_valid_bin = bool(
-        ffmpeg_path and (shutil.which(ffmpeg_path) is not None or os.path.isfile(ffmpeg_path))
+        ffmpeg_path
+        and not (_IS_WIN32 and ffmpeg_path.lower().endswith((".bat", ".cmd")))
+        and (
+            (os.path.isabs(ffmpeg_path) and os.path.isfile(ffmpeg_path))
+            or (shutil.which(ffmpeg_path) is not None)
+        )
     )
     ffmpeg_status = f"Ready ({ffmpeg_path})" if is_valid_bin else f"Missing ('{ffmpeg_path}')"
 

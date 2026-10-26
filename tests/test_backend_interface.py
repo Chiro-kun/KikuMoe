@@ -359,3 +359,25 @@ def test_audio_diagnostics_vlc_error_formatting(monkeypatch):
     status = log_audio_diagnostics(logger)
     assert "Unavailable" in status["vlc"]
     assert "libvlc was not found" in status["vlc"]
+
+
+def test_player_ffmpeg_rejects_bat_script(monkeypatch):
+    import tempfile
+    from pathlib import Path
+
+    from audio.player_ffmpeg import PlayerFFmpeg, _find_ffmpeg_bin
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        fake_bat = Path(tmp_dir) / "ffmpeg.bat"
+        fake_bat.write_text("@echo off\nexit /b 0", encoding="utf-8")
+
+        # If FFMPEG_PATH points to a .bat, it must be ignored on Windows
+        monkeypatch.setenv("FFMPEG_PATH", str(fake_bat))
+        found = _find_ffmpeg_bin()
+        assert not found.lower().endswith((".bat", ".cmd"))
+
+        # Even if somehow assigned, _check_ffmpeg must return False without executing it
+        player = PlayerFFmpeg()
+        player._ffmpeg_bin = str(fake_bat)
+        assert player._check_ffmpeg() is False
+        assert player.get_version() is None

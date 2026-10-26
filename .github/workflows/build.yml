@@ -180,7 +180,7 @@ jobs:
           $zipDir = "dist\KikuMoe-$appVersion-Windows-x64"
           New-Item -ItemType Directory -Path $zipDir -Force | Out-Null
           Copy-Item "dist\KikuMoe-$appVersion.exe" -Destination "$zipDir\KikuMoe.exe"
-          Copy-Item "FFMPEG.bat" -Destination "$zipDir\FFMPEG.bat"
+          Copy-Item "install-ffmpeg.bat" -Destination "$zipDir\install-ffmpeg.bat"
           Copy-Item "README.md" -Destination "$zipDir\README.md"
           Copy-Item "CHANGELOG.md" -Destination "$zipDir\CHANGELOG.md"
           Copy-Item "LICENSE" -Destination "$zipDir\LICENSE"

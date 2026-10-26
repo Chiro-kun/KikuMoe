@@ -60,7 +60,7 @@ cd kikumoe
 **Windows** — esegui lo script incluso (richiede privilegi amministratore):
 
 ```powershell
-.\FFMPEG.bat
+.\install-ffmpeg.bat
 ```
 
 Dopo l'installazione **riavvia Windows** per aggiornare il PATH.
@@ -224,7 +224,7 @@ La console sviluppatore mostra i log interni dell'applicazione in tempo reale.
 
 ## Risoluzione problemi
 
-**FFmpeg non trovato dopo aver eseguito FFMPEG.bat**
+**FFmpeg non trovato dopo aver eseguito install-ffmpeg.bat**
 
 Riavvia Windows per aggiornare il PATH di sistema.
 

@@ -32,7 +32,8 @@ def _find_ffmpeg_bin() -> str:
     e infine nel PATH di sistema."""
     env_bin = os.environ.get("FFMPEG_PATH")
     if env_bin and os.path.isfile(env_bin):
-        return env_bin
+        if not (_IS_WIN32 and env_bin.lower().endswith((".bat", ".cmd"))):
+            return env_bin
 
     candidates: list[Path] = []
     if getattr(sys, "frozen", False):
@@ -52,10 +53,16 @@ def _find_ffmpeg_bin() -> str:
 
     for c in candidates:
         try:
-            if c.is_file():
+            if c.is_file() and not (_IS_WIN32 and c.name.lower().endswith((".bat", ".cmd"))):
                 return str(c.resolve())
         except Exception:
             pass
+
+    if _IS_WIN32:
+        which_bin = shutil.which("ffmpeg.exe")
+        if which_bin and not which_bin.lower().endswith((".bat", ".cmd")):
+            return which_bin
+        return "ffmpeg.exe"
 
     which_bin = shutil.which("ffmpeg")
     if which_bin:
@@ -183,11 +190,12 @@ class PlayerFFmpeg:
         return None
 
     def is_ready(self) -> bool:
-        return bool(self._ready and pyaudio is not None and self._check_ffmpeg())
+        return bool(self._ready and pyaudio is not None)
 
     def reinitialize(
         self, libvlc_path: str | None = None, network_caching_ms: int | None = None
     ) -> bool:
+        self._init_audio()
         return self.is_ready()
 
     def get_init_error(self) -> str | None:
@@ -203,10 +211,15 @@ class PlayerFFmpeg:
     def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available."""
         try:
+            bin_to_check = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
+            if _IS_WIN32:
+                if bin_to_check.lower().endswith((".bat", ".cmd")):
+                    return False
+                if not os.path.isabs(bin_to_check) and not shutil.which(bin_to_check):
+                    return False
             kwargs: dict = {}
             if _IS_WIN32:
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-            bin_to_check = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
             result = subprocess.run(
                 [bin_to_check, "-version"],
                 capture_output=True,
@@ -461,10 +474,15 @@ class PlayerFFmpeg:
     def get_version(self) -> str | None:
         """Return ffmpeg version string if available."""
         try:
+            bin_to_run = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
+            if _IS_WIN32:
+                if bin_to_run.lower().endswith((".bat", ".cmd")):
+                    return None
+                if not os.path.isabs(bin_to_run) and not shutil.which(bin_to_run):
+                    return None
             kwargs: dict = {}
             if _IS_WIN32:
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-            bin_to_run = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
             result = subprocess.run(
                 [bin_to_run, "-version"],
                 capture_output=True,
