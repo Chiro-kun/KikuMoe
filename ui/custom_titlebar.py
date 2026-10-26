@@ -353,7 +353,12 @@ class CustomTitleBar(QFrame):
 
     HEIGHT = _TITLE_BAR_HEIGHT
 
-    def __init__(self, window: QWidget, icon: QIcon | None = None) -> None:
+    def __init__(
+        self,
+        window: QWidget,
+        icon: QIcon | None = None,
+        title: str | None = None,
+    ) -> None:
         super().__init__(window)
         self._window = window
         self.setObjectName("customTitleBar")
@@ -376,10 +381,20 @@ class CustomTitleBar(QFrame):
         self._ver_badge = _VersionBadgeLabel(APP_VERSION, self)
         layout.addWidget(self._ver_badge)
 
-        # 3. Spacer (song title removed from title bar as requested)
-        self._title_label = QLabel("")
+        # 3. Custom/Dialog Title Label
+        self._title_label = QLabel(title or "", self)
         self._title_label.setObjectName("titleBarTitle")
-        self._title_label.setVisible(False)
+        self._title_label.setStyleSheet(
+            "color: #ffffff; font-size: 13px; font-weight: 700; "
+            "background: transparent; border: none; padding-left: 2px;"
+        )
+        self._title_label.setVisible(bool(title))
+        layout.addWidget(self._title_label)
+
+        if title:
+            self._brand_label.setVisible(False)
+            self._ver_badge.setVisible(False)
+
         layout.addStretch(1)
 
         # 4. Window Control Buttons
@@ -413,9 +428,22 @@ class CustomTitleBar(QFrame):
     def set_icon(self, icon: QIcon | None) -> None:
         self._icon_label.set_icon(icon)
 
+    def set_dialog_title(self, title: str | None) -> None:
+        """Set a custom window/dialog title. If None, revert to brand mark and version badge."""
+        if title:
+            self._brand_label.setVisible(False)
+            self._ver_badge.setVisible(False)
+            self._title_label.setText(title)
+            self._title_label.setVisible(True)
+        else:
+            self._title_label.setVisible(False)
+            self._brand_label.setVisible(True)
+            self._ver_badge.setVisible(True)
+
     def set_title(self, title: str) -> None:
         """Keep internal label updated for compatibility without displaying song title in header."""
-        self._title_label.setText("")
+        if not self._title_label.isVisible():
+            self._title_label.setText("")
 
     def sync_maximize_button(self) -> None:
         if self._window.isMaximized():

@@ -18,8 +18,8 @@ from PyQt6.QtGui import (
     QColor,
     QIcon,
     QKeyEvent,
+    QLinearGradient,
     QPainter,
-    QPainterPath,
     QPen,
     QShowEvent,
 )
@@ -41,7 +41,7 @@ from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 
 class DialogIconBadge(QWidget):
-    """Refined cyber-glass badge rendering a glowing power/exit symbol."""
+    """Refined cyber-glass badge rendering a glowing power/exit symbol with symmetry."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -51,26 +51,23 @@ class DialogIconBadge(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # 1. Glowing translucent squircle background
-        rect = QRectF(0.5, 0.5, 35.0, 35.0)
-        painter.setBrush(QColor(236, 24, 108, 24))
-        painter.setPen(QPen(QColor(236, 24, 108, 70), 1.0))
+        # 1. Glowing translucent squircle background with Cyber glass gradient
+        rect = QRectF(1.0, 1.0, 34.0, 34.0)
+        grad = QLinearGradient(0.0, 0.0, 0.0, 36.0)
+        grad.setColorAt(0.0, QColor(236, 24, 108, 38))
+        grad.setColorAt(1.0, QColor(236, 24, 108, 16))
+        painter.setBrush(grad)
+        painter.setPen(QPen(QColor(255, 71, 151, 85), 1.0))
         painter.drawRoundedRect(rect, 9.0, 9.0)
 
-        # 2. Glowing power / standby emblem
-        accent = QColor("#EC186C")
-        pen = QPen(accent, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        # 2. Perfectly symmetric power / standby emblem
+        pen = QPen(QColor("#ff4797"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
 
-        # Arc open at the top
-        arc_rect = QRectF(10.5, 10.5, 15.0, 15.0)
-        path = QPainterPath()
-        path.arcMoveTo(arc_rect, 60.0)
-        path.arcTo(arc_rect, 60.0, 240.0)
-        painter.drawPath(path)
-
-        # Vertical line in center
-        painter.drawLine(QPointF(18.0, 8.5), QPointF(18.0, 16.5))
+        arc_rect = QRectF(11.0, 12.0, 14.0, 14.0)
+        painter.drawArc(arc_rect, int(55 * 16), int(-290 * 16))
+        painter.drawLine(QPointF(18.0, 9.0), QPointF(18.0, 16.5))
         painter.end()
 
 
@@ -87,10 +84,11 @@ class CloseConfirmDialog(QDialog):
         self.setObjectName("closeConfirmDialogRoot")
         self.setModal(True)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setFixedSize(430, 182)
+        self.setFixedSize(430, 180)
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
-        self.setWindowTitle(self.i18n.t("close_dialog_title"))
+        title_text = self.i18n.t("close_dialog_title")
+        self.setWindowTitle(title_text)
 
         self.action: str = "cancel"  # "tray" | "quit" | "cancel"
         self.remember: bool = False
@@ -104,12 +102,12 @@ class CloseConfirmDialog(QDialog):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # 1. Custom Cyber-Moe Titlebar (clean, without artificial CONFIRM badge)
+        # 1. Custom Cyber-Moe Titlebar displaying dialog title ("Chiudere l'app?")
         app_icon = icon or (getattr(parent, "_icon_app", None) if parent else None)
-        self._title_bar = CustomTitleBar(self, icon=app_icon)
+        self._title_bar = CustomTitleBar(self, icon=app_icon, title=title_text)
         self._title_bar._btn_min.setVisible(False)
         self._title_bar._btn_max.setVisible(False)
-        self._title_bar._ver_badge.setVisible(False)
+        self.title_lbl = self._title_bar._title_label
 
         # Re-wire titlebar close button to trigger cancel
         try:
@@ -122,38 +120,25 @@ class CloseConfirmDialog(QDialog):
         # 2. Main Body Container
         body_widget = QWidget(self)
         body_layout = QVBoxLayout(body_widget)
-        body_layout.setContentsMargins(18, 14, 18, 12)
+        body_layout.setContentsMargins(18, 16, 18, 12)
         body_layout.setSpacing(10)
 
-        # Header Row: Icon badge + Title and Description
+        # Header Row: Symmetrical Icon badge + Prompt Description
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(14)
 
         self.badge = DialogIconBadge(body_widget)
-        header_row.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
-
-        text_col = QVBoxLayout()
-        text_col.setContentsMargins(0, 0, 0, 0)
-        text_col.setSpacing(2)
-
-        title_text = self.i18n.t("close_dialog_title")
-        self.title_lbl = QLabel(title_text)
-        self.title_lbl.setStyleSheet(
-            "color: #ffffff; font-size: 14px; font-weight: 700; "
-            "background: transparent; border: none;"
-        )
-        text_col.addWidget(self.title_lbl)
+        header_row.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignCenter)
 
         prompt_text = self.i18n.t("close_dialog_text")
         self.prompt_label = QLabel(prompt_text)
         self.prompt_label.setWordWrap(True)
         self.prompt_label.setStyleSheet(
-            "color: #94a3b8; font-size: 12px; font-weight: 400; line-height: 1.35; "
+            "color: #e2e8f0; font-size: 13px; font-weight: 500; line-height: 1.4; "
             "background: transparent; border: none;"
         )
-        text_col.addWidget(self.prompt_label)
-        header_row.addLayout(text_col, 1)
+        header_row.addWidget(self.prompt_label, 1, Qt.AlignmentFlag.AlignVCenter)
         body_layout.addLayout(header_row)
 
         # Checkbox: Remember Choice (aligned directly under the text column)
