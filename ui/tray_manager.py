@@ -15,6 +15,7 @@ from core.constants import (
     STATION_NEURO21,
     STATION_TRUCKERSFM,
 )
+from ui.vector_icons import get_history_icon
 
 
 class TrayManager(QObject):
@@ -240,7 +241,8 @@ class TrayManager(QObject):
                         )
                     except Exception:
                         txt_history = "Cronologia brani"
-                    act_history = QAction(f"🕒 {txt_history}...", self._parent)
+                    act_history = QAction(f"{txt_history}...", self._parent)
+                    act_history.setIcon(get_history_icon(16))
                     if hasattr(self._parent, "toggle_history_popover"):
                         act_history.triggered.connect(self._parent.toggle_history_popover)
                     menu.addAction(act_history)

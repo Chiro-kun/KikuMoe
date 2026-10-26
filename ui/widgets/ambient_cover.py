@@ -11,7 +11,7 @@ Features:
 import math
 from typing import Optional
 
-from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -299,6 +299,7 @@ class AnimatedTrackLabel(QLabel):
     """
     QLabel subclass that performs a smooth 60 FPS vertical slide-up + crossfade
     whenever its text changes to a new track title or artist.
+    Supports an optional attached dropdown chevron button positioned right next to the title text.
     """
 
     def __init__(
@@ -315,14 +316,28 @@ class AnimatedTrackLabel(QLabel):
         self._text_color = QColor(text_color)
         self._prev_text: str = text
         self._anim_progress: float = 1.0
+        self._chevron_btn: Optional[QWidget] = None
 
         self.setFixedHeight(max(22, font_px + 8))
+        self.setMinimumWidth(0)
 
         self._elapsed = QElapsedTimer()
         self._anim_timer = QTimer(self)
         self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
+
+    def attach_chevron_button(self, btn: QWidget) -> None:
+        """Attach a dropdown chevron button positioned at the end of the title text."""
+        self._chevron_btn = btn
+        btn.setParent(self)
+        self._update_chevron_position()
+
+    def sizeHint(self) -> QSize:
+        return QSize(100, max(22, self._font_px + 8))
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(20, max(22, self._font_px + 8))
 
     def setText(self, a0: Optional[str]) -> None:
         new_txt = a0 or ""
@@ -331,6 +346,7 @@ class AnimatedTrackLabel(QLabel):
             return
         self._prev_text = old_txt
         super().setText(new_txt)
+        self._update_chevron_position()
         if self.isVisible():
             self._anim_progress = 0.0
             self._elapsed.start()
@@ -339,6 +355,43 @@ class AnimatedTrackLabel(QLabel):
         else:
             self._anim_progress = 1.0
         self.update()
+
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._update_chevron_position()
+
+    def _update_chevron_position(self) -> None:
+        if self._chevron_btn is None:
+            return
+        w = float(self.width())
+        h = float(self.height())
+        if w <= 10 or h <= 10:
+            return
+        txt = (self.text() or "").strip()
+        if not txt or txt in ("–", "-"):
+            self._chevron_btn.setVisible(False)
+            return
+
+        font = QFont(self.font())
+        font.setPixelSize(self._font_px)
+        font.setWeight(QFont.Weight(self._font_weight))
+        fm = QFontMetrics(font)
+
+        btn_w = float(self._chevron_btn.width())
+        btn_h = float(self._chevron_btn.height())
+        reserve_w = btn_w + 6.0
+
+        max_text_w = max(20.0, w - 12.0 - reserve_w * 2.0)
+        elided_txt = fm.elidedText(txt, Qt.TextElideMode.ElideRight, int(max_text_w))
+        text_w = float(fm.horizontalAdvance(elided_txt))
+
+        text_x = 6.0 + (w - 12.0 - text_w) / 2.0
+        text_end_x = text_x + text_w
+
+        btn_x = int(text_end_x + 3.0)
+        btn_y = int((h - btn_h) / 2.0)
+        self._chevron_btn.move(btn_x, btn_y)
+        self._chevron_btn.setVisible(True)
 
     def _tick_anim(self) -> None:
         elapsed = float(self._elapsed.elapsed())
@@ -363,6 +416,13 @@ class AnimatedTrackLabel(QLabel):
         painter.setFont(font)
         fm = QFontMetrics(font)
 
+        reserve_w = (
+            (float(self._chevron_btn.width()) + 6.0)
+            if (self._chevron_btn and self._chevron_btn.isVisible())
+            else 0.0
+        )
+        usable_w = max(20, int(w - 12.0 - reserve_w * 2.0))
+
         ease = 1.0 - ((1.0 - self._anim_progress) ** 3)
 
         # Outgoing text sliding up & fading out
@@ -370,9 +430,7 @@ class AnimatedTrackLabel(QLabel):
             out_col = QColor(self._text_color)
             out_col.setAlpha(int(255 * (1.0 - ease)))
             painter.setPen(out_col)
-            out_elided = fm.elidedText(
-                self._prev_text, Qt.TextElideMode.ElideRight, max(20, int(w - 12))
-            )
+            out_elided = fm.elidedText(self._prev_text, Qt.TextElideMode.ElideRight, usable_w)
             y_out = -7.0 * ease
             painter.drawText(
                 QRectF(6.0, y_out, w - 12.0, h),
@@ -384,7 +442,7 @@ class AnimatedTrackLabel(QLabel):
         in_col = QColor(self._text_color)
         in_col.setAlpha(int(255 * ease))
         painter.setPen(in_col)
-        in_elided = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, max(20, int(w - 12)))
+        in_elided = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, usable_w)
         y_in = 8.0 * (1.0 - ease)
         painter.drawText(
             QRectF(6.0, y_in, w - 12.0, h),

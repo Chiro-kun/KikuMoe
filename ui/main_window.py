@@ -100,6 +100,13 @@ from ui.history_popover import SongHistoryPopover
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.tray_manager import TrayManager
+from ui.vector_icons import (
+    get_apple_music_icon,
+    get_copy_icon,
+    get_history_icon,
+    get_spotify_icon,
+    get_youtube_icon,
+)
 from ui.widgets.ambient_cover import (
     AmbientCoverCard,
     AnimatedTrackLabel,
@@ -112,6 +119,7 @@ from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
 from ui.widgets.station_pill import StationPillButton
 from ui.widgets.status_footer import StatusFooter
+from ui.widgets.track_menu_button import TrackMenuChevronButton
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
@@ -734,6 +742,13 @@ class ListenMoePlayer(QWidget):
         self.now_playing_title.setObjectName("songTitleLabel")
         self.now_playing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.now_playing_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.track_menu_btn = TrackMenuChevronButton(self.now_playing_title)
+        self.track_menu_btn.setToolTip(self.i18n.t("search_menu_tooltip"))
+        self.track_menu_btn.clicked.connect(
+            lambda: self._show_track_context_menu(from_chevron=True)
+        )
+        self.now_playing_title.attach_chevron_button(self.track_menu_btn)
 
         self.now_playing_title.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
@@ -2590,7 +2605,9 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def _show_track_context_menu(self, pos: QPoint) -> None:
+    def _show_track_context_menu(
+        self, pos: QPoint | None = None, from_chevron: bool = False
+    ) -> None:
         """Display context menu with Quick Search & Clipboard actions for current track."""
         try:
             title = (getattr(self, "_current_title", "") or "").strip()
@@ -2609,11 +2626,14 @@ class ListenMoePlayer(QWidget):
                     padding: 6px 0px;
                 }
                 QMenu::item {
-                    padding: 6px 28px 6px 12px;
+                    padding: 6px 24px 6px 10px;
                     border-radius: 5px;
                     margin: 1px 6px;
                     color: #e2e8f0;
                     font-size: 12px;
+                }
+                QMenu::icon {
+                    padding-left: 4px;
                 }
                 QMenu::item:selected {
                     background-color: rgba(236, 24, 108, 0.25);
@@ -2627,46 +2647,56 @@ class ListenMoePlayer(QWidget):
                 """
             )
 
-            # Quick Search Actions
-            act_spotify = menu.addAction(f"🟢  {self.i18n.t('search_spotify')}")
+            # Quick Search Actions with crisp vector icons
+            act_spotify = menu.addAction(get_spotify_icon(16), self.i18n.t("search_spotify"))
             if act_spotify is not None:
                 act_spotify.triggered.connect(lambda: search_spotify(title, artist))
 
-            act_youtube = menu.addAction(f"▶  {self.i18n.t('search_youtube')}")
+            act_youtube = menu.addAction(get_youtube_icon(16), self.i18n.t("search_youtube"))
             if act_youtube is not None:
                 act_youtube.triggered.connect(lambda: search_youtube(title, artist))
 
-            act_apple = menu.addAction(f"🍎  {self.i18n.t('search_apple_music')}")
+            act_apple = menu.addAction(get_apple_music_icon(16), self.i18n.t("search_apple_music"))
             if act_apple is not None:
                 act_apple.triggered.connect(lambda: search_apple_music(title, artist))
 
             menu.addSeparator()
 
             formatted = f"{artist} - {title}" if artist else title
-            act_copy_all = menu.addAction(f"📋  {self.i18n.t('copy_formatted')}")
+            act_copy_all = menu.addAction(get_copy_icon(16), self.i18n.t("copy_formatted"))
             if act_copy_all is not None:
                 act_copy_all.triggered.connect(lambda: copy_to_clipboard(formatted))
 
             if artist:
-                act_copy_artist = menu.addAction(f"📋  {self.i18n.t('copy_artist')}")
+                act_copy_artist = menu.addAction(get_copy_icon(16), self.i18n.t("copy_artist"))
                 if act_copy_artist is not None:
                     act_copy_artist.triggered.connect(lambda: copy_to_clipboard(artist))
 
-            act_copy_title = menu.addAction(f"📋  {self.i18n.t('copy_title')}")
+            act_copy_title = menu.addAction(get_copy_icon(16), self.i18n.t("copy_title"))
             if act_copy_title is not None:
                 act_copy_title.triggered.connect(lambda: copy_to_clipboard(title))
 
             menu.addSeparator()
 
-            act_history = menu.addAction(f"🕒  {self.i18n.t('history_button')}...")
+            act_history = menu.addAction(
+                get_history_icon(16), f"{self.i18n.t('history_button')}..."
+            )
             if act_history is not None:
                 act_history.triggered.connect(self.toggle_history_popover)
 
-            sender = self.sender()
-            if isinstance(sender, QWidget):
-                global_pos = sender.mapToGlobal(pos)
+            is_chevron = from_chevron or (self.sender() == getattr(self, "track_menu_btn", None))
+            if hasattr(self, "track_menu_btn") and is_chevron:
+                self.track_menu_btn.set_active(True)
+                menu.aboutToHide.connect(lambda: self.track_menu_btn.set_active(False))
+                global_pos = self.track_menu_btn.mapToGlobal(
+                    QPoint(0, self.track_menu_btn.height() + 2)
+                )
             else:
-                global_pos = QCursor.pos()
+                sender = self.sender()
+                if isinstance(sender, QWidget) and pos is not None:
+                    global_pos = sender.mapToGlobal(pos)
+                else:
+                    global_pos = QCursor.pos()
             menu.exec(global_pos)
         except Exception:
             pass

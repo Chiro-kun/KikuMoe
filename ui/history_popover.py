@@ -11,6 +11,7 @@ from PyQt6.QtCore import (
     QPointF,
     QPropertyAnimation,
     QRectF,
+    QSize,
     Qt,
     pyqtSignal,
 )
@@ -36,6 +37,7 @@ from PyQt6.QtWidgets import (
 from core.i18n import I18n
 from core.quick_search import copy_to_clipboard, search_spotify, search_youtube
 from core.song_history import SongHistoryEntry, SongHistoryManager
+from ui.vector_icons import get_copy_icon, get_spotify_icon, get_youtube_icon
 
 
 class _ElidedLabel(QLabel):
@@ -201,40 +203,49 @@ class SongHistoryRowWidget(QWidget):
         actions_box.setSpacing(4)
 
         # Spotify Button
-        self.btn_spotify = QPushButton("🟢", self)
+        self.btn_spotify = QPushButton(self)
+        self.btn_spotify.setIcon(get_spotify_icon(14))
+        self.btn_spotify.setIconSize(QSize(14, 14))
         self.btn_spotify.setFixedSize(24, 24)
         self.btn_spotify.setToolTip(self.i18n.t("search_spotify"))
         self.btn_spotify.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_spotify.setStyleSheet(
-            "QPushButton { background: rgba(30, 215, 96, 0.12); color: #1ed760; "
-            "border: 1px solid rgba(30, 215, 96, 0.3); border-radius: 6px; font-size: 10px; }"
-            "QPushButton:hover { background: rgba(30, 215, 96, 0.28); color: #ffffff; }"
+            "QPushButton { background: rgba(30, 215, 96, 0.12); "
+            "border: 1px solid rgba(30, 215, 96, 0.32); border-radius: 6px; padding: 0; }\n"
+            "QPushButton:hover { background: rgba(30, 215, 96, 0.28); "
+            "border-color: rgba(30, 215, 96, 0.65); }"
         )
         self.btn_spotify.clicked.connect(lambda: search_spotify(entry.title, entry.artist))
         actions_box.addWidget(self.btn_spotify)
 
         # YouTube Button
-        self.btn_youtube = QPushButton("▶", self)
+        self.btn_youtube = QPushButton(self)
+        self.btn_youtube.setIcon(get_youtube_icon(14))
+        self.btn_youtube.setIconSize(QSize(14, 14))
         self.btn_youtube.setFixedSize(24, 24)
         self.btn_youtube.setToolTip(self.i18n.t("search_youtube"))
         self.btn_youtube.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_youtube.setStyleSheet(
-            "QPushButton { background: rgba(255, 0, 0, 0.12); color: #ff4d4d; "
-            "border: 1px solid rgba(255, 0, 0, 0.3); border-radius: 6px; font-size: 9px; }"
-            "QPushButton:hover { background: rgba(255, 0, 0, 0.28); color: #ffffff; }"
+            "QPushButton { background: rgba(255, 0, 0, 0.12); "
+            "border: 1px solid rgba(255, 0, 0, 0.32); border-radius: 6px; padding: 0; }\n"
+            "QPushButton:hover { background: rgba(255, 0, 0, 0.28); "
+            "border-color: rgba(255, 0, 0, 0.65); }"
         )
         self.btn_youtube.clicked.connect(lambda: search_youtube(entry.title, entry.artist))
         actions_box.addWidget(self.btn_youtube)
 
         # Copy Button
-        self.btn_copy = QPushButton("📋", self)
+        self.btn_copy = QPushButton(self)
+        self.btn_copy.setIcon(get_copy_icon(14))
+        self.btn_copy.setIconSize(QSize(14, 14))
         self.btn_copy.setFixedSize(24, 24)
         self.btn_copy.setToolTip(self.i18n.t("copy_formatted"))
         self.btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_copy.setStyleSheet(
-            "QPushButton { background: rgba(255, 255, 255, 0.06); color: #cbd5e1; "
-            "border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 6px; font-size: 10px; }"
-            "QPushButton:hover { background: rgba(255, 255, 255, 0.16); color: #ffffff; }"
+            "QPushButton { background: rgba(255, 255, 255, 0.06); "
+            "border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; padding: 0; }\n"
+            "QPushButton:hover { background: rgba(255, 255, 255, 0.18); "
+            "border-color: rgba(255, 255, 255, 0.45); }"
         )
         self.btn_copy.clicked.connect(self._on_copy_clicked)
         actions_box.addWidget(self.btn_copy)
@@ -386,6 +397,7 @@ class SongHistoryPopover(QWidget):
             if item is not None:
                 w = item.widget()
                 if w is not None:
+                    w.setParent(None)
                     w.deleteLater()
 
         entries = self.history_manager.get_entries()

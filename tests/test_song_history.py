@@ -196,3 +196,123 @@ def test_song_history_popover_empty_and_populated(qapp):
     popover.btn_clear.click()
     assert mgr.count() == 0
     assert popover.badge_count.text() == "0"
+
+
+def test_vector_icons(qapp):
+    """Verify vector icon and pixmap generators render cleanly at requested dimensions."""
+    from ui.vector_icons import (
+        get_apple_music_icon,
+        get_apple_music_pixmap,
+        get_chevron_down_icon,
+        get_chevron_down_pixmap,
+        get_copy_icon,
+        get_copy_pixmap,
+        get_history_icon,
+        get_history_pixmap,
+        get_spotify_icon,
+        get_spotify_pixmap,
+        get_youtube_icon,
+        get_youtube_pixmap,
+    )
+
+    for sz in (14, 16, 24):
+        # Spotify
+        sp_pm = get_spotify_pixmap(sz)
+        assert not sp_pm.isNull()
+        assert sp_pm.width() == sz
+        assert not get_spotify_icon(sz).isNull()
+
+        # YouTube
+        yt_pm = get_youtube_pixmap(sz)
+        assert not yt_pm.isNull()
+        assert yt_pm.width() == sz
+        assert not get_youtube_icon(sz).isNull()
+
+        # Apple Music
+        am_pm = get_apple_music_pixmap(sz)
+        assert not am_pm.isNull()
+        assert am_pm.width() == sz
+        assert not get_apple_music_icon(sz).isNull()
+
+        # Copy
+        cp_pm = get_copy_pixmap(sz)
+        assert not cp_pm.isNull()
+        assert cp_pm.width() == sz
+        assert not get_copy_icon(sz).isNull()
+
+        # History
+        hi_pm = get_history_pixmap(sz)
+        assert not hi_pm.isNull()
+        assert hi_pm.width() == sz
+        assert not get_history_icon(sz).isNull()
+
+        # Chevron
+        cv_pm = get_chevron_down_pixmap(sz)
+        assert not cv_pm.isNull()
+        assert cv_pm.width() == sz
+        assert not get_chevron_down_icon(sz).isNull()
+
+
+def test_track_menu_chevron_button(qapp):
+    """Verify TrackMenuChevronButton properties and state toggling."""
+    from ui.widgets.track_menu_button import TrackMenuChevronButton
+
+    btn = TrackMenuChevronButton()
+    assert btn.width() == 20
+    assert btn.height() == 20
+    assert btn.is_active() is False
+
+    btn.set_active(True)
+    assert btn.is_active() is True
+    btn.set_active(False)
+    assert btn.is_active() is False
+
+
+def test_animated_track_label_chevron_positioning(qapp):
+    """Verify AnimatedTrackLabel positions attached chevron button next to title text."""
+    from ui.widgets.ambient_cover import AnimatedTrackLabel
+    from ui.widgets.track_menu_button import TrackMenuChevronButton
+
+    lbl = AnimatedTrackLabel("–")
+    lbl.resize(400, 26)
+    btn = TrackMenuChevronButton()
+    lbl.attach_chevron_button(btn)
+
+    # Idle track: chevron hidden
+    assert btn.isHidden() is True
+
+    # Active track: chevron becomes visible
+    lbl.setText("Last Surprise (Evil)")
+    assert btn.isHidden() is False
+    assert btn.x() > 0
+    assert btn.x() < lbl.width()
+
+    # Very long track: chevron stays within label bounds
+    lbl.setText("Super Long Track Title That Exceeds The Geometry Margins Completely")
+    assert btn.isHidden() is False
+    assert btn.x() + btn.width() <= lbl.width()
+
+
+def test_song_history_popover_buttons_use_vector_icons(qapp):
+    """Verify history popover track rows use crisp vector icons without Unicode emojis."""
+    from ui.history_popover import SongHistoryRowWidget
+
+    entry = SongHistoryEntry(
+        title="Bad Apple!!",
+        artist="nomico",
+        station_id="gensokyo",
+        station_name="Gensokyo Radio",
+        timestamp=time.time(),
+    )
+    i18n = I18n("it")
+    row = SongHistoryRowWidget(entry, i18n=i18n)
+
+    # Verify buttons have icons and no emoji text
+    assert not row.btn_spotify.icon().isNull()
+    assert row.btn_spotify.text() == ""
+
+    assert not row.btn_youtube.icon().isNull()
+    assert row.btn_youtube.text() == ""
+
+    assert not row.btn_copy.icon().isNull()
+    assert row.btn_copy.text() == ""
