@@ -9,8 +9,21 @@ without repeating station entries or truncating text.
 from __future__ import annotations
 
 import os
+import time
+from typing import Callable
 
-from PyQt6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import (  # type: ignore[attr-defined]
+    QEasingCurve,
+    QParallelAnimationGroup,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    pyqtProperty,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QColor,
     QFont,
@@ -74,14 +87,20 @@ class ChannelChip(QPushButton):
             bg = "#EC186C"
             fg = "#FFFFFF"
             border = "1px solid #EC186C"
+            hover_bg = "#FD3585"
+            pressed_bg = "#C70E55"
         elif self._hovered:
-            bg = "rgba(255, 255, 255, 0.16)"
+            bg = "rgba(255, 255, 255, 0.18)"
             fg = "#FFFFFF"
-            border = "1px solid rgba(255, 255, 255, 0.35)"
+            border = "1px solid rgba(255, 255, 255, 0.40)"
+            hover_bg = "rgba(255, 255, 255, 0.22)"
+            pressed_bg = "rgba(236, 24, 108, 0.35)"
         else:
             bg = "rgba(255, 255, 255, 0.08)"
             fg = "#B0B7C9"
             border = "1px solid rgba(255, 255, 255, 0.12)"
+            hover_bg = "rgba(255, 255, 255, 0.18)"
+            pressed_bg = "rgba(236, 24, 108, 0.35)"
 
         self.setStyleSheet(
             f"""
@@ -91,6 +110,13 @@ class ChannelChip(QPushButton):
                 border: {border};
                 border-radius: 11px;
                 padding: 0 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover_bg};
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background-color: {pressed_bg};
             }}
             """
         )
@@ -251,10 +277,12 @@ class StationGlassPopover(QWidget):
     """Frameless translucent popover card for radio station selection.
 
     Rendered with direct QPainter antialiasing, completely eliminating
-    native Windows QMenu black corner artifacts.
+    native Windows QMenu black corner artifacts. Features smooth entrance
+    drop-in and exit fade animations.
     """
 
     station_selected = pyqtSignal(str, str)  # (station_id, channel)
+    closed = pyqtSignal()
 
     def __init__(
         self,
@@ -278,6 +306,10 @@ class StationGlassPopover(QWidget):
             if icon_dir and os.path.isdir(icon_dir)
             else os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "icons")
         )
+
+        self._anim_group: QParallelAnimationGroup | None = None
+        self._is_closing = False
+        self._closed_emitted = False
 
         self.setFixedWidth(240)
 
@@ -357,16 +389,82 @@ class StationGlassPopover(QWidget):
         return fallback
 
     def _on_select(self, station_id: str, channel: str) -> None:
-        self.station_selected.emit(station_id, channel)
-        self.close()
+        self.animate_close(callback=lambda: self.station_selected.emit(station_id, channel))
 
     def show_at(self, center_x: int, y: int) -> None:
-        """Position and show popover centered at center_x."""
+        """Position and show popover centered at center_x with drop-in and fade animation."""
         self.adjustSize()
         w = self.width()
         target_x = max(8, center_x - (w // 2))
-        self.move(target_x, y)
+        target_y = y
+        start_y = target_y - 10
+
+        self.move(target_x, start_y)
+        self.setWindowOpacity(0.0)
         self.show()
+
+        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
+            self._anim_group.stop()
+
+        group = QParallelAnimationGroup(self)
+        anim_pos = QPropertyAnimation(self, b"pos", group)
+        anim_pos.setDuration(190)
+        anim_pos.setStartValue(QPoint(target_x, start_y))
+        anim_pos.setEndValue(QPoint(target_x, target_y))
+        anim_pos.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        anim_op = QPropertyAnimation(self, b"windowOpacity", group)
+        anim_op.setDuration(180)
+        anim_op.setStartValue(0.0)
+        anim_op.setEndValue(1.0)
+        anim_op.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self._anim_group = group
+        group.start()
+
+    def animate_close(self, callback: Callable[[], None] | None = None) -> None:
+        """Smoothly fade out and slide up before closing."""
+        if self._is_closing:
+            return
+        self._is_closing = True
+
+        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
+            self._anim_group.stop()
+
+        group = QParallelAnimationGroup(self)
+        anim_pos = QPropertyAnimation(self, b"pos", group)
+        anim_pos.setDuration(120)
+        anim_pos.setStartValue(self.pos())
+        anim_pos.setEndValue(QPoint(self.x(), self.y() - 8))
+        anim_pos.setEasingCurve(QEasingCurve.Type.InCubic)
+
+        anim_op = QPropertyAnimation(self, b"windowOpacity", group)
+        anim_op.setDuration(120)
+        anim_op.setStartValue(self.windowOpacity())
+        anim_op.setEndValue(0.0)
+        anim_op.setEasingCurve(QEasingCurve.Type.InCubic)
+
+        def _finish() -> None:
+            self.close()
+            if callback:
+                callback()
+
+        group.finished.connect(_finish)
+        self._anim_group = group
+        group.start()
+
+    def _emit_closed(self) -> None:
+        if not self._closed_emitted:
+            self._closed_emitted = True
+            self.closed.emit()
+
+    def hideEvent(self, event) -> None:
+        self._emit_closed()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._emit_closed()
+        super().closeEvent(event)
 
     def paintEvent(self, event: QPaintEvent | None) -> None:
         painter = QPainter(self)
@@ -418,6 +516,10 @@ class StationPillButton(QWidget):
         self._hovered = False
         self._pressed = False
         self._popover: StationGlassPopover | None = None
+        self._chevron_angle: float = 0.0
+        self._chevron_anim: QPropertyAnimation | None = None
+        self._menu_open: bool = False
+        self._last_close_time: float = 0.0
 
         self._height = 28
         self.setFixedHeight(self._height)
@@ -425,6 +527,26 @@ class StationPillButton(QWidget):
         self.setMouseTracking(True)
         self.setToolTip("Cambia stazione radio")
         self._pixmap_cache: dict[str, QPixmap] = {}
+
+    def get_chevron_angle(self) -> float:
+        return self._chevron_angle
+
+    def set_chevron_angle(self, val: float) -> None:
+        self._chevron_angle = val
+        self.update()
+
+    chevron_angle = pyqtProperty(float, get_chevron_angle, set_chevron_angle)
+
+    def _animate_chevron(self, target_angle: float) -> None:
+        if self._chevron_anim and self._chevron_anim.state() == QPropertyAnimation.State.Running:
+            self._chevron_anim.stop()
+        anim = QPropertyAnimation(self, b"chevron_angle")
+        anim.setDuration(180)
+        anim.setStartValue(self._chevron_angle)
+        anim.setEndValue(target_angle)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._chevron_anim = anim
+        anim.start()
 
     def update_state(self, station_id: str, channel: str | None = None) -> None:
         """Updates the active station and channel label/icon."""
@@ -453,8 +575,8 @@ class StationPillButton(QWidget):
         fm = QFontMetrics(font)
         title = self.get_display_title()
         text_w = fm.horizontalAdvance(title)
-        # 12 (left) + 16 (icon) + 7 (gap) + text_w + 6 (gap) + 8 (chevron) + 12 (right)
-        total_w = 12 + 16 + 7 + text_w + 6 + 8 + 12
+        # 12 (left) + 16 (icon) + 7 (gap) + text_w + 10 (gap) + 8 (chevron) + 12 (right)
+        total_w = 12 + 16 + 7 + text_w + 10 + 8 + 12
         return QSize(max(130, total_w), self._height)
 
     def _get_icon_pixmap(self, filename: str) -> QPixmap:
@@ -513,11 +635,11 @@ class StationPillButton(QWidget):
         radius = h / 2.0
 
         # Colors matching LiveEqualizerBadge and SettingsIconButton
-        if self._pressed:
-            bg = QColor(28, 14, 26, 245)
+        if self._pressed or self._menu_open:
+            bg = QColor(24, 26, 40, 245)
             border = self._accent
             fg = QColor("#ffffff")
-            chevron_col = QColor("#ffffff")
+            chevron_col = self._accent
         elif self._hovered:
             bg = QColor(24, 26, 40, 240)
             border = self._accent
@@ -560,20 +682,37 @@ class StationPillButton(QWidget):
         text_y = (h + fm.ascent() - fm.descent()) / 2.0
         painter.drawText(QPointF(text_x, text_y), title)
 
-        # 4. Chevron (▾)
-        chevron_font = QFont(self.font())
-        chevron_font.setPointSize(8)
-        chevron_font.setBold(False)
-        painter.setFont(chevron_font)
-        painter.setPen(chevron_col)
-        chev_fm = painter.fontMetrics()
-        chev_x = text_x + text_w + 6.0
-        chev_y = (h + chev_fm.ascent() - chev_fm.descent()) / 2.0 - 0.5
-        painter.drawText(QPointF(chev_x, chev_y), "▾")
+        # 4. Smooth animated vector chevron (rotates 0° -> 180° when open)
+        chev_center_x = text_x + text_w + 10.0
+        chev_center_y = h / 2.0
+        painter.save()
+        painter.translate(chev_center_x, chev_center_y)
+        painter.rotate(self._chevron_angle)
+        pen = QPen(
+            chevron_col,
+            1.6,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        )
+        painter.setPen(pen)
+        chev_path = QPainterPath()
+        chev_path.moveTo(-3.5, -1.8)
+        chev_path.lineTo(0.0, 2.2)
+        chev_path.lineTo(3.5, -1.8)
+        painter.drawPath(chev_path)
+        painter.restore()
 
         painter.end()
 
     def _show_station_menu(self) -> None:
+        if time.monotonic() - self._last_close_time < 0.25:
+            return
+
+        if self._menu_open and self._popover is not None and self._popover.isVisible():
+            self._popover.animate_close()
+            return
+
         pill_global_pos = self.mapToGlobal(QPoint(0, 0))
         center_x = pill_global_pos.x() + (self.width() // 2)
         target_y = pill_global_pos.y() + self.height() + 5
@@ -585,8 +724,19 @@ class StationPillButton(QWidget):
             icon_dir=self._icon_dir,
         )
         self._popover = popover
+        self._menu_open = True
+        self._animate_chevron(180.0)
+        self.update()
+
         popover.station_selected.connect(self._on_popover_station_selected)
+        popover.closed.connect(self._on_popover_closed)
         popover.show_at(center_x=center_x, y=target_y)
+
+    def _on_popover_closed(self) -> None:
+        self._menu_open = False
+        self._last_close_time = time.monotonic()
+        self._animate_chevron(0.0)
+        self.update()
 
     def _on_popover_station_selected(self, station_id: str, channel: str) -> None:
         self.station_selected.emit(station_id, channel)

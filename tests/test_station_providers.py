@@ -228,3 +228,38 @@ def test_station_pill_button_state():
     assert pill.get_current_station() == "anison"
     assert "ANISON.FM" in pill.get_display_title()
     pill.deleteLater()
+
+
+def test_station_popover_animations():
+    """Verify StationGlassPopover and StationPillButton animations (drop-in, fade, chevron)."""
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.station_pill import StationPillButton
+
+    _ = QApplication.instance() or QApplication(["pytest"])
+    pill = StationPillButton(initial_station="listenmoe", initial_channel="J-POP")
+    pill.resize(180, 28)
+    pill.show()
+
+    assert pill.get_chevron_angle() == 0.0
+
+    # Open menu and trigger drop-in/fade-in animation
+    pill._show_station_menu()
+    assert pill._popover is not None
+    popover = pill._popover
+
+    # Allow entrance animation to complete
+    QTest.qWait(250)
+    assert popover.windowOpacity() >= 0.99
+    assert pill.get_chevron_angle() >= 170.0
+
+    # Trigger close animation
+    selected: list[tuple[str, str]] = []
+    popover.animate_close(callback=lambda: selected.append(("listenmoe", "K-POP")))
+    QTest.qWait(250)
+
+    assert selected == [("listenmoe", "K-POP")]
+    assert pill.get_chevron_angle() <= 10.0
+
+    pill.deleteLater()
