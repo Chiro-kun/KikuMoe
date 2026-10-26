@@ -86,9 +86,10 @@ if [[ -d "$APPDIR/usr/bin/_internal" ]]; then
             done
         fi
     done
-    # Remove bundled OpenSSL from _internal to prevent symbol version conflicts
-    # with host libcurl when loading host libmpv on distributions with newer OpenSSL (e.g. Arch / Fedora)
+    # Remove bundled OpenSSL and fontconfig from _internal to prevent symbol version conflicts
+    # with host libcurl / libass when loading host libmpv on distributions with newer libraries (e.g. Arch / Fedora)
     rm -f "$APPDIR/usr/bin/_internal/libssl.so"* "$APPDIR/usr/bin/_internal/libcrypto.so"* 2>/dev/null || true
+    rm -f "$APPDIR/usr/bin/_internal/libfontconfig.so"* 2>/dev/null || true
 fi
 
 # Bundle static ffmpeg into AppDir usr/bin (co-located with KikuMoe executable)

@@ -213,6 +213,7 @@ if not _IS_WIN32:
         "libQt6Qml",
         "libssl",
         "libcrypto",
+        "libfontconfig",
     )
 
     def _should_exclude_binary(dest_name: str) -> bool:
