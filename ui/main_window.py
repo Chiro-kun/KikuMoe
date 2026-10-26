@@ -10,6 +10,7 @@ from typing import Dict, Optional, Set
 
 from PyQt6.QtCore import (
     QEvent,
+    QPoint,
     QPointF,
     QRectF,
     QSettings,
@@ -21,6 +22,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor,
+    QCursor,
     QIcon,
     QKeySequence,
     QLinearGradient,
@@ -35,6 +37,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QSizePolicy,
@@ -79,6 +82,13 @@ from core.constants import (
 )
 from core.i18n import I18n
 from core.logger import get_logger
+from core.quick_search import (
+    copy_to_clipboard,
+    search_apple_music,
+    search_spotify,
+    search_youtube,
+)
+from core.song_history import SongHistoryManager
 from core.ssl_compat import get_ssl_context
 from network.station_manager import StationManager
 from network.ws_client import NowPlayingWS
@@ -86,6 +96,7 @@ from ui.about_dialog import AboutDialog
 from ui.close_dialog import CloseConfirmDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
+from ui.history_popover import SongHistoryPopover
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.tray_manager import TrayManager
@@ -95,6 +106,7 @@ from ui.widgets.ambient_cover import (
     FullBleedCanvas,
     LiveEqualizerBadge,
 )
+from ui.widgets.history_button import HistoryIconButton
 from ui.widgets.playback_controls import PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
@@ -407,6 +419,8 @@ class ListenMoePlayer(QWidget):
         self._retry_pending = False
         self._settings_dlg: Optional[SettingsDialog] = None
         self._about_dialog: Optional[AboutDialog] = None
+        self.history_mgr = SongHistoryManager(max_entries=100, parent=self)
+        self._history_popover: Optional[SongHistoryPopover] = None
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -663,13 +677,18 @@ class ListenMoePlayer(QWidget):
         right_wing.setFixedWidth(86)
         right_wing_layout = QHBoxLayout(right_wing)
         right_wing_layout.setContentsMargins(0, 0, 0, 0)
-        right_wing_layout.setSpacing(0)
+        right_wing_layout.setSpacing(6)
+
+        self.history_button = HistoryIconButton(self)
+        self.history_button.setToolTip(self.i18n.t("history_button"))
+        self.history_button.clicked.connect(self.toggle_history_popover)
 
         self.settings_button = SettingsIconButton()
         self.settings_button.setToolTip(self.i18n.t("settings_button"))
         self.settings_button.clicked.connect(self.open_settings)
 
         right_wing_layout.addStretch(1)
+        right_wing_layout.addWidget(self.history_button)
         right_wing_layout.addWidget(self.settings_button)
 
         top_bar_layout.addWidget(left_wing)
@@ -690,6 +709,8 @@ class ListenMoePlayer(QWidget):
         # 2. Central Artwork Hero Showcase
         self._album_cover_size = 196
         self.ambient_cover = AmbientCoverCard(cover_size=self._album_cover_size)
+        self.ambient_cover.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.ambient_cover.customContextMenuRequested.connect(self._show_track_context_menu)
         self._layout.addWidget(self.ambient_cover)
 
         # Hidden legacy compatibility labels
@@ -714,6 +735,9 @@ class ListenMoePlayer(QWidget):
         self.now_playing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.now_playing_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
+        self.now_playing_title.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
+
         self.now_playing_artist = AnimatedTrackLabel(
             "", font_px=13, font_weight=600, text_color="#c8cee0"
         )
@@ -722,6 +746,8 @@ class ListenMoePlayer(QWidget):
         self.now_playing_artist.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
+        self.now_playing_artist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.now_playing_artist.customContextMenuRequested.connect(self._show_track_context_menu)
 
         track_box.addWidget(self.now_playing_title)
         track_box.addWidget(self.now_playing_artist)
@@ -1508,6 +1534,22 @@ class ListenMoePlayer(QWidget):
                 and track_sig != getattr(self, "_last_notified_track", None)
             ):
                 self._last_notified_track = track_sig
+
+                # Record into session song history
+                from core.config import STATIONS
+
+                current_st = getattr(self, "_current_radio_provider", "listenmoe")
+                st_cfg = STATIONS.get(current_st, {})
+                st_name = str(st_cfg.get("name", current_st.upper()))
+                self.history_mgr.add_entry(
+                    title=self._current_title,
+                    artist=self._current_artist,
+                    station_id=current_st,
+                    station_name=st_name,
+                    art_url=self._current_cover_ref,
+                    duration=self._current_duration_seconds or 0,
+                )
+
                 if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(
                     KEY_TRAY_ENABLED, True
                 ):
@@ -2501,6 +2543,133 @@ class ListenMoePlayer(QWidget):
             self._view_stack._render_snapshot(dlg)
         except Exception as e:
             self.log.debug("[UI] _prewarm_settings exception: %s", e)
+
+    def toggle_history_popover(self) -> None:
+        """Open or close the session song history popover card."""
+        try:
+            if not self.isVisible():
+                self.showNormal()
+
+            if (
+                hasattr(self, "_history_popover")
+                and self._history_popover
+                and self._history_popover.isVisible()
+            ):
+                self._history_popover._animate_exit()
+                return
+
+            if not hasattr(self, "_history_popover") or self._history_popover is None:
+                self._history_popover = SongHistoryPopover(
+                    history_manager=self.history_mgr,
+                    parent=self,
+                    i18n=self.i18n,
+                )
+                self._history_popover.closed.connect(self._on_history_popover_closed)
+
+            if hasattr(self, "history_button"):
+                self.history_button.set_active(True)
+
+            # Position popover directly anchored below the history button
+            if hasattr(self, "history_button"):
+                btn_top_left = self.history_button.mapToGlobal(QPoint(0, 0))
+                pop_w = self._history_popover.width()
+                target_x = btn_top_left.x() + self.history_button.width() - pop_w + 20
+                target_x = max(10, target_x)
+                target_y = btn_top_left.y() + self.history_button.height() + 8
+                self._history_popover.open_at(QPoint(target_x, target_y))
+            else:
+                geo = self.geometry()
+                self._history_popover.open_at(QPoint(geo.x() + 40, geo.y() + 60))
+        except Exception:
+            pass
+
+    def _on_history_popover_closed(self) -> None:
+        try:
+            if hasattr(self, "history_button"):
+                self.history_button.set_active(False)
+        except Exception:
+            pass
+
+    def _show_track_context_menu(self, pos: QPoint) -> None:
+        """Display context menu with Quick Search & Clipboard actions for current track."""
+        try:
+            title = (getattr(self, "_current_title", "") or "").strip()
+            artist = (getattr(self, "_current_artist", "") or "").strip()
+
+            if not title or title in ("–", self.i18n.t("unknown")):
+                return
+
+            menu = QMenu(self)
+            menu.setStyleSheet(
+                """
+                QMenu {
+                    background-color: #0e111b;
+                    border: 1px solid rgba(255, 255, 255, 0.14);
+                    border-radius: 8px;
+                    padding: 6px 0px;
+                }
+                QMenu::item {
+                    padding: 6px 28px 6px 12px;
+                    border-radius: 5px;
+                    margin: 1px 6px;
+                    color: #e2e8f0;
+                    font-size: 12px;
+                }
+                QMenu::item:selected {
+                    background-color: rgba(236, 24, 108, 0.25);
+                    color: #ffffff;
+                }
+                QMenu::separator {
+                    height: 1px;
+                    background-color: rgba(255, 255, 255, 0.08);
+                    margin: 4px 8px;
+                }
+                """
+            )
+
+            # Quick Search Actions
+            act_spotify = menu.addAction(f"🟢  {self.i18n.t('search_spotify')}")
+            if act_spotify is not None:
+                act_spotify.triggered.connect(lambda: search_spotify(title, artist))
+
+            act_youtube = menu.addAction(f"▶  {self.i18n.t('search_youtube')}")
+            if act_youtube is not None:
+                act_youtube.triggered.connect(lambda: search_youtube(title, artist))
+
+            act_apple = menu.addAction(f"🍎  {self.i18n.t('search_apple_music')}")
+            if act_apple is not None:
+                act_apple.triggered.connect(lambda: search_apple_music(title, artist))
+
+            menu.addSeparator()
+
+            formatted = f"{artist} - {title}" if artist else title
+            act_copy_all = menu.addAction(f"📋  {self.i18n.t('copy_formatted')}")
+            if act_copy_all is not None:
+                act_copy_all.triggered.connect(lambda: copy_to_clipboard(formatted))
+
+            if artist:
+                act_copy_artist = menu.addAction(f"📋  {self.i18n.t('copy_artist')}")
+                if act_copy_artist is not None:
+                    act_copy_artist.triggered.connect(lambda: copy_to_clipboard(artist))
+
+            act_copy_title = menu.addAction(f"📋  {self.i18n.t('copy_title')}")
+            if act_copy_title is not None:
+                act_copy_title.triggered.connect(lambda: copy_to_clipboard(title))
+
+            menu.addSeparator()
+
+            act_history = menu.addAction(f"🕒  {self.i18n.t('history_button')}...")
+            if act_history is not None:
+                act_history.triggered.connect(self.toggle_history_popover)
+
+            sender = self.sender()
+            if isinstance(sender, QWidget):
+                global_pos = sender.mapToGlobal(pos)
+            else:
+                global_pos = QCursor.pos()
+            menu.exec(global_pos)
+        except Exception:
+            pass
 
     def _close_embedded_settings(self) -> None:
         try:

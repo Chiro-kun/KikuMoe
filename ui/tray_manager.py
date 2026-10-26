@@ -231,6 +231,20 @@ class TrayManager(QObject):
                     menu.addAction(act_mute)
                     self._act_mute = act_mute
 
+                    # Cronologia brani
+                    try:
+                        txt_history = (
+                            self._i18n.t("history_button")
+                            if hasattr(self._i18n, "t")
+                            else "Cronologia brani"
+                        )
+                    except Exception:
+                        txt_history = "Cronologia brani"
+                    act_history = QAction(f"🕒 {txt_history}...", self._parent)
+                    if hasattr(self._parent, "toggle_history_popover"):
+                        act_history.triggered.connect(self._parent.toggle_history_popover)
+                    menu.addAction(act_history)
+
                     # Separatore fine sezione Playback
                     self._sep_playback_end = menu.addSeparator()
 
