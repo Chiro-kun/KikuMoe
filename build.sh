@@ -2,40 +2,37 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
 
-# Download static ffmpeg if missing on Linux for self-contained audio playback
+# Fetch or build static ffmpeg if missing on Linux for self-contained audio playback
 LINUX_FFMPEG="$PROJECT_ROOT/packaging/linux/ffmpeg"
-if [[ ! -f "$LINUX_FFMPEG" ]]; then
-    echo "Downloading static ffmpeg for self-contained Linux build..."
-    mkdir -p "$PROJECT_ROOT/packaging/linux"
-    FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
-    TMP_FFMPEG_DIR="$(mktemp -d)"
-    if command -v curl &>/dev/null; then
-        curl -fsSL "$FFMPEG_URL" -o "$TMP_FFMPEG_DIR/ffmpeg.tar.xz" || true
-    elif command -v wget &>/dev/null; then
-        wget -q -O "$TMP_FFMPEG_DIR/ffmpeg.tar.xz" "$FFMPEG_URL" || true
+if [[ ! -x "$LINUX_FFMPEG" ]]; then
+    if [[ "${USE_MINIMAL_FFMPEG:-1}" == "1" ]] && command -v gcc &>/dev/null && command -v make &>/dev/null; then
+        bash "$PROJECT_ROOT/packaging/linux/build-minimal-ffmpeg.sh" "$LINUX_FFMPEG"
+    else
+        bash "$PROJECT_ROOT/packaging/linux/fetch-ffmpeg.sh" "$LINUX_FFMPEG"
     fi
-    if [[ -f "$TMP_FFMPEG_DIR/ffmpeg.tar.xz" ]]; then
-        tar -xf "$TMP_FFMPEG_DIR/ffmpeg.tar.xz" -C "$TMP_FFMPEG_DIR" --wildcards '*/bin/ffmpeg' || true
-        find "$TMP_FFMPEG_DIR" -name ffmpeg -type f -exec cp {} "$LINUX_FFMPEG" \;
-        chmod +x "$LINUX_FFMPEG" || true
-        echo "ffmpeg installed to $LINUX_FFMPEG"
-    fi
-    rm -rf "$TMP_FFMPEG_DIR"
 fi
 
 echo "Installing dependencies via Poetry..."
-poetry install --with dev
+poetry install --only main,build
 
 echo "Running: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec"
-cd "$PROJECT_ROOT"
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
-if [[ -f "$LINUX_FFMPEG" ]]; then
-    cp "$LINUX_FFMPEG" "$PROJECT_ROOT/dist/ffmpeg"
-    chmod +x "$PROJECT_ROOT/dist/ffmpeg" || true
+if [[ -f "$LINUX_FFMPEG" && -d "$PROJECT_ROOT/dist/KikuMoe" ]]; then
+    cp "$LINUX_FFMPEG" "$PROJECT_ROOT/dist/KikuMoe/ffmpeg"
+    chmod +x "$PROJECT_ROOT/dist/KikuMoe/ffmpeg"
 fi
 
-VERSION="$(grep -oP '(?<=version:\s).+' "$PROJECT_ROOT/version.yml" | tr -d '[:space:]' || echo '2.0.0-beta2')"
+if [[ -d "$PROJECT_ROOT/dist/KikuMoe" && $(command -v du 2>/dev/null) ]]; then
+    echo ""
+    echo "=== Top 15 Largest Files in dist/KikuMoe ==="
+    find "$PROJECT_ROOT/dist/KikuMoe" -type f -exec du -h {} + | sort -rh | head -15 || true
+    echo "==========================================="
+    echo ""
+fi
+
+VERSION="$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' "$PROJECT_ROOT/version.yml" | head -1)"
 echo "Done. Output:"
-echo "  dist/KikuMoe-${VERSION}"
+echo "  dist/KikuMoe/KikuMoe (v${VERSION:-2.0.0-beta2})"

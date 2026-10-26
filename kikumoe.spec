@@ -77,31 +77,51 @@ if not _IS_WIN32:
     if _linux_icon.exists():
         datas.append((str(_linux_icon), "icons"))
 
-# VLC bundling (Windows: bundle DLLs; Linux: system-installed VLC is used directly)
-vlc_binaries = []
+# Backend binaries (Windows: bundle VLC & MPV DLLs; Linux: bundle PortAudio & JACK libraries)
+binaries_list = []
 if _IS_WIN32:
     vlc_dir = Path(os.environ.get("VLC_DIR") or r"C:\Program Files\VideoLAN\VLC")
     libvlc = vlc_dir / "libvlc.dll"
     libvlccore = vlc_dir / "libvlccore.dll"
     plugins_dir = vlc_dir / "plugins"
     if libvlc.exists():
-        vlc_binaries.append((str(libvlc), "."))
+        binaries_list.append((str(libvlc), "."))
         if libvlccore.exists():
-            vlc_binaries.append((str(libvlccore), "."))
+            binaries_list.append((str(libvlccore), "."))
         if plugins_dir.is_dir():
             datas.append((str(plugins_dir), "plugins"))
             
     # Include the MPV DLL and its sibling runtime dependencies.
-    vlc_binaries.extend((str(dll), ".") for dll in sorted(packaging_win.glob("*.dll")))
+    binaries_list.extend((str(dll), ".") for dll in sorted(packaging_win.glob("*.dll")))
+else:
+    # On Linux, explicitly collect libportaudio and libjack so that the frozen AppImage
+    # has self-contained PortAudio support without relying on host dev packages or JACK.
+    for lib_pattern in ("libportaudio.so*", "libjack.so*"):
+        for search_dir in (
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib64",
+            "/usr/lib",
+            "/usr/local/lib",
+        ):
+            search_path = Path(search_dir)
+            if search_path.is_dir():
+                found = False
+                for match in sorted(search_path.glob(lib_pattern)):
+                    if match.is_file():
+                        binaries_list.append((str(match), "."))
+                        found = True
+                        break
+                if found:
+                    break
 
 block_cipher = None
 
 a = Analysis(
     [str(repo_root / "KikuMoe.py")],
     pathex=[str(repo_root)],
-    binaries=vlc_binaries,
+    binaries=binaries_list,
     datas=datas,
-    hiddenimports=["certifi", "mpv"],
+    hiddenimports=["certifi", "mpv", "pyaudio", "_portaudio"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[str(repo_root / "pyi_rthook_vlc.py")],
@@ -129,35 +149,83 @@ a = Analysis(
         "PyQt6.QtNfc",
         "PyQt6.QtRemoteObjects",
         "PyQt6.QtSpatialAudio",
+        "PyQt6.QtPrintSupport",
+        "PyQt6.QtDesigner",
+        "PyQt6.QtHelp",
+        "PyQt6.QtCharts",
+        "PyQt6.QtOpenGLWidgets",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     noarchive=False,
 )
-# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, VLC)
-# and standard C++ runtimes (libstdc++, libgcc_s) per AppImage standards.
-# When bundled into PyInstaller/AppImage, these libraries conflict with the host's
-# ALSA plugins, PipeWire, and PulseAudio daemons, causing audio initialization to fail.
-# Excluding them forces the application to load them directly from the host system.
+
+# Filter out unused Qt translation files (*.qm) from a.datas to optimize bundle size
+a.datas = [
+    d
+    for d in a.datas
+    if not (
+        d[0].endswith(".qm")
+        or "translations" in d[1].replace("\\", "/").split("/")
+        or "translations" in d[0].replace("\\", "/").split("/")
+    )
+]
+# On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, PipeWire),
+# host multimedia backends (libvlc, libmpv - loaded from host dynamically via ctypes),
+# transitive video codecs/encoders/engines pulled by host libmpv (libav*, libx265, libcodec2,
+# libplacebo, libflite, liblapack, libgfortran, libgtk-3, librsvg), unused Qt libraries
+# (libQt6Pdf, libQt6Quick, libQt6Qml), and C++ runtimes per AppImage standards.
 if not _IS_WIN32:
-    _linux_audio_excludes = (
+    _linux_binary_excludes = (
         "libvlc",
         "libvlccore",
+        "libmpv",
+        "libavcodec",
+        "libavformat",
+        "libavfilter",
+        "libavutil",
+        "libswresample",
+        "libswscale",
+        "libpostproc",
+        "libplacebo",
+        "libx264",
+        "libx265",
+        "libcodec2",
+        "libaom",
+        "libvpx",
+        "libflite",
+        "liblapack",
+        "libgfortran",
+        "libgtk-3",
+        "librsvg-2",
         "libasound",
         "libpulse",
         "libpulse-simple",
         "libpulsecommon",
-        "libjack",
+        # libjack is retained for PortAudio runtime compatibility on systems without JACK
         "libpipewire",
         "libspa",
         "libasound_module",
         "libstdc++",
         "libgcc_s",
+        "libQt6Pdf",
+        "libQt6Quick",
+        "libQt6Qml",
+        "libssl",
+        "libcrypto",
+        "libfontconfig",
     )
-    a.binaries = [
-        b for b in a.binaries
-        if not any(b[0].startswith(prefix) for prefix in _linux_audio_excludes)
-    ]
+
+    def _should_exclude_binary(dest_name: str) -> bool:
+        base = os.path.basename(dest_name)
+        if any(base.startswith(prefix) for prefix in _linux_binary_excludes):
+            return True
+        # Exclude system ICU (e.g. libicudata.so.70), preserving Qt's own ICU (under PyQt6/)
+        if base.startswith("libicu") and not dest_name.startswith("PyQt6/"):
+            return True
+        return False
+
+    a.binaries = [b for b in a.binaries if not _should_exclude_binary(b[0])]
 
 # Note: Static ffmpeg on Linux is bundled into AppDir usr/bin/ffmpeg (or next to the
 # executable) rather than packed inside a.binaries, saving ~90MB of duplication.
@@ -180,22 +248,52 @@ if _IS_WIN32:
     if mfst.exists():
         exe_kwargs["manifest"] = str(mfst)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    name=f"KikuMoe-{app_version}",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,
-    disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    argv_emulation=False,
-    **exe_kwargs,
-)
+    # Windows build: single executable (onefile)
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name=f"KikuMoe-{app_version}",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        argv_emulation=False,
+        **exe_kwargs,
+    )
+else:
+    # Linux build: directory mode (onedir) to avoid redundant extraction and compression
+    # inside AppImage SquashFS. Output: dist/KikuMoe/KikuMoe and dist/KikuMoe/_internal/
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="KikuMoe",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        argv_emulation=False,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="KikuMoe",
+    )

@@ -6,6 +6,7 @@ on:
       - devel
       - main
       - redesign
+      - linux-build-opx
     tags:
       - 'v*'
   pull_request:
@@ -16,7 +17,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   quality-gate:
@@ -30,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libmpv-dev ffmpeg portaudio19-dev \
+            libmpv-dev portaudio19-dev \
             libgl1 libegl1 libdbus-1-3 \
             libfontconfig1 libfreetype6 \
             libxkbcommon0 libxkbcommon-x11-0 \
@@ -39,15 +44,17 @@ jobs:
             libxcb-shape0 libxcb-sync1 libxcb-xfixes0 \
             libxcb-xinerama0 libxcb-xkb1
 
+      - name: Install Poetry
+        run: pipx install poetry==2.5.1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'poetry'
 
-      - name: Install Poetry & dev dependencies
-        run: |
-          pip install poetry
-          poetry install --with dev
+      - name: Install dev dependencies
+        run: poetry install --with dev
 
       - name: Check code formatting with Ruff
         run: poetry run ruff format --check .
@@ -75,7 +82,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libmpv-dev ffmpeg file wget portaudio19-dev \
+            file wget curl binutils gcc make nasm pkg-config libssl-dev portaudio19-dev \
             libglib2.0-0 libgl1 libegl1 libdbus-1-3 \
             libfontconfig1 libfreetype6 \
             libxkbcommon0 libxkbcommon-x11-0 \
@@ -84,37 +91,48 @@ jobs:
             libxcb-shape0 libxcb-sync1 libxcb-xfixes0 \
             libxcb-xinerama0 libxcb-xkb1
 
+      - name: Install Poetry
+        run: pipx install poetry==2.5.1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'poetry'
 
-      - name: Install Poetry & project dependencies
+      - name: Install project dependencies
+        run: poetry install --only main,build
+
+      - name: Build minimal audio FFmpeg
+        run: bash packaging/linux/build-minimal-ffmpeg.sh packaging/linux/ffmpeg
+
+      - name: Verify minimal FFmpeg live stream decoding
         run: |
-          pip install poetry
-          poetry install --with dev
+          ./packaging/linux/ffmpeg -version | head -2
+          echo "Testing LISTEN.moe live streams with minimal FFmpeg..."
+          timeout 15 ./packaging/linux/ffmpeg -i https://listen.moe/stream -f s16le -t 3 -loglevel error - > /dev/null
+          timeout 15 ./packaging/linux/ffmpeg -i https://listen.moe/fallback -f s16le -t 3 -loglevel error - > /dev/null
+          echo "Live stream decode verification PASSED."
 
-      - name: Download static ffmpeg on the fly
-        run: |
-          FFMPEG_URL="https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
-          echo "Downloading static ffmpeg from $FFMPEG_URL..."
-          wget -q "$FFMPEG_URL" -O ffmpeg.tar.xz
-          tar -xf ffmpeg.tar.xz --wildcards '*/bin/ffmpeg' --strip-components=2
-          mv ffmpeg packaging/linux/ffmpeg
-          chmod +x packaging/linux/ffmpeg
-          rm -f ffmpeg.tar.xz
-
-      - name: Build PyInstaller binary
+      - name: Build PyInstaller onedir bundle
         run: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
       - name: Build AppImage
-        run: bash packaging/linux/build-appimage.sh
+        run: bash packaging/linux/build-appimage.sh dist/KikuMoe
+
+      - name: Smoke test AppImage
+        run: |
+          chmod +x dist/*.AppImage
+          QT_QPA_PLATFORM=offscreen timeout 20 dist/*.AppImage --appimage-extract-and-run --version
+          QT_QPA_PLATFORM=offscreen timeout 20 dist/*.AppImage --appimage-extract-and-run --check-audio
 
       - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
         with:
           name: KikuMoe-Linux-AppImage
           path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
 
   build-windows:
     name: Build Windows Executable & Portable ZIP
@@ -124,23 +142,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Poetry
+        run: pipx install poetry==2.5.1
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install Poetry
-        run: pip install poetry
+          cache: 'poetry'
 
       - name: Install project dependencies
-        run: poetry install --with dev
+        run: poetry install --only main,build
 
       - name: Download libmpv-2.dll on the fly
         shell: pwsh
         run: |
           $mpvUrl = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261020/mpv-dev-x86_64-20261020-git-6a262d11f6.7z"
+          $expectedHash = "d16ea67bcc46d4ee9170f05b322d7184768f216f458bef089c3397a6beaff83e"
           Write-Host "Downloading $mpvUrl..."
           Invoke-WebRequest -Uri $mpvUrl -OutFile mpv-dev.7z
+          $actualHash = (Get-FileHash -Path mpv-dev.7z -Algorithm SHA256).Hash.ToLower()
+          if ($actualHash -ne $expectedHash) {
+              Write-Error "SHA256 mismatch for mpv-dev.7z! Expected $expectedHash, got $actualHash"
+              exit 1
+          }
           7z e mpv-dev.7z -o"packaging\windows" libmpv-2.dll -r -y
           Remove-Item mpv-dev.7z -Force
 
@@ -165,19 +190,37 @@ jobs:
         with:
           name: KikuMoe-Windows-ZIP
           path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload Windows EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: KikuMoe-Windows-EXE
           path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 7
 
   release:
     name: Publish GitHub Release
     needs: [quality-gate, build-linux, build-windows]
     runs-on: ubuntu-22.04
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify release tag matches version.yml
+        run: |
+          APP_VER="$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' version.yml | head -1)"
+          EXPECTED_TAG="v${APP_VER}"
+          if [[ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]]; then
+            echo "ERROR: Git tag '${GITHUB_REF_NAME}' does not match version.yml expected tag '${EXPECTED_TAG}'" >&2
+            exit 1
+          fi
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -198,5 +241,8 @@ jobs:
             release-artifacts/*.zip
             release-artifacts/*.exe
             release-artifacts/SHA256SUMS.txt
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
