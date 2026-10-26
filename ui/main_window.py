@@ -1194,7 +1194,6 @@ class ListenMoePlayer(QWidget):
                     geo.y() + max(0, (geo.height() - dlg.height()) // 2),
                 )
             try:
-                dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
                 dlg.raise_()
                 dlg.activateWindow()
             except Exception:

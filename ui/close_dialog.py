@@ -83,8 +83,12 @@ class CloseConfirmDialog(QDialog):
         super().__init__(parent)
         self.setObjectName("closeConfirmDialogRoot")
         self.setModal(True)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setFixedSize(430, 180)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setFixedWidth(430)
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
         title_text = self.i18n.t("close_dialog_title")
@@ -180,6 +184,10 @@ class CloseConfirmDialog(QDialog):
         btn_layout.addWidget(self.btn_tray)
 
         outer_layout.addWidget(footer_frame)
+
+        # Dynamic safe height (>= 186px) preventing Windows WM / Qt geometry collision
+        final_h = max(186, self.sizeHint().height())
+        self.setFixedSize(430, final_h)
 
         try:
             apply_windows_titlebar_dark_mode(self, True)
