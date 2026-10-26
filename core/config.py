@@ -46,12 +46,12 @@ STATIONS: dict[str, dict[str, Any]] = {
         "default_channel": "",
         "default_format": "MP3 256k",
         "streams": {
-            "MP3 256k": "https://stream.gensokyoradio.net/3",
-            "MP3 128k": "https://stream.gensokyoradio.net/1",
-            "Opus 64k": "https://stream.gensokyoradio.net/2",
+            "MP3 256k": "https://stream.gensokyoradio.net/3/",
+            "MP3 128k": "https://stream.gensokyoradio.net/1/",
+            "Opus 64k": "https://stream.gensokyoradio.net/2/",
         },
         "metadata_url": "https://gensokyoradio.net/api/station/playing/",
-        "art_base_url": "https://gensokyoradio.net/images/albums/500/",
+        "art_base_url": "https://cdn.gensokyoradio.net/images/albums/500/",
         "homepage": "https://gensokyoradio.net/",
     },
     "anison": {

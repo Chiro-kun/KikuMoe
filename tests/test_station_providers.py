@@ -35,10 +35,10 @@ def test_station_stream_url_resolution():
 
     # 2. Gensokyo Radio
     gensokyo_256 = get_station_stream_url("gensokyo", fmt="MP3 256k")
-    assert gensokyo_256 == "https://stream.gensokyoradio.net/3"
+    assert gensokyo_256 == "https://stream.gensokyoradio.net/3/"
 
     gensokyo_128 = get_station_stream_url("gensokyo", fmt="MP3 128k")
-    assert gensokyo_128 == "https://stream.gensokyoradio.net/1"
+    assert gensokyo_128 == "https://stream.gensokyoradio.net/1/"
 
     # 3. ANISON.FM
     anison_url = get_station_stream_url("anison", fmt="MP3 320k")
@@ -149,7 +149,7 @@ def test_station_manager_orchestration():
     changed = mgr.set_station("gensokyo")
     assert changed is True
     assert mgr.current_station_id == "gensokyo"
-    assert mgr.get_stream_url(fmt="MP3 256k") == "https://stream.gensokyoradio.net/3"
+    assert mgr.get_stream_url(fmt="MP3 256k") == "https://stream.gensokyoradio.net/3/"
 
     # Switch to ANISON
     changed2 = mgr.set_station("anison")
@@ -257,9 +257,9 @@ def test_station_popover_animations():
     # Trigger close animation
     selected: list[tuple[str, str]] = []
     popover.animate_close(callback=lambda: selected.append(("listenmoe", "K-POP")))
-    QTest.qWait(250)
+    QTest.qWait(350)
 
     assert selected == [("listenmoe", "K-POP")]
-    assert pill.get_chevron_angle() <= 10.0
+    assert pill.get_chevron_angle() <= 5.0
 
     pill.deleteLater()
