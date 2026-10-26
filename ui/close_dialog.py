@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QKeyEvent
+from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtGui import QColor, QIcon, QKeyEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -18,6 +19,40 @@ from core.i18n import I18n
 from ui.custom_titlebar import CustomTitleBar
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+
+
+class DialogIconBadge(QWidget):
+    """Refined cyber-glass badge rendering a glowing power/exit symbol."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(36, 36)
+
+    def paintEvent(self, a0: object) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 1. Glowing translucent squircle background
+        rect = QRectF(0.5, 0.5, 35.0, 35.0)
+        painter.setBrush(QColor(236, 24, 108, 24))
+        painter.setPen(QPen(QColor(236, 24, 108, 70), 1.0))
+        painter.drawRoundedRect(rect, 9.0, 9.0)
+
+        # 2. Glowing power / standby emblem
+        accent = QColor("#EC186C")
+        pen = QPen(accent, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+
+        # Arc open at the top
+        arc_rect = QRectF(10.5, 10.5, 15.0, 15.0)
+        path = QPainterPath()
+        path.arcMoveTo(arc_rect, 60.0)
+        path.arcTo(arc_rect, 60.0, 240.0)
+        painter.drawPath(path)
+
+        # Vertical line in center
+        painter.drawLine(QPointF(18.0, 8.5), QPointF(18.0, 16.5))
+        painter.end()
 
 
 class CloseConfirmDialog(QDialog):
@@ -33,7 +68,7 @@ class CloseConfirmDialog(QDialog):
         self.setObjectName("closeConfirmDialogRoot")
         self.setModal(True)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        self.setFixedSize(430, 205)
+        self.setFixedSize(430, 182)
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
         self.setWindowTitle(self.i18n.t("close_dialog_title"))
@@ -47,41 +82,75 @@ class CloseConfirmDialog(QDialog):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # 1. Custom Cyber-Moe Titlebar
+        # 1. Custom Cyber-Moe Titlebar (clean, without artificial CONFIRM badge)
         app_icon = icon or (getattr(parent, "_icon_app", None) if parent else None)
         self._title_bar = CustomTitleBar(self, icon=app_icon)
         self._title_bar._btn_min.setVisible(False)
         self._title_bar._btn_max.setVisible(False)
-        self._title_bar._ver_badge.setText("CONFIRM")
-        # Ensure titlebar close button cancels
-        self._title_bar._btn_close.clicked.disconnect()
+        self._title_bar._ver_badge.setVisible(False)
+
+        # Re-wire titlebar close button to trigger cancel
+        try:
+            self._title_bar._btn_close.clicked.disconnect()
+        except Exception:
+            pass
         self._title_bar._btn_close.clicked.connect(self._on_cancel)
         outer_layout.addWidget(self._title_bar)
 
-        # 2. Body Container
+        # 2. Main Body Container
         body_widget = QWidget(self)
         body_layout = QVBoxLayout(body_widget)
-        body_layout.setContentsMargins(20, 16, 20, 18)
-        body_layout.setSpacing(14)
+        body_layout.setContentsMargins(18, 14, 18, 12)
+        body_layout.setSpacing(10)
 
-        # Text prompt
-        self.prompt_label = QLabel(self.i18n.t("close_dialog_text"))
+        # Header Row: Icon badge + Title and Description
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(14)
+
+        self.badge = DialogIconBadge(body_widget)
+        header_row.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(2)
+
+        title_text = self.i18n.t("close_dialog_title")
+        self.title_lbl = QLabel(title_text)
+        self.title_lbl.setStyleSheet(
+            "color: #ffffff; font-size: 14px; font-weight: 700; "
+            "background: transparent; border: none;"
+        )
+        text_col.addWidget(self.title_lbl)
+
+        prompt_text = self.i18n.t("close_dialog_text")
+        self.prompt_label = QLabel(prompt_text)
         self.prompt_label.setWordWrap(True)
         self.prompt_label.setStyleSheet(
-            "color: #f1f5f9; font-size: 13px; font-weight: 600; line-height: 1.4;"
+            "color: #94a3b8; font-size: 12px; font-weight: 400; line-height: 1.35; "
+            "background: transparent; border: none;"
         )
-        body_layout.addWidget(self.prompt_label)
+        text_col.addWidget(self.prompt_label)
+        header_row.addLayout(text_col, 1)
+        body_layout.addLayout(header_row)
 
-        # Checkbox: Remember Choice
+        # Checkbox: Remember Choice (aligned directly under the text column)
         self.cb_remember = QCheckBox(self.i18n.t("close_remember"))
         self.cb_remember.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cb_remember.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        self.cb_remember.setStyleSheet(
+            "QCheckBox { font-size: 12px; color: #94a3b8; spacing: 8px; "
+            "margin-left: 50px; background: transparent; }\n"
+            "QCheckBox:hover { color: #e2e8f0; }"
+        )
         body_layout.addWidget(self.cb_remember)
+        outer_layout.addWidget(body_widget, 1)
 
-        # Buttons row
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 4, 0, 0)
-        btn_layout.setSpacing(10)
+        # 3. Action Buttons Footer Bar
+        footer_frame = QFrame(self)
+        footer_frame.setObjectName("dialogFooter")
+        btn_layout = QHBoxLayout(footer_frame)
+        btn_layout.setContentsMargins(18, 8, 18, 10)
+        btn_layout.setSpacing(8)
 
         self.btn_cancel = QPushButton(self.i18n.t("settings_cancel"))
         self.btn_cancel.setObjectName("cancelButton")
@@ -103,8 +172,7 @@ class CloseConfirmDialog(QDialog):
         self.btn_tray.clicked.connect(self._on_tray)
         btn_layout.addWidget(self.btn_tray)
 
-        body_layout.addLayout(btn_layout)
-        outer_layout.addWidget(body_widget, 1)
+        outer_layout.addWidget(footer_frame)
 
         try:
             apply_windows_titlebar_dark_mode(self, True)
@@ -148,12 +216,18 @@ class CloseConfirmDialog(QDialog):
             border: 1px solid rgba(255, 255, 255, 0.16);
             border-radius: 12px;
         }}
+        QFrame#dialogFooter {{
+            background-color: rgba(14, 17, 27, 0.70);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+        }}
         QPushButton#primaryButton {{
             background-color: {accent};
             color: #ffffff;
             border: none;
             border-radius: 8px;
-            padding: 7px 16px;
+            padding: 6px 16px;
             font-size: 12px;
             font-weight: 700;
         }}
@@ -164,28 +238,28 @@ class CloseConfirmDialog(QDialog):
             background-color: {pressed_accent};
         }}
         QPushButton#dangerButton {{
-            background-color: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.35);
-            color: #fca5a5;
+            background-color: rgba(225, 29, 72, 0.14);
+            border: 1px solid rgba(225, 29, 72, 0.35);
+            color: #fda4af;
             border-radius: 8px;
-            padding: 7px 16px;
+            padding: 6px 14px;
             font-size: 12px;
             font-weight: 600;
         }}
         QPushButton#dangerButton:hover {{
-            background-color: rgba(239, 68, 68, 0.28);
-            border: 1px solid rgba(239, 68, 68, 0.65);
+            background-color: rgba(225, 29, 72, 0.26);
+            border: 1px solid rgba(225, 29, 72, 0.65);
             color: #ffffff;
         }}
         QPushButton#dangerButton:pressed {{
-            background-color: rgba(239, 68, 68, 0.40);
+            background-color: rgba(225, 29, 72, 0.38);
         }}
         QPushButton#cancelButton {{
             background-color: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.12);
             color: #94a3b8;
             border-radius: 8px;
-            padding: 7px 14px;
+            padding: 6px 14px;
             font-size: 12px;
             font-weight: 500;
         }}
