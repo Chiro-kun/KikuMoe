@@ -263,3 +263,55 @@ def test_station_popover_animations():
     assert pill.get_chevron_angle() <= 5.0
 
     pill.deleteLater()
+
+
+def test_station_providers_deduplicate_now_playing_events():
+    """Verify that station polling providers do not spam redundant now_playing events."""
+    from network.providers.anison_provider import AnisonProvider
+    from network.providers.gensokyo_provider import GensokyoProvider
+
+    g_events = []
+    g_prov = GensokyoProvider(
+        on_now_playing=lambda *args: g_events.append(args), on_error_text=lambda _: None
+    )
+
+    sample_g = {
+        "SONGINFO": {"TITLE": "Song A", "ARTIST": "Artist A", "CIRCLE": "Circle A"},
+        "SONGTIMES": {"DURATION": 200, "SONGEND": 1793040000},
+        "SONGDATA": {"SONGID": 12345},
+        "MISC": {"ALBUMART": "art.jpg"},
+    }
+
+    # Initial poll
+    g_prov._parse_and_emit(sample_g)
+    assert len(g_events) == 1
+
+    # Second poll with same song: MUST NOT emit
+    g_prov._parse_and_emit(sample_g)
+    assert len(g_events) == 1
+
+    # Third poll with new song: MUST emit
+    sample_g2 = dict(sample_g)
+    sample_g2["SONGDATA"] = {"SONGID": 12346}
+    sample_g2["SONGINFO"] = {"TITLE": "Song B", "ARTIST": "Artist B", "CIRCLE": "Circle B"}
+    g_prov._parse_and_emit(sample_g2)
+    assert len(g_events) == 2
+
+    # ANISON dedup test
+    a_events = []
+    a_prov = AnisonProvider(
+        on_now_playing=lambda *args: a_events.append(args), on_error_text=lambda _: None
+    )
+    sample_a = {"full_duration": 180, "duration": 90, "on_air": "Anime - Song 1"}
+
+    a_prov._parse_and_emit(sample_a)
+    assert len(a_events) == 1
+
+    # Second poll with same on_air text: MUST NOT emit
+    a_prov._parse_and_emit(sample_a)
+    assert len(a_events) == 1
+
+    # Third poll with changed on_air text: MUST emit
+    sample_a2 = {"full_duration": 210, "duration": 200, "on_air": "Anime 2 - Song 2"}
+    a_prov._parse_and_emit(sample_a2)
+    assert len(a_events) == 2

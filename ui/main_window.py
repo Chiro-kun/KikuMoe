@@ -387,6 +387,7 @@ class ListenMoePlayer(QWidget):
         self._ui_paused: bool = False
         self._current_title: Optional[str] = None
         self._current_artist: Optional[str] = None
+        self._last_notified_track: Optional[str] = None
         self._current_duration_seconds: Optional[int] = None
         self._current_start_epoch: Optional[float] = None
         self._current_cover_ref: Optional[str] = None
@@ -1511,14 +1512,22 @@ class ListenMoePlayer(QWidget):
                     self.song_progress.show()
 
             self.label_refresh.emit()
-            if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(
-                KEY_TRAY_ENABLED, True
+            track_sig = f"{self._current_title} — {self._current_artist}"
+            if (
+                self._current_title
+                and self._current_title != "–"
+                and self._current_title != self.i18n.t("unknown")
+                and track_sig != getattr(self, "_last_notified_track", None)
             ):
-                msg_title = self.i18n.t("now_playing_prefix")
-                body = f"{self._current_title}" + (
-                    f" — {self._current_artist}" if self._current_artist else ""
-                )
-                self.notify_tray.emit(msg_title, body)
+                self._last_notified_track = track_sig
+                if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(
+                    KEY_TRAY_ENABLED, True
+                ):
+                    msg_title = self.i18n.t("now_playing_prefix")
+                    body = f"{self._current_title}" + (
+                        f" — {self._current_artist}" if self._current_artist else ""
+                    )
+                    self.notify_tray.emit(msg_title, body)
             self.backend_status_refresh.emit()
         except Exception:
             pass
@@ -1548,6 +1557,7 @@ class ListenMoePlayer(QWidget):
         target_channel = channel or old_channel
 
         self._current_radio_provider = clean_id
+        self._last_notified_track = None
         self.settings.setValue(KEY_STATION, clean_id)
         if clean_id == STATION_LISTENMOE and channel:
             self.settings.setValue(KEY_CHANNEL, channel)

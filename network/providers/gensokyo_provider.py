@@ -146,10 +146,18 @@ class GensokyoProvider(BaseMetadataProvider):
             art_url = None
 
         # Check if song changed or first update
-        if song_id != self._last_song_id:
-            self._last_song_id = song_id
+        track_sig = f"{display_artist} - {title}"
+        track_changed = False
+        if song_id is not None:
+            if song_id != self._last_song_id:
+                self._last_song_id = song_id
+                track_changed = True
+        elif track_sig != getattr(self, "_last_track_sig", None):
+            self._last_track_sig = track_sig
+            track_changed = True
+
+        if track_changed:
             logger.debug(
                 "Gensokyo track changed: %s - %s (dur=%ss)", display_artist, title, duration_sec
             )
-
-        self.on_now_playing(title, display_artist, duration_sec, end_ts, art_url)
+            self.on_now_playing(title, display_artist, duration_sec, end_ts, art_url)

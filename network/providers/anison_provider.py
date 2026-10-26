@@ -157,5 +157,4 @@ class AnisonProvider(BaseMetadataProvider):
         if track_sig != self._last_track_signature:
             self._last_track_signature = track_sig
             logger.debug("ANISON.FM track changed: %s (dur=%ss)", track_sig, duration_sec)
-
-        self.on_now_playing(title, artist, duration_sec, end_ts, art_url)
+            self.on_now_playing(title, artist, duration_sec, end_ts, art_url)
