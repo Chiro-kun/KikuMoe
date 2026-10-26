@@ -114,17 +114,30 @@ class GensokyoProvider(BaseMetadataProvider):
         duration = song_times.get("DURATION")
         duration_sec = int(duration) if duration is not None and int(duration) > 0 else 0
 
-        song_start = song_times.get("SONGSTART")
-        start_ts: float | None = None
-        if song_start is not None:
+        # Calculate expected track end epoch (SONGEND matches KikuMoe ticker semantics)
+        song_end = song_times.get("SONGEND")
+        end_ts: float | None = None
+        if song_end is not None:
             try:
-                start_ts = float(song_start)
+                end_ts = float(song_end)
             except (ValueError, TypeError):
-                start_ts = None
+                end_ts = None
 
-        if start_ts is None:
-            played = song_times.get("PLAYED", 0)
-            start_ts = time.time() - float(played or 0)
+        if end_ts is None:
+            song_start = song_times.get("SONGSTART")
+            if song_start is not None and duration_sec > 0:
+                try:
+                    end_ts = float(song_start) + duration_sec
+                except (ValueError, TypeError):
+                    end_ts = None
+
+        if end_ts is None:
+            rem = song_times.get("REMAINING")
+            if rem is not None:
+                try:
+                    end_ts = time.time() + float(rem)
+                except (ValueError, TypeError):
+                    end_ts = None
 
         art_file = (misc.get("ALBUMART") or "").strip()
         if art_file:
@@ -139,4 +152,4 @@ class GensokyoProvider(BaseMetadataProvider):
                 "Gensokyo track changed: %s - %s (dur=%ss)", display_artist, title, duration_sec
             )
 
-        self.on_now_playing(title, display_artist, duration_sec, start_ts, art_url)
+        self.on_now_playing(title, display_artist, duration_sec, end_ts, art_url)

@@ -16,6 +16,14 @@ def test_cover_url_security_whitelist():
     assert (
         normalize("https://listen.moe/covers/sample.png") == "https://listen.moe/covers/sample.png"
     )
+    assert (
+        normalize("https://cdn.gensokyoradio.net/images/albums/500/test.jpg")
+        == "https://cdn.gensokyoradio.net/images/albums/500/test.jpg"
+    )
+    assert (
+        normalize("https://anison.fm/resources/poster/300/123.jpg")
+        == "https://anison.fm/resources/poster/300/123.jpg"
+    )
     assert normalize("sample.png") == "https://cdn.listen.moe/covers/sample.png"
 
     # Insecure HTTP rejected

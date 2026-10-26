@@ -89,7 +89,7 @@ def test_gensokyo_metadata_parsing():
     assert "まさみティー" in artist
     assert "O-LIFE.JP" in artist
     assert duration == 254
-    assert start_epoch == 1793042592.0
+    assert start_epoch == 1793042846.0
     assert art_url == "https://cdn.gensokyoradio.net/images/albums/500/_24bbe897ec.jpg"
 
 

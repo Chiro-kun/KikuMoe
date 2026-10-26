@@ -751,7 +751,10 @@ class ListenMoePlayer(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
         )
 
-        self.stream_tag_label = QLabel("LISTEN.MOE · STREAM")
+        initial_st = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        cfg_st = get_station_config(initial_st)
+        initial_tag = f"{str(cfg_st.get('name', 'LISTEN.MOE')).upper()} · STREAM"
+        self.stream_tag_label = QLabel(initial_tag)
         self.stream_tag_label.setObjectName("sectionTitleLabel")
         self.stream_tag_label.setStyleSheet(
             "font-size: 9px; letter-spacing: 1.5px; color: rgba(255, 255, 255, 0.38);"
@@ -1451,7 +1454,27 @@ class ListenMoePlayer(QWidget):
             self._current_duration_seconds = (
                 int(duration) if duration is not None and int(duration) >= 0 else None
             )
-            self._current_start_epoch = float(start_ts) if start_ts is not None else None
+
+            # Normalize track end epoch:
+            # LISTEN.moe provides expected track END epoch directly (start_ts > now).
+            # Other providers might provide track START timestamp (start_ts <= now).
+            if (
+                start_ts is not None
+                and self._current_duration_seconds is not None
+                and self._current_duration_seconds > 0
+            ):
+                import time
+
+                now_check = time.time() + getattr(self, "_clock_sync_offset", 0)
+                ts_val = float(start_ts)
+                if ts_val <= now_check and (now_check - ts_val) <= (
+                    self._current_duration_seconds + 60
+                ):
+                    self._current_start_epoch = ts_val + self._current_duration_seconds
+                else:
+                    self._current_start_epoch = ts_val
+            else:
+                self._current_start_epoch = float(start_ts) if start_ts is not None else None
             self._current_cover_ref = (
                 album_cover if isinstance(album_cover, str) and album_cover.strip() else None
             )
@@ -1544,7 +1567,13 @@ class ListenMoePlayer(QWidget):
                 clean_id == STATION_LISTENMOE and target_channel != old_channel
             )
             if station_or_chan_changed:
+                self._current_cover_url = None
+                self._current_cover_ref = None
                 cfg = get_station_config(clean_id)
+                if hasattr(self, "stream_tag_label") and self.stream_tag_label:
+                    self.stream_tag_label.setText(
+                        f"{str(cfg.get('name', clean_id)).upper()} · STREAM"
+                    )
                 icon_file = cfg.get("icon")
                 if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
                     icon_path = os.path.join(self._icon_dir, icon_file)
@@ -2004,7 +2033,20 @@ class ListenMoePlayer(QWidget):
         except Exception:
             return icon
 
-    _ALLOWED_COVER_HOSTS = frozenset({"cdn.listen.moe", "listen.moe"})
+    _ALLOWED_COVER_HOSTS = frozenset(
+        {
+            "cdn.listen.moe",
+            "listen.moe",
+            "cdn.gensokyoradio.net",
+            "gensokyoradio.net",
+            "anison.fm",
+            "pool.anison.fm",
+            "radio.twinskaraoke.com",
+            "twinskaraoke.com",
+            "truckers.fm",
+            "cdn.truckers.fm",
+        }
+    )
 
     def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
         try:

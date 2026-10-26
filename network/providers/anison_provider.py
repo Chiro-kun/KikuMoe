@@ -129,7 +129,7 @@ class AnisonProvider(BaseMetadataProvider):
                 title = parts[1].strip() or clean_text
                 break
 
-        # 4. Parse durations & start epoch
+        # 4. Parse durations & expected end epoch
         # "full_duration": total track seconds
         # "duration": remaining seconds
         full_dur = data.get("full_duration")
@@ -142,18 +142,20 @@ class AnisonProvider(BaseMetadataProvider):
             except (ValueError, TypeError):
                 duration_sec = 0
 
-        start_ts: float | None = None
-        if duration_sec > 0 and rem_dur is not None:
-            try:
-                rem_sec = int(rem_dur)
-                elapsed = max(0, duration_sec - rem_sec)
-                start_ts = time.time() - elapsed
-            except (ValueError, TypeError):
-                start_ts = None
+        end_ts: float | None = None
+        if duration_sec > 0:
+            if rem_dur is not None:
+                try:
+                    rem_sec = int(rem_dur)
+                    end_ts = time.time() + rem_sec
+                except (ValueError, TypeError):
+                    end_ts = None
+            if end_ts is None:
+                end_ts = time.time() + duration_sec
 
         track_sig = f"{artist} - {title}"
         if track_sig != self._last_track_signature:
             self._last_track_signature = track_sig
             logger.debug("ANISON.FM track changed: %s (dur=%ss)", track_sig, duration_sec)
 
-        self.on_now_playing(title, artist, duration_sec, start_ts, art_url)
+        self.on_now_playing(title, artist, duration_sec, end_ts, art_url)
