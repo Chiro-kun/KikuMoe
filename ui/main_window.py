@@ -32,7 +32,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -83,6 +83,7 @@ from core.ssl_compat import get_ssl_context
 from network.station_manager import StationManager
 from network.ws_client import NowPlayingWS
 from ui.about_dialog import AboutDialog
+from ui.close_dialog import CloseConfirmDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
@@ -679,11 +680,11 @@ class ListenMoePlayer(QWidget):
 
         # Backward compatibility placeholders
         self.settings_header_bar = top_bar
-        self.label = QLabel(self.i18n.t("header").format(channel="J-POP", format="Vorbis"))
+        self.label = QLabel(self.i18n.t("header").format(channel="J-POP", format="Vorbis"), self)
         self.label.setVisible(False)
-        self.status_label = QLabel("")
+        self.status_label = QLabel("", self)
         self.status_label.setVisible(False)
-        self.sleep_label = QLabel("")
+        self.sleep_label = QLabel("", self)
         self.sleep_label.setVisible(False)
 
         # 2. Central Artwork Hero Showcase
@@ -1181,44 +1182,32 @@ class ListenMoePlayer(QWidget):
 
         try:
             parent_widget = self if self.isVisible() else None
-            msg = QMessageBox(parent_widget)
-            msg.setWindowTitle(self.i18n.t("close_dialog_title"))
-            msg.setText(self.i18n.t("close_dialog_text"))
-            msg.setIcon(QMessageBox.Icon.Question)
-
-            tray_btn = msg.addButton(
-                self.i18n.t("close_option_tray"), QMessageBox.ButtonRole.AcceptRole
+            dlg = CloseConfirmDialog(
+                parent=parent_widget,
+                i18n=self.i18n,
+                icon=getattr(self, "_icon_app", None),
             )
-            msg.addButton(self.i18n.t("close_option_quit"), QMessageBox.ButtonRole.DestructiveRole)
-            cancel_btn = msg.addButton(
-                self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole
-            )
-            msg.setEscapeButton(cancel_btn)
-
-            cb = QCheckBox(self.i18n.t("close_remember"))
-            msg.setCheckBox(cb)
-
-            self._make_frameless_msg(msg)
+            if self.isVisible():
+                geo = self.geometry()
+                dlg.move(
+                    geo.x() + max(0, (geo.width() - dlg.width()) // 2),
+                    geo.y() + max(0, (geo.height() - dlg.height()) // 2),
+                )
             try:
-                apply_windows_titlebar_dark_mode(msg, True)
-            except Exception:
-                pass
-            try:
-                msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-                msg.raise_()
-                msg.activateWindow()
+                dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                dlg.raise_()
+                dlg.activateWindow()
             except Exception:
                 pass
 
-            msg.exec()
-            clicked = msg.clickedButton()
-            if clicked is None or clicked == cancel_btn:
+            res = dlg.exec()
+            if res != QDialog.DialogCode.Accepted or dlg.action == "cancel":
                 # User cancelled close action (Cancel button, Esc, or window X on the dialog)
                 event.ignore()
                 return
 
-            remember = cb.isChecked()
-            choice_tray = clicked == tray_btn
+            remember = dlg.remember
+            choice_tray = dlg.action == "tray"
 
             if remember:
                 self.settings.setValue(KEY_DONT_ASK_ON_CLOSE, True)
@@ -1779,7 +1768,6 @@ class ListenMoePlayer(QWidget):
                 self.sleep_label.setText(
                     self.t("sleep_remaining", time=self._format_mmss(self._sleep_remaining_sec))
                 )
-                self.sleep_label.setVisible(True)
         except Exception:
             pass
 
@@ -2869,7 +2857,6 @@ class ListenMoePlayer(QWidget):
                 self.sleep_label.setText(
                     self.t("sleep_remaining", time=self._format_mmss(self._sleep_remaining_sec))
                 )
-                self.sleep_label.setVisible(True)
             if hasattr(self, "sleep_timer_widget"):
                 self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
             if hasattr(self, "playback_controls"):

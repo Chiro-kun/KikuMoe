@@ -407,3 +407,57 @@ def test_settings_prewarm_and_logo_cache(qapp):
     assert p._view_stack.count() == 1
     p._prewarm_settings()
     p.close()
+
+
+def test_close_confirm_dialog(qapp):
+    """Verify CloseConfirmDialog triggers correct actions, remember flags, and styling."""
+    from ui.close_dialog import CloseConfirmDialog
+
+    # 1. Tray selection
+    dlg = CloseConfirmDialog()
+    dlg.cb_remember.setChecked(True)
+    dlg._on_tray()
+    assert dlg.action == "tray"
+    assert dlg.remember is True
+    dlg.close()
+
+    # 2. Quit selection
+    dlg2 = CloseConfirmDialog()
+    dlg2.cb_remember.setChecked(False)
+    dlg2._on_quit()
+    assert dlg2.action == "quit"
+    assert dlg2.remember is False
+    dlg2.close()
+
+    # 3. Cancel selection
+    dlg3 = CloseConfirmDialog()
+    dlg3._on_cancel()
+    assert dlg3.action == "cancel"
+    dlg3.close()
+
+
+def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
+    """Verify starting sleep timer does not spawn detached top-level labels or windows."""
+    from ui.main_window import ListenMoePlayer
+
+    monkeypatch.setattr(ListenMoePlayer, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
+
+    player = ListenMoePlayer()
+    try:
+        top_levels_before = [w for w in QApplication.topLevelWidgets() if w.isVisible()]
+
+        # Start sleep timer
+        player._on_sleep_start_requested(15)
+        assert player._sleep_remaining_sec == 15 * 60
+
+        top_levels_after = [w for w in QApplication.topLevelWidgets() if w.isVisible()]
+        # Verify no new detached top-level windows were opened
+        assert len(top_levels_after) == len(top_levels_before)
+        assert player.sleep_label.isVisible() is False
+        assert player.sleep_label.isWindow() is False
+    finally:
+        player.deleteLater()
