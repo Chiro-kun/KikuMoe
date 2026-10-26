@@ -258,14 +258,48 @@ def test_track_menu_chevron_button(qapp):
     from ui.widgets.track_menu_button import TrackMenuChevronButton
 
     btn = TrackMenuChevronButton()
-    assert btn.width() == 20
-    assert btn.height() == 20
+    assert btn.width() == 18
+    assert btn.height() == 22
     assert btn.is_active() is False
 
     btn.set_active(True)
     assert btn.is_active() is True
     btn.set_active(False)
     assert btn.is_active() is False
+
+
+def test_animated_track_label_click_and_hover(qapp):
+    """Verify AnimatedTrackLabel emits clicked signal and syncs hover state with chevron."""
+    from PyQt6.QtCore import QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+
+    from ui.widgets.ambient_cover import AnimatedTrackLabel
+    from ui.widgets.track_menu_button import TrackMenuChevronButton
+
+    lbl = AnimatedTrackLabel("Whole World Is Watching")
+    btn = TrackMenuChevronButton()
+    lbl.attach_chevron_button(btn)
+
+    # Click signal emission
+    clicks = []
+    lbl.clicked.connect(lambda: clicks.append(True))
+
+    ev = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(20.0, 10.0),
+        QPointF(20.0, 10.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    lbl.mousePressEvent(ev)
+    assert len(clicks) == 1
+
+    # Hover sync
+    lbl.set_hovered(True)
+    assert btn._hovered is True
+    lbl.set_hovered(False)
+    assert btn._hovered is False
 
 
 def test_animated_track_label_chevron_positioning(qapp):

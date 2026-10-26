@@ -11,13 +11,14 @@ Features:
 import math
 from typing import Optional
 
-from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer
+from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
     QFont,
     QFontMetrics,
     QLinearGradient,
+    QMouseEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -299,8 +300,11 @@ class AnimatedTrackLabel(QLabel):
     """
     QLabel subclass that performs a smooth 60 FPS vertical slide-up + crossfade
     whenever its text changes to a new track title or artist.
-    Supports an optional attached dropdown chevron button positioned right next to the title text.
+    Supports an optional attached dropdown chevron button positioned right next to the title text,
+    interactive hover capsule glow, and click emission to trigger track actions.
     """
+
+    clicked = pyqtSignal()
 
     def __init__(
         self,
@@ -317,6 +321,7 @@ class AnimatedTrackLabel(QLabel):
         self._prev_text: str = text
         self._anim_progress: float = 1.0
         self._chevron_btn: Optional[QWidget] = None
+        self._hovered: bool = False
 
         self.setFixedHeight(max(22, font_px + 8))
         self.setMinimumWidth(0)
@@ -339,6 +344,32 @@ class AnimatedTrackLabel(QLabel):
     def minimumSizeHint(self) -> QSize:
         return QSize(20, max(22, self._font_px + 8))
 
+    def set_hovered(self, hovered: bool) -> None:
+        """Synchronize hover capsule state with child chevron button."""
+        if self._hovered != hovered:
+            self._hovered = hovered
+            if self._chevron_btn and hasattr(self._chevron_btn, "set_hovered"):
+                self._chevron_btn.set_hovered(hovered)
+            self.update()
+
+    def enterEvent(self, a0: object) -> None:
+        txt = (self.text() or "").strip()
+        if txt and txt not in ("–", "-"):
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.set_hovered(True)
+        super().enterEvent(a0)  # type: ignore[arg-type]
+
+    def leaveEvent(self, a0: object) -> None:
+        self.set_hovered(False)
+        super().leaveEvent(a0)  # type: ignore[arg-type]
+
+    def mousePressEvent(self, a0: object) -> None:
+        if isinstance(a0, QMouseEvent) and a0.button() == Qt.MouseButton.LeftButton:
+            txt = (self.text() or "").strip()
+            if txt and txt not in ("–", "-"):
+                self.clicked.emit()
+        super().mousePressEvent(a0)  # type: ignore[arg-type]
+
     def setText(self, a0: Optional[str]) -> None:
         new_txt = a0 or ""
         old_txt = self.text()
@@ -356,8 +387,8 @@ class AnimatedTrackLabel(QLabel):
             self._anim_progress = 1.0
         self.update()
 
-    def resizeEvent(self, a0) -> None:
-        super().resizeEvent(a0)
+    def resizeEvent(self, a0: object) -> None:
+        super().resizeEvent(a0)  # type: ignore[arg-type]
         self._update_chevron_position()
 
     def _update_chevron_position(self) -> None:
@@ -370,6 +401,7 @@ class AnimatedTrackLabel(QLabel):
         txt = (self.text() or "").strip()
         if not txt or txt in ("–", "-"):
             self._chevron_btn.setVisible(False)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
             return
 
         font = QFont(self.font())
@@ -403,7 +435,7 @@ class AnimatedTrackLabel(QLabel):
             self._anim_timer.stop()
         self.update()
 
-    def paintEvent(self, a0) -> None:
+    def paintEvent(self, a0: object) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
@@ -423,6 +455,25 @@ class AnimatedTrackLabel(QLabel):
         )
         usable_w = max(20, int(w - 12.0 - reserve_w * 2.0))
 
+        txt = (self.text() or "").strip()
+        in_elided = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, usable_w)
+        text_w = float(fm.horizontalAdvance(in_elided))
+        text_x = 6.0 + (w - 12.0 - text_w) / 2.0
+
+        # Sleek cyber-glass hover capsule when user points at title / chevron
+        if self._hovered and txt not in ("–", "-"):
+            btn_w = (
+                float(self._chevron_btn.width())
+                if (self._chevron_btn and self._chevron_btn.isVisible())
+                else 0.0
+            )
+            capsule_x = text_x - 7.0
+            capsule_w = text_w + btn_w + 14.0
+            capsule_rect = QRectF(capsule_x, 1.0, capsule_w, h - 2.0)
+            painter.setBrush(QColor(255, 255, 255, 14))
+            painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
+            painter.drawRoundedRect(capsule_rect, 6.0, 6.0)
+
         ease = 1.0 - ((1.0 - self._anim_progress) ** 3)
 
         # Outgoing text sliding up & fading out
@@ -439,10 +490,9 @@ class AnimatedTrackLabel(QLabel):
             )
 
         # Incoming text sliding up from below & fading in
-        in_col = QColor(self._text_color)
+        in_col = QColor("#ffffff" if self._hovered else self._text_color)
         in_col.setAlpha(int(255 * ease))
         painter.setPen(in_col)
-        in_elided = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, usable_w)
         y_in = 8.0 * (1.0 - ease)
         painter.drawText(
             QRectF(6.0, y_in, w - 12.0, h),

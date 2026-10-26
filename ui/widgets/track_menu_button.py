@@ -17,7 +17,7 @@ class TrackMenuChevronButton(QPushButton):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(20, 20)
+        self.setFixedSize(18, 22)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hovered = False
         self._active = False
@@ -30,14 +30,23 @@ class TrackMenuChevronButton(QPushButton):
     def is_active(self) -> bool:
         return self._active
 
+    def set_hovered(self, hovered: bool) -> None:
+        if self._hovered != hovered:
+            self._hovered = hovered
+            self.update()
+
     def enterEvent(self, event: object) -> None:
-        self._hovered = True
-        self.update()
+        self.set_hovered(True)
+        par = self.parent()
+        if par is not None and hasattr(par, "set_hovered"):
+            par.set_hovered(True)
         super().enterEvent(event)  # type: ignore[arg-type]
 
     def leaveEvent(self, a0: object) -> None:
-        self._hovered = False
-        self.update()
+        self.set_hovered(False)
+        par = self.parent()
+        if par is not None and hasattr(par, "set_hovered"):
+            par.set_hovered(False)
         super().leaveEvent(a0)  # type: ignore[arg-type]
 
     def paintEvent(self, a0: object) -> None:
@@ -45,16 +54,17 @@ class TrackMenuChevronButton(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         w, h = float(self.width()), float(self.height())
+
+        # If standalone active state (e.g. menu open)
         if self._active:
             p.setBrush(QColor(236, 24, 108, 55))
             p.setPen(QPen(QColor(PALETTE.get("accent", "#EC186C")), 1.0))
             p.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), 5, 5)
-        elif self._hovered:
-            p.setBrush(QColor(255, 255, 255, 30))
-            p.setPen(QPen(QColor(255, 255, 255, 65), 1.0))
-            p.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), 5, 5)
 
-        cx, cy = w / 2.0, h / 2.0
+        cx = w / 2.0
+        # Vertically aligned with font x-height/baseline
+        cy = (h / 2.0) + 2.0
+
         if self._active:
             chev_col = QColor(PALETTE.get("accent", "#EC186C"))
         elif self._hovered:
@@ -64,7 +74,7 @@ class TrackMenuChevronButton(QPushButton):
 
         pen = QPen(
             chev_col,
-            1.6,
+            1.7,
             Qt.PenStyle.SolidLine,
             Qt.PenCapStyle.RoundCap,
             Qt.PenJoinStyle.RoundJoin,
@@ -73,8 +83,8 @@ class TrackMenuChevronButton(QPushButton):
         p.setBrush(Qt.BrushStyle.NoBrush)
 
         path = QPainterPath()
-        path.moveTo(cx - 3.5, cy - 1.8)
-        path.lineTo(cx, cy + 2.2)
-        path.lineTo(cx + 3.5, cy - 1.8)
+        path.moveTo(cx - 3.2, cy - 2.0)
+        path.lineTo(cx, cy + 2.0)
+        path.lineTo(cx + 3.2, cy - 2.0)
         p.drawPath(path)
         p.end()

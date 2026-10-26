@@ -749,6 +749,9 @@ class ListenMoePlayer(QWidget):
             lambda: self._show_track_context_menu(from_chevron=True)
         )
         self.now_playing_title.attach_chevron_button(self.track_menu_btn)
+        self.now_playing_title.clicked.connect(
+            lambda: self._show_track_context_menu(from_chevron=True)
+        )
 
         self.now_playing_title.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
@@ -2684,10 +2687,23 @@ class ListenMoePlayer(QWidget):
             if act_history is not None:
                 act_history.triggered.connect(self.toggle_history_popover)
 
-            is_chevron = from_chevron or (self.sender() == getattr(self, "track_menu_btn", None))
+            is_chevron = (
+                from_chevron
+                or (self.sender() == getattr(self, "track_menu_btn", None))
+                or (self.sender() == getattr(self, "now_playing_title", None))
+            )
             if hasattr(self, "track_menu_btn") and is_chevron:
                 self.track_menu_btn.set_active(True)
-                menu.aboutToHide.connect(lambda: self.track_menu_btn.set_active(False))
+                if hasattr(self, "now_playing_title"):
+                    self.now_playing_title.set_hovered(True)
+
+                def _on_menu_hide() -> None:
+                    if hasattr(self, "track_menu_btn"):
+                        self.track_menu_btn.set_active(False)
+                    if hasattr(self, "now_playing_title"):
+                        self.now_playing_title.set_hovered(False)
+
+                menu.aboutToHide.connect(_on_menu_hide)
                 global_pos = self.track_menu_btn.mapToGlobal(
                     QPoint(0, self.track_menu_btn.height() + 2)
                 )

@@ -1,76 +1,71 @@
 """
 Crisp, anti-aliased vector icon generators for KikuMoe.
-Renders brand and UI action icons (Spotify, YouTube, Apple Music, Copy, History, Chevron)
+Renders official brand and UI action icons (Spotify, YouTube, Apple Music, Copy, History, Chevron)
 into QIcon and QPixmap without relying on inconsistent system Unicode emojis.
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtCore import QByteArray, QPointF, QRectF, Qt
 from PyQt6.QtGui import (
     QColor,
     QIcon,
     QImage,
-    QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
     QPixmap,
 )
+from PyQt6.QtSvg import QSvgRenderer
+
+# Official brand SVG definitions
+_SPOTIFY_SVG = QByteArray(
+    b'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+    b'<path fill="#1ED760" d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0z"/>'
+    b'<path fill="#0b0e14" d="M17.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>'  # noqa: E501
+    b"</svg>"
+)
+
+_YOUTUBE_SVG = QByteArray(
+    b'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+    b'<path fill="#FF0000" d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/>'  # noqa: E501
+    b'<path fill="#FFFFFF" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>'
+    b"</svg>"
+)
+
+_APPLE_MUSIC_SVG = QByteArray(
+    b'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+    b"<defs>"
+    b'<linearGradient id="apple_grad" x1="0" y1="0" x2="1" y2="1">'
+    b'<stop offset="0%" stop-color="#FA2D48"/>'
+    b'<stop offset="100%" stop-color="#FA5570"/>'
+    b"</linearGradient>"
+    b"</defs>"
+    b'<rect width="24" height="24" rx="5.5" fill="url(#apple_grad)"/>'
+    b'<path fill="#FFFFFF" d="M17.15 4.35c-.32-.1-.7-.03-.95.18l-6.8 5.67c-.25.21-.4.52-.4.85v5.82c-.52-.35-1.18-.54-1.9-.52-1.71.05-3.1 1.34-3.1 2.87 0 1.58 1.48 2.86 3.3 2.78 1.63-.07 2.95-1.28 3.1-2.73V11.2l5.7-4.75v5.6c-.52-.35-1.18-.54-1.9-.52-1.71.05-3.1 1.34-3.1 2.87 0 1.58 1.48 2.86 3.3 2.78 1.63-.07 2.95-1.28 3.1-2.73V4.9c0-.25-.09-.45-.25-.55z"/>'  # noqa: E501
+    b"</svg>"
+)
+
+# Cached SVG renderers
+_RENDERER_SPOTIFY: QSvgRenderer | None = None
+_RENDERER_YOUTUBE: QSvgRenderer | None = None
+_RENDERER_APPLE_MUSIC: QSvgRenderer | None = None
 
 
-def get_spotify_pixmap(size: int = 16) -> QPixmap:
-    """Generate crisp Spotify green disc with rotated curved audio waves."""
+def _render_svg(svg_data: QByteArray, size: int) -> QPixmap:
     img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
     img.fill(0)
     p = QPainter(img)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    s = float(size)
-    # Spotify green circle (#1ED760)
-    p.setBrush(QColor("#1ED760"))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawEllipse(QRectF(1.0, 1.0, s - 2.0, s - 2.0))
-
-    # Dark sound waves rotated -14 degrees
-    p.save()
-    p.translate(s / 2.0, s / 2.0)
-    p.rotate(-14.0)
-    p.translate(-s / 2.0, -s / 2.0)
-
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    pen = QPen(
-        QColor("#0b0e14"),
-        max(1.1, 1.8 * (s / 24.0)),
-        Qt.PenStyle.SolidLine,
-        Qt.PenCapStyle.RoundCap,
-    )
-    p.setPen(pen)
-    p.drawArc(
-        QRectF(s * 0.22, s * 0.22, s * 0.56, s * 0.50),
-        int(42 * 16),
-        int(96 * 16),
-    )
-
-    pen.setWidthF(max(1.0, 1.5 * (s / 24.0)))
-    p.setPen(pen)
-    p.drawArc(
-        QRectF(s * 0.27, s * 0.36, s * 0.46, s * 0.44),
-        int(42 * 16),
-        int(96 * 16),
-    )
-
-    pen.setWidthF(max(0.9, 1.3 * (s / 24.0)))
-    p.setPen(pen)
-    p.drawArc(
-        QRectF(s * 0.32, s * 0.50, s * 0.36, s * 0.38),
-        int(42 * 16),
-        int(96 * 16),
-    )
-
-    p.restore()
+    renderer = QSvgRenderer(svg_data)
+    renderer.render(p, QRectF(0.0, 0.0, float(size), float(size)))
     p.end()
     return QPixmap.fromImage(img)
+
+
+def get_spotify_pixmap(size: int = 16) -> QPixmap:
+    """Generate official Spotify green disc with brand-accurate sound waves."""
+    return _render_svg(_SPOTIFY_SVG, size)
 
 
 def get_spotify_icon(size: int = 16) -> QIcon:
@@ -78,34 +73,8 @@ def get_spotify_icon(size: int = 16) -> QIcon:
 
 
 def get_youtube_pixmap(size: int = 16) -> QPixmap:
-    """Generate YouTube red rounded badge with centered white play triangle."""
-    img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(0)
-    p = QPainter(img)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    s = float(size)
-    # Red badge
-    rect = QRectF(1.0, s * 0.18, s - 2.0, s * 0.64)
-    p.setBrush(QColor("#FF0000"))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawRoundedRect(rect, s * 0.18, s * 0.18)
-
-    # Centered white play triangle
-    path = QPainterPath()
-    tx = s * 0.40
-    ty = s * 0.34
-    tw = s * 0.26
-    th = s * 0.32
-    path.moveTo(tx, ty)
-    path.lineTo(tx + tw, ty + th / 2.0)
-    path.lineTo(tx, ty + th)
-    path.closeSubpath()
-
-    p.setBrush(QColor("#FFFFFF"))
-    p.drawPath(path)
-    p.end()
-    return QPixmap.fromImage(img)
+    """Generate official YouTube red badge with centered play triangle."""
+    return _render_svg(_YOUTUBE_SVG, size)
 
 
 def get_youtube_icon(size: int = 16) -> QIcon:
@@ -113,37 +82,8 @@ def get_youtube_icon(size: int = 16) -> QIcon:
 
 
 def get_apple_music_pixmap(size: int = 16) -> QPixmap:
-    """Generate Apple Music magenta-gradient badge with white paired musical notes."""
-    img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(0)
-    p = QPainter(img)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    s = float(size)
-    grad = QLinearGradient(0, 0, s, s)
-    grad.setColorAt(0.0, QColor("#FA2D48"))
-    grad.setColorAt(1.0, QColor("#FA5570"))
-    p.setBrush(grad)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawRoundedRect(QRectF(1.0, 1.0, s - 2.0, s - 2.0), s * 0.22, s * 0.22)
-
-    # Paired notes beam & stems
-    pen = QPen(
-        QColor("#FFFFFF"),
-        max(1.1, 1.8 * (s / 24.0)),
-        Qt.PenStyle.SolidLine,
-        Qt.PenCapStyle.RoundCap,
-    )
-    p.setPen(pen)
-    p.drawLine(QPointF(s * 0.34, s * 0.68), QPointF(s * 0.34, s * 0.30))
-    p.drawLine(QPointF(s * 0.34, s * 0.30), QPointF(s * 0.68, s * 0.22))
-    p.drawLine(QPointF(s * 0.68, s * 0.22), QPointF(s * 0.68, s * 0.60))
-
-    p.setBrush(QColor("#FFFFFF"))
-    p.drawEllipse(QPointF(s * 0.28, s * 0.68), s * 0.09, s * 0.07)
-    p.drawEllipse(QPointF(s * 0.62, s * 0.60), s * 0.09, s * 0.07)
-    p.end()
-    return QPixmap.fromImage(img)
+    """Generate official Apple Music gradient badge with musical notes."""
+    return _render_svg(_APPLE_MUSIC_SVG, size)
 
 
 def get_apple_music_icon(size: int = 16) -> QIcon:
@@ -220,7 +160,7 @@ def get_chevron_down_pixmap(size: int = 16, color: str = "#94a3b8") -> QPixmap:
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     s = float(size)
-    cx, cy = s / 2.0, s / 2.0
+    cx, cy = s / 2.0, s / 2.0 + 1.5
     pen = QPen(
         QColor(color),
         max(1.1, 1.6 * (s / 16.0)),
@@ -232,8 +172,8 @@ def get_chevron_down_pixmap(size: int = 16, color: str = "#94a3b8") -> QPixmap:
     p.setBrush(Qt.BrushStyle.NoBrush)
 
     path = QPainterPath()
-    hw = s * 0.24
-    hh = s * 0.14
+    hw = s * 0.22
+    hh = s * 0.13
     path.moveTo(cx - hw, cy - hh)
     path.lineTo(cx, cy + hh)
     path.lineTo(cx + hw, cy - hh)

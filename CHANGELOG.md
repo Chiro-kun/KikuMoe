@@ -10,11 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
-- **Multi-Station Radio Engine (Phase 1)**:
+- **Multi-Station Radio Engine**:
   - Integrated community and partner web radio stations: LISTEN.moe (J-POP & K-POP), Gensokyo Radio (Touhou Project 24/7), ANISON.FM (Japanese anime music), Neuro 21 Radio (Neuro & Evil karaoke covers), and TruckersFM (Euro Truck & gaming hits).
   - Modernized top HUD station selector: `StationPillButton` featuring an animated vector chevron, active station branding, and the `StationGlassPopover` frosted glass channel switcher.
   - Pluggable provider architecture (`StationProvider`) handling diverse metadata streams (LISTEN.moe WebSockets, AzuraCast REST APIs, Icecast/Liquidsoap status endpoints).
-- **Session Song History & Popover (Phase 3)**:
+- **Session Song History & Popover**:
   - In-memory thread-safe `SongHistoryManager` ring buffer (up to 100 tracks) with consecutive duplicate filtering to avoid spamming the history during reconnects or polling cycles.
   - Cyber-Glass `SongHistoryPopover` modal card featuring smooth drop-in/fade animations (190ms `OutCubic`), session track count badge, "Svuota" (clear) action, and empty state guidance.
   - Dedicated vector history button (`HistoryIconButton`) in the header HUD with 60 FPS click-bounce animation (`0.84 -> 1.04 -> 1.0`).
@@ -22,21 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Spotify Desktop Detection & Fallback**: Automatically probes for Spotify desktop installations across platforms (Windows Registry `HKCU/HKCR/HKLM\Software\Classes\spotify\shell\open\command` + exe paths, Linux `which spotify`, Flatpak, Snap, macOS). Launches native URI `spotify:search:<query>` if installed, with seamless fallback to `https://open.spotify.com/search/<query>` in the default browser.
   - Direct search integrations for **YouTube**, **YouTube Music**, and **Apple Music**.
   - One-click clipboard actions: Copy formatted `"Artist - Title"`, song title, or artist name with visual feedback.
-- **Track Title Dropdown Chevron Button (`TrackMenuChevronButton`)**:
-  - Interactive vector chevron (`▾`) positioned dynamically right at the end of the song title in `AnimatedTrackLabel`.
-  - Left-clicking opens the Quick Search & Actions menu directly beneath the title text, providing an intuitive visual affordance for song actions.
+- **Track Title Dropdown Chevron & Interactive Capsule (`TrackMenuChevronButton`)**:
+  - Interactive vector chevron (`▾`) positioned dynamically right at the optical midline and baseline of the song title in `AnimatedTrackLabel`.
+  - Added subtle glowing Cyber-Glass hover capsule surrounding the active song title and chevron on mouse hover with pointing hand cursor.
+  - Left-clicking either the title text or the chevron directly opens the Quick Search & Actions menu anchored underneath.
   - Automatically hidden when playback is idle and elides cleanly on long titles without pushing title text off-center.
-- **Crisp Vector Icon Suite (`ui/vector_icons.py`)**:
-  - Replaced all Unicode emojis (`🟢`, `▶`, `🍎`, `📋`, `🕒`) across menus and buttons with custom antialiased vector graphics:
-    - Spotify green disc `#1ED760` with sound waves rotated at -14°.
-    - YouTube red badge `#FF0000` with centered white play triangle.
-    - Apple Music gradient badge (`#FA2D48` → `#FA5570`) with white paired musical notes.
+- **Official Vector Icon Suite (`ui/vector_icons.py`)**:
+  - Replaced all Unicode emojis across menus and buttons with authentic, pixel-perfect vector SVGs rendered via `QSvgRenderer`:
+    - Official Spotify brand green disc `#1ED760` with accurate convex sound waves.
+    - Official YouTube red badge `#FF0000` with centered white play triangle.
+    - Official Apple Music gradient badge (`#FA2D48` → `#FA5570`) with white paired musical notes.
     - Copy documents icon with rounded corners in slate `#CBD5E1`.
     - Neon clock history icon with hour and minute hands.
   - Rendered across the Now Playing context menu, history popover action buttons, and system tray.
 
 ### Changed
-- **Close Confirmation Dialog UI (Phase 2)**:
+- **Close Confirmation Dialog UI**:
   - Modernized `CloseConfirmDialog` with custom Cyber-Glass title bar (`CustomTitleBar`), dialog title "Chiudere l'app?", and clean non-redundant description body.
   - Replaced asymmetric dialog icon with a perfectly balanced standby power emblem badge (`DialogIconBadge`).
   - Added smooth drop-in and fade entrance/exit animations with `WindowStaysOnTopHint`.
