@@ -39,6 +39,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -523,10 +524,12 @@ class StationPillButton(QWidget):
 
         self._height = 28
         self.setFixedHeight(self._height)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
         self.setToolTip("Cambia stazione radio")
         self._pixmap_cache: dict[str, QPixmap] = {}
+        self.setFixedWidth(self.sizeHint().width())
 
     def get_chevron_angle(self) -> float:
         return self._chevron_angle
@@ -553,6 +556,7 @@ class StationPillButton(QWidget):
         self._current_station = (station_id or DEFAULT_STATION).lower().strip()
         if channel:
             self._current_channel = channel.strip()
+        self.setFixedWidth(self.sizeHint().width())
         self.updateGeometry()
         self.update()
 
@@ -575,9 +579,10 @@ class StationPillButton(QWidget):
         fm = QFontMetrics(font)
         title = self.get_display_title()
         text_w = fm.horizontalAdvance(title)
-        # 12 (left) + 16 (icon) + 7 (gap) + text_w + 10 (gap) + 8 (chevron) + 12 (right)
-        total_w = 12 + 16 + 7 + text_w + 10 + 8 + 12
-        return QSize(max(130, total_w), self._height)
+        # Symmetrical pill: 11 (left) + 16 (icon) + 7 (gap)
+        # + text_w + 8 (gap) + 7 (chevron) + 11 (right)
+        total_w = 11 + 16 + 7 + text_w + 8 + 7 + 11
+        return QSize(total_w, self._height)
 
     def _get_icon_pixmap(self, filename: str) -> QPixmap:
         if filename in self._pixmap_cache:
@@ -660,10 +665,14 @@ class StationPillButton(QWidget):
         painter.drawPath(path)
 
         # 2. Icon (16x16)
+        pad = 11.0
+        gap_icon_text = 7.0
+        gap_text_chev = 8.0
+
         cfg = get_station_config(self._current_station)
         icon_file = str(cfg.get("icon", "listen.png"))
         pix = self._get_icon_pixmap(icon_file)
-        icon_x = 11.0
+        icon_x = pad
         if not pix.isNull():
             icon_y = (h - float(pix.height())) / 2.0
             painter.drawPixmap(int(icon_x), int(icon_y), pix)
@@ -678,12 +687,12 @@ class StationPillButton(QWidget):
         title = self.get_display_title()
         fm = painter.fontMetrics()
         text_w = fm.horizontalAdvance(title)
-        text_x = icon_x + 16.0 + 7.0
+        text_x = icon_x + 16.0 + gap_icon_text
         text_y = (h + fm.ascent() - fm.descent()) / 2.0
         painter.drawText(QPointF(text_x, text_y), title)
 
         # 4. Smooth animated vector chevron (rotates 0° -> 180° when open)
-        chev_center_x = text_x + text_w + 10.0
+        chev_center_x = text_x + text_w + gap_text_chev + 3.5
         chev_center_y = h / 2.0
         painter.save()
         painter.translate(chev_center_x, chev_center_y)

@@ -385,11 +385,20 @@ def test_station_pill_button_state():
     pill.update_state("gensokyo")
     assert pill.get_current_station() == "gensokyo"
     assert "Gensokyo Radio" in pill.get_display_title()
+    gensokyo_w = pill.width()
 
     # Update to ANISON.FM
     pill.update_state("anison")
     assert pill.get_current_station() == "anison"
     assert "ANISON.FM" in pill.get_display_title()
+
+    # Update to Neuro 21: verify compact, dynamic width adapts to shorter title
+    pill.update_state("neuro21")
+    assert pill.get_current_station() == "neuro21"
+    assert "Neuro 21" in pill.get_display_title()
+    assert pill.width() == pill.sizeHint().width()
+    assert pill.width() < gensokyo_w
+
     pill.deleteLater()
 
 
