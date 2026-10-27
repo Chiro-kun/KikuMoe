@@ -44,6 +44,8 @@ PALETTE: Dict[str, str] = {
     "station_glass_overlay": "#c00c0e18",
     "station_glass_fallback": "#f0141622",
     "station_glass_rim": "#30ffffff",
+    "station_selected_bg": "rgba(236, 24, 108, 0.20)",
+    "station_selected_hover": "rgba(236, 24, 108, 0.28)",
     # Status Colors
     "status_online": "#00e676",  # Connected / audio playing
     "status_warning": "#ffab00",  # Buffering / reconnecting

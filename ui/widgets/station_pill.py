@@ -151,6 +151,14 @@ class StationRowWithChannels(QWidget):
 
         self.setFixedHeight(36)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if self.is_current_station:
+            self.setObjectName("selectedStationMultiRow")
+            self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            self.setStyleSheet(
+                "QWidget#selectedStationMultiRow { "
+                f"background-color: {PALETTE['station_selected_bg']}; border-radius: 6px; "
+                "}"
+            )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 8, 0)
@@ -285,10 +293,12 @@ class SimpleStationRow(QPushButton):
         super().leaveEvent(event)
 
     def _update_style(self) -> None:
-        if self._hovered:
+        if self._hovered and self.is_selected:
+            bg = PALETTE["station_selected_hover"]
+        elif self._hovered:
             bg = "rgba(236, 24, 108, 0.18)"
         elif self.is_selected:
-            bg = "rgba(255, 255, 255, 0.05)"
+            bg = PALETTE["station_selected_bg"]
         else:
             bg = "transparent"
 
