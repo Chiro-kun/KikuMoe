@@ -129,6 +129,7 @@ from ui.widgets.track_menu_button import TrackMenuChevronButton
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
+_MIN_WINDOW_HEIGHT = 700
 
 
 # Custom Progress Bar with Scrubber Playhead, Gradient Fill & 60 FPS Play/Buffer Animation
@@ -580,8 +581,8 @@ class ListenMoePlayer(QWidget):
         # Use custom Cyber-Moe title bar with logo on all platforms (Windows & Linux)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 405, 670
-        self.setMinimumSize(380, 560)
+        fixed_w, fixed_h = 405, _MIN_WINDOW_HEIGHT
+        self.setMinimumSize(380, _MIN_WINDOW_HEIGHT)
         self.resize(fixed_w, fixed_h)
         self.setObjectName("mainWindowRoot")
         self._apply_window_title("")
@@ -1201,7 +1202,7 @@ class ListenMoePlayer(QWidget):
         try:
             self.apply_theme()
             self.apply_translations()
-            min_h = max(660, self.minimumSizeHint().height())
+            min_h = max(_MIN_WINDOW_HEIGHT, self.minimumSizeHint().height())
             if self.height() < min_h:
                 self.resize(max(380, self.width()), min_h)
             self.backend_status_refresh.connect(self.update_vlc_status_label)

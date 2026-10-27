@@ -560,3 +560,25 @@ def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
         assert player.sleep_label.isWindow() is False
     finally:
         player.deleteLater()
+
+
+def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
+    from PyQt6.QtCore import QPoint
+
+    from ui.main_window import ListenMoePlayer
+
+    monkeypatch.setattr(ListenMoePlayer, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
+    player = ListenMoePlayer()
+    player.resize(200, 200)
+    player.show()
+    qapp.processEvents()
+    assert player.width() >= 380
+    assert player.height() >= 700
+    cover_bottom = player.ambient_cover.mapTo(player, QPoint(0, player.ambient_cover.height())).y()
+    title_top = player.now_playing_title.mapTo(player, QPoint(0, 0)).y()
+    assert title_top >= cover_bottom
+    player.deleteLater()
