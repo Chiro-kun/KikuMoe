@@ -20,6 +20,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+
 jobs:
   quality-gate:
     name: Lint, Type Check & Test
@@ -31,6 +34,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
+          sudo apt-get upgrade -y
           sudo apt-get install -y --no-install-recommends \
             dbus libmpv-dev portaudio19-dev \
             libgl1 libegl1 libdbus-1-3 \
@@ -40,6 +44,7 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-sync1 libxcb-xfixes0 \
             libxcb-xinerama0 libxcb-xkb1
+          sudo apt autoclean -y
 
       - name: Install Poetry
         run: pipx install poetry==2.5.1
@@ -79,6 +84,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
+          sudo apt-get upgrade -y
           sudo apt-get install -y --no-install-recommends \
             file wget curl binutils gcc make nasm pkg-config libssl-dev portaudio19-dev \
             libglib2.0-0 libgl1 libegl1 libdbus-1-3 \
@@ -88,6 +94,7 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-sync1 libxcb-xfixes0 \
             libxcb-xinerama0 libxcb-xkb1
+          sudo apt autoclean -y
 
       - name: Install Poetry
         run: pipx install poetry==2.5.1
