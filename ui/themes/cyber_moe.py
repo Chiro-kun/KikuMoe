@@ -80,7 +80,6 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
         border-radius: 14px;
     }}
     QScrollArea#lyricsScroll {{ border: 0; background: transparent; }}
-    QLabel#lyricsHeading {{ color: {accent}; font-size: 10px; font-weight: 800; }}
 
     /* Glass Cards */
     QFrame#glassCard, QWidget#glassCard {{

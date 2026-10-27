@@ -547,12 +547,14 @@ class StationPillButton(QWidget):
 
         self._height = 28
         self.setFixedHeight(self._height)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setMinimumWidth(90)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
         self.setToolTip("Cambia stazione radio")
         self._pixmap_cache: dict[str, QPixmap] = {}
-        self.setFixedWidth(self.sizeHint().width())
+        self.setMaximumWidth(self.sizeHint().width())
+        self.resize(self.sizeHint())
 
     def get_chevron_angle(self) -> float:
         return self._chevron_angle
@@ -579,7 +581,8 @@ class StationPillButton(QWidget):
         self._current_station = (station_id or DEFAULT_STATION).lower().strip()
         if channel:
             self._current_channel = channel.strip()
-        self.setFixedWidth(self.sizeHint().width())
+        self.setMaximumWidth(self.sizeHint().width())
+        self.resize(self.sizeHint())
         self.updateGeometry()
         self.update()
 
@@ -709,8 +712,10 @@ class StationPillButton(QWidget):
 
         title = self.get_display_title()
         fm = painter.fontMetrics()
-        text_w = fm.horizontalAdvance(title)
         text_x = icon_x + 16.0 + gap_icon_text
+        available_text_width = max(0, int(w - text_x - gap_text_chev - 7.0 - pad))
+        title = fm.elidedText(title, Qt.TextElideMode.ElideRight, available_text_width)
+        text_w = fm.horizontalAdvance(title)
         text_y = (h + fm.ascent() - fm.descent()) / 2.0
         painter.drawText(QPointF(text_x, text_y), title)
 

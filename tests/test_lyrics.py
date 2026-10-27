@@ -74,6 +74,10 @@ def test_panel_tracks_active_line_and_supports_plain_lyrics(qapp):
     assert not panel.lines
     assert panel.labels[0].text() == "Plain"
     assert panel.labels[1].text() == "Just text"
+    panel.show_record({"syncedLyrics": "[00:01.00]One"}, "Plain", "Timing unavailable")
+    assert not panel.lines
+    assert panel.labels[0].text() == "Timing unavailable"
+    assert panel.labels[1].text() == "One"
     panel.close()
 
 

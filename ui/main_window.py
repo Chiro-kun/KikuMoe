@@ -664,7 +664,7 @@ class ListenMoePlayer(QWidget):
         top_bar_layout.setSpacing(6)
 
         left_wing = QWidget()
-        left_wing.setFixedWidth(86)
+        left_wing.setFixedWidth(78)
         left_wing_layout = QHBoxLayout(left_wing)
         left_wing_layout.setContentsMargins(0, 0, 0, 0)
         left_wing_layout.setSpacing(0)
@@ -701,7 +701,7 @@ class ListenMoePlayer(QWidget):
         center_hud_layout.addStretch(1)
 
         right_wing = QWidget()
-        right_wing.setFixedWidth(86)
+        right_wing.setFixedWidth(98)
         right_wing_layout = QHBoxLayout(right_wing)
         right_wing_layout.setContentsMargins(0, 0, 0, 0)
         right_wing_layout.setSpacing(6)
@@ -710,11 +710,18 @@ class ListenMoePlayer(QWidget):
         self.history_button.setToolTip(self.i18n.t("history_button"))
         self.history_button.clicked.connect(self.toggle_history_popover)
 
+        self.lyrics_button = LyricsButton()
+        self.lyrics_button.setObjectName("lyricsButton")
+        self.lyrics_button.setToolTip(self.i18n.t("lyrics_button"))
+        self.lyrics_button.setAccessibleName(self.i18n.t("lyrics_button"))
+        self.lyrics_button.toggled.connect(self._toggle_lyrics)
+
         self.settings_button = SettingsIconButton()
         self.settings_button.setToolTip(f"{self.i18n.t('settings_button')} (Ctrl+,)")
         self.settings_button.clicked.connect(self.open_settings)
 
         right_wing_layout.addStretch(1)
+        right_wing_layout.addWidget(self.lyrics_button)
         right_wing_layout.addWidget(self.history_button)
         right_wing_layout.addWidget(self.settings_button)
 
@@ -804,12 +811,6 @@ class ListenMoePlayer(QWidget):
         track_box.addWidget(self.track_hover_group)
         self._layout.addLayout(track_box)
 
-        self.lyrics_button = LyricsButton()
-        self.lyrics_button.setObjectName("lyricsButton")
-        self.lyrics_button.setToolTip(self.i18n.t("lyrics_button"))
-        self.lyrics_button.setAccessibleName(self.i18n.t("lyrics_button"))
-        self.lyrics_button.toggled.connect(self._toggle_lyrics)
-
         # Legacy label
         self.now_playing_label = QLabel("–")
         self.now_playing_label.setVisible(False)
@@ -856,7 +857,6 @@ class ListenMoePlayer(QWidget):
         self.song_time_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         time_row.addWidget(self.song_elapsed_label)
-        time_row.addWidget(self.lyrics_button)
         time_row.addWidget(self.stream_tag_label, 1)
         time_row.addWidget(self.song_time_label)
         prog_box.addLayout(time_row)
@@ -906,7 +906,6 @@ class ListenMoePlayer(QWidget):
     def _on_lyrics_result(self, record, status):
         if not self.lyrics_button.isChecked():
             return
-        self.lyrics_panel.heading.setText("LYRICS · LRCLIB")
         if status == "error":
             self.lyrics_panel.show_message(self.i18n.t("lyrics_error"))
         elif not record:
@@ -914,11 +913,9 @@ class ListenMoePlayer(QWidget):
         elif record.get("instrumental"):
             self.lyrics_panel.show_message(self.i18n.t("lyrics_instrumental"))
         elif record.get("syncedLyrics") or record.get("plainLyrics"):
-            self.lyrics_panel.show_record(record, self.i18n.t("lyrics_plain"))
-            if self.lyrics_panel.lines and self._current_start_epoch is None:
-                self.lyrics_panel.heading.setText(self.i18n.t("lyrics_no_timing"))
-            else:
-                self.lyrics_panel.heading.setText("LYRICS · LRCLIB")
+            no_timing = self._current_start_epoch is None or self._current_duration_seconds is None
+            note = self.i18n.t("lyrics_no_timing") if no_timing else ""
+            self.lyrics_panel.show_record(record, self.i18n.t("lyrics_plain"), note)
             self._update_lyrics_position()
         else:
             self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))

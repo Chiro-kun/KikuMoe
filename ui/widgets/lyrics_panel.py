@@ -55,10 +55,6 @@ class LyricsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(5)
-        self.heading = QLabel("LYRICS · LRCLIB")
-        self.heading.setObjectName("lyricsHeading")
-        self.heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.heading)
         self.scroll = QScrollArea()
         self.scroll.setObjectName("lyricsScroll")
         self.scroll.setWidgetResizable(True)
@@ -101,17 +97,19 @@ class LyricsPanel(QWidget):
         self._update_styles()
         self.scroll.verticalScrollBar().setValue(0)
 
-    def show_record(self, record, plain_note):
+    def show_record(self, record, plain_note, timing_note=""):
         self._clear()
         self.lines = parse_lrc(record.get("syncedLyrics"))
-        if self.lines:
+        if self.lines and not timing_note:
             self._update_padding()
             for _, text in self.lines:
                 self._add_line(text or "♪")
         else:
             self.content_layout.setContentsMargins(0, 0, 4, 0)
-            self._add_line(plain_note)
-            self._add_line(record.get("plainLyrics") or "")
+            text = record.get("plainLyrics") or "\n".join(text for _, text in self.lines)
+            self.lines = []
+            self._add_line(timing_note or plain_note)
+            self._add_line(text)
             self.content_layout.addStretch()
         self._update_styles()
         self.scroll.verticalScrollBar().setValue(0)

@@ -720,8 +720,15 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     monkeypatch.setattr(window.lyrics_provider, "search", lambda *args: calls.append(args))
     window._current_title, window._current_artist = "Song", "Artist"
     window._current_duration_seconds = 120
-    window.resize(400, 720)
+    window._current_start_epoch = 1000
+    window.resize(380, 720)
     window.show()
+    qapp.processEvents()
+    assert window.lyrics_button.parentWidget() is window.history_button.parentWidget()
+    assert window.lyrics_button.geometry().right() < window.history_button.geometry().left()
+    assert window.station_pill.mapTo(window, window.station_pill.rect().topRight()).x() < (
+        window.lyrics_button.mapTo(window, window.lyrics_button.rect().topLeft()).x()
+    )
     window.lyrics_button.click()
     qapp.processEvents()
     assert window.width() >= 650
