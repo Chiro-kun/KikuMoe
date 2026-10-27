@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **Compact Settings Layout**: Settings pages scroll vertically when the window is too small for their contents, preventing overlapping cards while keeping the action buttons visible.
 - **Title Capsule Hit-Testing**: Hit-testing is now strictly bounded to the title text and chevron geometry (`get_capsule_rect()`). Mouse movements and clicks in empty margin areas to the left or right of centered text are properly ignored.
 - **Active Menu State Retention**: The unified title hover capsule remains fully illuminated while the dropdown search context menu is open (`set_menu_active(True)`), preventing the capsule from prematurely collapsing on `leaveEvent`.
 - **Chevron Button Clean Rendering**: Removed standalone square box background from `TrackMenuChevronButton` when clicked/active; the chevron icon seamlessly tints to the accent color `#EC186C` inside the unified title capsule without an isolated bounding box.

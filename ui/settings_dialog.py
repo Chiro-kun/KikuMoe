@@ -49,6 +49,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListView,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
@@ -985,7 +986,7 @@ class SettingsDialog(QDialog):
 
         gen_layout.addWidget(card_play)
         gen_layout.addStretch(1)
-        self.pages.addWidget(page_gen)
+        self._add_settings_page(page_gen)
 
         # ==================== PAGE 1: AUDIO & STREAM ====================
         page_audio = QWidget()
@@ -1111,7 +1112,7 @@ class SettingsDialog(QDialog):
 
         audio_layout.addWidget(card_net)
         audio_layout.addStretch(1)
-        self.pages.addWidget(page_audio)
+        self._add_settings_page(page_audio)
 
         # ==================== PAGE 2: TRAY & CONSOLE ====================
         page_sys = QWidget()
@@ -1180,7 +1181,7 @@ class SettingsDialog(QDialog):
 
         sys_layout.addWidget(card_dev)
         sys_layout.addStretch(1)
-        self.pages.addWidget(page_sys)
+        self._add_settings_page(page_sys)
 
         # ==================== PAGE 3: INFO & CREDITI ====================
         page_about = QWidget()
@@ -1201,7 +1202,7 @@ class SettingsDialog(QDialog):
             backend_name=backend_name,
         )
         about_lay.addWidget(self.about_widget)
-        self.pages.addWidget(page_about)
+        self._add_settings_page(page_about)
 
         body_layout.addWidget(self.pages, 1)
 
@@ -1283,6 +1284,17 @@ class SettingsDialog(QDialog):
         self._populate_audio_devices()
         if hasattr(self, "_applied_values"):
             self._applied_values["audio_device"] = self.cmb_audio_device.currentData()
+
+    def _add_settings_page(self, page: QWidget) -> None:
+        """Let each settings page scroll independently when space is limited."""
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsPageScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setMinimumSize(0, 0)
+        scroll.setWidget(page)
+        self.pages.addWidget(scroll)
 
     def set_tab(self, idx: int, animated: bool = False) -> None:
         """Programmatically switch to tab index (0=General, 1=Audio, 2=Advanced, 3=Info)."""
@@ -1442,6 +1454,24 @@ class SettingsDialog(QDialog):
             border: 1px solid rgba(255, 255, 255, 0.10);
             border-top: 1px solid rgba(255, 255, 255, 0.16);
             border-radius: 13px;
+        }}
+        QScrollArea#settingsPageScroll, QScrollArea#settingsPageScroll > QWidget > QWidget {{
+            background: transparent;
+            border: none;
+        }}
+        QScrollArea#settingsPageScroll QScrollBar:vertical {{
+            background: transparent;
+            width: 6px;
+            margin: 2px 0;
+        }}
+        QScrollArea#settingsPageScroll QScrollBar::handle:vertical {{
+            background: rgba(255, 255, 255, 70);
+            border-radius: 3px;
+            min-height: 24px;
+        }}
+        QScrollArea#settingsPageScroll QScrollBar::add-line:vertical,
+        QScrollArea#settingsPageScroll QScrollBar::sub-line:vertical {{
+            height: 0;
         }}
         QFrame#settingsFooterDeck {{
             background-color: #131624;

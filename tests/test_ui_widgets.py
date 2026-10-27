@@ -430,6 +430,38 @@ def test_settings_dialog_four_tabs(qapp):
     dlg.close()
 
 
+def test_settings_pages_scroll_in_compact_window(qapp):
+    from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
+
+    from ui.settings_dialog import SettingsDialog
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    dlg = SettingsDialog(host, embedded=True)
+    layout.addWidget(dlg)
+    host.resize(405, 550)
+    host.show()
+    dlg.set_tab(3)
+    qapp.processEvents()
+    scroll = dlg.pages.currentWidget()
+    assert isinstance(scroll, QScrollArea)
+    assert scroll.verticalScrollBar().maximum() > 0
+    cards = [
+        dlg.about_widget.layout().itemAt(i).widget()
+        for i in range(dlg.about_widget.layout().count())
+        if dlg.about_widget.layout().itemAt(i).widget() is not None
+    ]
+    assert all(a.geometry().bottom() < b.geometry().top() for a, b in zip(cards, cards[1:]))
+    scroll.ensureWidgetVisible(dlg.about_widget.btn_copy)
+    qapp.processEvents()
+    copy_pos = dlg.about_widget.btn_copy.mapTo(
+        scroll.viewport(), dlg.about_widget.btn_copy.rect().center()
+    )
+    assert scroll.viewport().rect().contains(copy_pos)
+    assert dlg.btn_apply.isVisible()
+    host.close()
+
+
 def test_settings_prewarm_and_logo_cache(qapp):
     from PyQt6.QtCore import QSettings
     from PyQt6.QtWidgets import QWidget
