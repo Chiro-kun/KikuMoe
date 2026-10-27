@@ -3,6 +3,7 @@ Tests for KikuMoe 2.0.0 Cyber-Moe UI widgets and theming system.
 """
 
 import os
+import time
 
 import pytest
 from PyQt6.QtGui import QColor, QPixmap
@@ -763,6 +764,25 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     QTest.qWait(350)
     assert window.lyrics_panel.isHidden()
     assert window.width() == 380
+    lyrics = "\n".join(f"[00:{n:02}.00]Line {n}" for n in range(1, 51))
+    monkeypatch.setattr(
+        window.lyrics_provider,
+        "search",
+        lambda *args: window.lyrics_provider.finished.emit({"syncedLyrics": lyrics}, "ok"),
+    )
+    window._current_start_epoch = time.time() + 90
+    window.lyrics_button.click()
+    QTest.qWait(800)
+    panel = window.lyrics_panel
+    assert panel.active == 29
+    line = panel.labels[panel.active]
+    assert (
+        abs(
+            line.mapTo(panel.scroll.viewport(), line.rect().center()).y()
+            - panel.scroll.viewport().height() // 2
+        )
+        < 5
+    )
     window.hide()
     window.deleteLater()
 

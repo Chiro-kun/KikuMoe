@@ -961,6 +961,8 @@ class ListenMoePlayer(QWidget):
             self._lyrics_original_width = None
         self.lyrics_panel.setMaximumWidth(16777215)
         self.lyrics_panel.setMinimumWidth(190)
+        if enabled:
+            self.lyrics_panel._schedule_recenter()
 
     def _refresh_lyrics(self, force=False):
         if not self.lyrics_button.isChecked():

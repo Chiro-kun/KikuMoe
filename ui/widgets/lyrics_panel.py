@@ -129,6 +129,10 @@ class LyricsPanel(QWidget):
         self.animation = QPropertyAnimation(self.scroll.verticalScrollBar(), b"value", self)
         self.animation.setDuration(350)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._recenter_timer = QTimer(self)
+        self._recenter_timer.setSingleShot(True)
+        self._recenter_timer.timeout.connect(self._recenter_active)
+        self.scroll.verticalScrollBar().rangeChanged.connect(self._schedule_recenter)
 
     def set_accent(self, accent):
         self._accent = accent
@@ -136,6 +140,7 @@ class LyricsPanel(QWidget):
 
     def _clear(self):
         self.animation.stop()
+        self._recenter_timer.stop()
         self.lines, self.labels, self.active = [], [], -1
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
@@ -192,8 +197,12 @@ class LyricsPanel(QWidget):
     def eventFilter(self, watched, event):
         if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize and self.lines:
             self._update_padding()
-            QTimer.singleShot(0, self._recenter_active)
+            self._schedule_recenter()
         return super().eventFilter(watched, event)
+
+    def _schedule_recenter(self, *args):
+        if self.active >= 0:
+            self._recenter_timer.start(0)
 
     def _recenter_active(self):
         if self.active < 0 or self.active >= len(self.labels):
@@ -223,5 +232,4 @@ class LyricsPanel(QWidget):
             self.labels[previous].set_active(False, self._accent)
         if current >= 0:
             self.labels[current].set_active(True, self._accent)
-            self._recenter_active()
-            QTimer.singleShot(0, self._recenter_active)
+            self._schedule_recenter()
