@@ -49,7 +49,9 @@ KikuMoe si collega al server IPC locale di Discord desktop o di un client
 compatibile con [arRPC](https://github.com/OpenAsar/arrpc), e riprova se il
 server non è ancora disponibile. Per Discord Web occorre un server arRPC e un
 bridge compatibile; alcuni client alternativi lo integrano già. La copertina
-viene mostrata quando è disponibile un URL supportato. Per mostrare anche un
+viene mostrata quando è disponibile un URL supportato. L'attività include un
+pulsante che apre la pagina del progetto; Discord lo mostra agli altri utenti.
+Per mostrare anche un
 piccolo logo, la distribuzione può impostare `KIKUMOE_DISCORD_ICON` con il nome
 di un asset caricato nell'applicazione Discord o con un URL immagine.
 

@@ -10,6 +10,8 @@ import uuid
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtNetwork import QLocalSocket
 
+from core.constants import URL_FORGEJO
+
 
 def ipc_paths():
     if sys.platform == "win32":
@@ -27,10 +29,13 @@ def ipc_paths():
     return paths
 
 
-def activity_payload(title, artist, station, cover, end_epoch, duration, paused):
+def activity_payload(
+    title, artist, station, cover, end_epoch, duration, paused, button_label="Open KikuMoe"
+):
     if not title or title in ("–", "-"):
         return None
     activity = {"details": title[:128], "state": (artist or station or "Radio")[:128]}
+    activity["buttons"] = [{"label": button_label, "url": URL_FORGEJO}]
     if cover and cover.startswith(("https://", "http://")) and len(cover) <= 300:
         activity["assets"] = {"large_image": cover, "large_text": (station or "KikuMoe")[:128]}
     if not paused and end_epoch and duration and duration > 0:

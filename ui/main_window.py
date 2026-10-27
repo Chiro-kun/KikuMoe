@@ -1160,7 +1160,14 @@ class ListenMoePlayer(QWidget):
             end -= self._clock_sync_offset
         cover = self._normalize_album_cover_url(self._current_cover_ref)
         activity = activity_payload(
-            title, self._current_artist, station, cover, end, self._current_duration_seconds, paused
+            title,
+            self._current_artist,
+            station,
+            cover,
+            end,
+            self._current_duration_seconds,
+            paused,
+            self.i18n.t("discord_open_kikumoe"),
         )
         if activity and paused:
             activity["state"] = (activity["state"] + " · " + self.i18n.t("pause"))[:128]

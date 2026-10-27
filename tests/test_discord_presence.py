@@ -6,6 +6,7 @@ import uuid
 from PyQt6.QtNetwork import QLocalServer
 from PyQt6.QtWidgets import QApplication
 
+from core.constants import URL_FORGEJO
 from core.discord_presence import DiscordPresence, activity_payload
 
 
@@ -37,8 +38,12 @@ def test_activity_timestamps_and_pause():
         "Song", "Artist", "Radio", "https://example.com/cover.png", 200, 60, False
     )
     assert playing["timestamps"] == {"start": 140, "end": 200}
+    assert playing["buttons"] == [{"label": "Open KikuMoe", "url": URL_FORGEJO}]
     assert playing["assets"]["large_image"] == "https://example.com/cover.png"
     paused = activity_payload("Song", "Artist", "Radio", "local.png", 200, 60, True)
+    localized = activity_payload("Song", "Artist", "Radio", None, None, 0, False, "Apri KikuMoe")
+    assert localized["buttons"] == [{"label": "Apri KikuMoe", "url": URL_FORGEJO}]
+    assert paused["buttons"] == playing["buttons"]
     assert "timestamps" not in paused
     assert "assets" not in paused
     assert activity_payload("–", "Artist", "Radio", None, None, 0, False) is None
@@ -52,7 +57,8 @@ def test_ipc_handshake_update_clear_and_reconnect():
     rpc = DiscordPresence()
     rpc.configure(True, "123456789")
     rpc.paths = [name, name]
-    rpc.set_activity({"details": "Song"})
+    activity = activity_payload("Song", "Artist", "Radio", None, None, 0, False)
+    rpc.set_activity(activity)
     wait_for(qapp, server.hasPendingConnections)
     peer = server.nextPendingConnection()
     assert receive(qapp, peer) == (0, {"v": 1, "client_id": "123456789"})
@@ -65,7 +71,7 @@ def test_ipc_handshake_update_clear_and_reconnect():
     peer.flush()
     _, command = receive(qapp, peer)
     assert command["cmd"] == "SET_ACTIVITY"
-    assert command["args"]["activity"] == {"details": "Song"}
+    assert command["args"]["activity"] == activity
     rpc.set_activity(None)
     _, clear = receive(qapp, peer)
     assert clear["args"]["activity"] is None
