@@ -312,6 +312,7 @@ class AnimatedTrackLabel(QLabel):
         font_px: int = 16,
         font_weight: int = 800,
         text_color: str = "#ffffff",
+        interactive: bool = False,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(text, parent)
@@ -322,9 +323,13 @@ class AnimatedTrackLabel(QLabel):
         self._anim_progress: float = 1.0
         self._chevron_btn: Optional[QWidget] = None
         self._hovered: bool = False
+        self._menu_active: bool = False
+        self._interactive: bool = interactive
 
         self.setFixedHeight(max(22, font_px + 8))
         self.setMinimumWidth(0)
+        if self._interactive:
+            self.setMouseTracking(True)
 
         self._elapsed = QElapsedTimer()
         self._anim_timer = QTimer(self)
@@ -334,6 +339,8 @@ class AnimatedTrackLabel(QLabel):
 
     def attach_chevron_button(self, btn: QWidget) -> None:
         """Attach a dropdown chevron button positioned at the end of the title text."""
+        self._interactive = True
+        self.setMouseTracking(True)
         self._chevron_btn = btn
         btn.setParent(self)
         self._update_chevron_position()
@@ -344,8 +351,49 @@ class AnimatedTrackLabel(QLabel):
     def minimumSizeHint(self) -> QSize:
         return QSize(20, max(22, self._font_px + 8))
 
+    def get_capsule_rect(self) -> Optional[QRectF]:
+        """Calculates precise symmetrical cyber-glass capsule around centered text + chevron."""
+        if not self._interactive:
+            return None
+        txt = (self.text() or "").strip()
+        if not txt or txt in ("–", "-"):
+            return None
+        w = float(self.width())
+        h = float(self.height())
+        if w <= 10 or h <= 10:
+            return None
+
+        font = QFont(self.font())
+        font.setPixelSize(self._font_px)
+        font.setWeight(QFont.Weight(self._font_weight))
+        fm = QFontMetrics(font)
+
+        has_btn = bool(self._chevron_btn and self._chevron_btn.isVisible())
+        btn_w = float(self._chevron_btn.width()) if (has_btn and self._chevron_btn) else 0.0
+        reserve_w = (btn_w + 6.0) if has_btn else 0.0
+
+        usable_w = max(20, int(w - 12.0 - reserve_w * 2.0))
+        elided_txt = fm.elidedText(txt, Qt.TextElideMode.ElideRight, usable_w)
+        text_w = float(fm.horizontalAdvance(elided_txt))
+
+        text_x = 6.0 + (w - 12.0 - text_w) / 2.0
+        capsule_x = text_x - 8.0
+        capsule_w = text_w + (btn_w + 19.0 if has_btn else 16.0)
+        return QRectF(capsule_x, 1.0, capsule_w, h - 2.0)
+
+    def set_menu_active(self, active: bool) -> None:
+        """Keep capsule illuminated while dropdown context menu is open."""
+        if self._menu_active != active:
+            self._menu_active = active
+            self.update()
+
+    def is_menu_active(self) -> bool:
+        return self._menu_active
+
     def set_hovered(self, hovered: bool) -> None:
         """Synchronize hover capsule state with child chevron button."""
+        if not self._interactive:
+            return
         if self._hovered != hovered:
             self._hovered = hovered
             if self._chevron_btn and hasattr(self._chevron_btn, "set_hovered"):
@@ -353,21 +401,40 @@ class AnimatedTrackLabel(QLabel):
             self.update()
 
     def enterEvent(self, a0: object) -> None:
-        txt = (self.text() or "").strip()
-        if txt and txt not in ("–", "-"):
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.set_hovered(True)
         super().enterEvent(a0)  # type: ignore[arg-type]
 
     def leaveEvent(self, a0: object) -> None:
-        self.set_hovered(False)
+        if self._interactive:
+            if not self._menu_active:
+                if self._chevron_btn and self._chevron_btn.underMouse():
+                    pass
+                else:
+                    self.set_hovered(False)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         super().leaveEvent(a0)  # type: ignore[arg-type]
 
+    def mouseMoveEvent(self, a0: object) -> None:
+        if self._interactive and isinstance(a0, QMouseEvent):
+            rect = self.get_capsule_rect()
+            if rect is not None and rect.contains(a0.position()):
+                self.set_hovered(True)
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+            else:
+                if not self._menu_active:
+                    self.set_hovered(False)
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(a0)  # type: ignore[arg-type]
+
     def mousePressEvent(self, a0: object) -> None:
-        if isinstance(a0, QMouseEvent) and a0.button() == Qt.MouseButton.LeftButton:
-            txt = (self.text() or "").strip()
-            if txt and txt not in ("–", "-"):
+        if (
+            self._interactive
+            and isinstance(a0, QMouseEvent)
+            and a0.button() == Qt.MouseButton.LeftButton
+        ):
+            rect = self.get_capsule_rect()
+            if rect is not None and rect.contains(a0.position()):
                 self.clicked.emit()
+                return
         super().mousePressEvent(a0)  # type: ignore[arg-type]
 
     def setText(self, a0: Optional[str]) -> None:
@@ -455,24 +522,14 @@ class AnimatedTrackLabel(QLabel):
         )
         usable_w = max(20, int(w - 12.0 - reserve_w * 2.0))
 
-        txt = (self.text() or "").strip()
         in_elided = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, usable_w)
-        text_w = float(fm.horizontalAdvance(in_elided))
-        text_x = 6.0 + (w - 12.0 - text_w) / 2.0
 
         # Sleek cyber-glass hover capsule when user points at title / chevron
-        if self._hovered and txt not in ("–", "-"):
-            btn_w = (
-                float(self._chevron_btn.width())
-                if (self._chevron_btn and self._chevron_btn.isVisible())
-                else 0.0
-            )
-            capsule_x = text_x - 7.0
-            capsule_w = text_w + btn_w + 14.0
-            capsule_rect = QRectF(capsule_x, 1.0, capsule_w, h - 2.0)
+        rect = self.get_capsule_rect() if self._interactive else None
+        if (self._hovered or self._menu_active) and rect is not None:
             painter.setBrush(QColor(255, 255, 255, 14))
             painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
-            painter.drawRoundedRect(capsule_rect, 6.0, 6.0)
+            painter.drawRoundedRect(rect, 6.0, 6.0)
 
         ease = 1.0 - ((1.0 - self._anim_progress) ** 3)
 
@@ -490,7 +547,8 @@ class AnimatedTrackLabel(QLabel):
             )
 
         # Incoming text sliding up from below & fading in
-        in_col = QColor("#ffffff" if self._hovered else self._text_color)
+        is_lit = (self._hovered or self._menu_active) and self._interactive
+        in_col = QColor("#ffffff" if is_lit else self._text_color)
         in_col.setAlpha(int(255 * ease))
         painter.setPen(in_col)
         y_in = 8.0 * (1.0 - ease)

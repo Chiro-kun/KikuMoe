@@ -269,37 +269,69 @@ def test_track_menu_chevron_button(qapp):
 
 
 def test_animated_track_label_click_and_hover(qapp):
-    """Verify AnimatedTrackLabel emits clicked signal and syncs hover state with chevron."""
+    """Verify AnimatedTrackLabel hit-testing, clicked emission, and hover sync."""
     from PyQt6.QtCore import QPointF, Qt
     from PyQt6.QtGui import QMouseEvent
 
     from ui.widgets.ambient_cover import AnimatedTrackLabel
     from ui.widgets.track_menu_button import TrackMenuChevronButton
 
-    lbl = AnimatedTrackLabel("Whole World Is Watching")
+    lbl = AnimatedTrackLabel("Whole World Is Watching", interactive=True)
+    lbl.resize(800, 26)
     btn = TrackMenuChevronButton()
     lbl.attach_chevron_button(btn)
 
-    # Click signal emission
+    capsule = lbl.get_capsule_rect()
+    assert capsule is not None
+
     clicks = []
     lbl.clicked.connect(lambda: clicks.append(True))
 
-    ev = QMouseEvent(
+    # 1. Click outside capsule (e.g. at x=10 in empty margin) -> ignored
+    ev_outside = QMouseEvent(
         QMouseEvent.Type.MouseButtonPress,
-        QPointF(20.0, 10.0),
-        QPointF(20.0, 10.0),
+        QPointF(10.0, 10.0),
+        QPointF(10.0, 10.0),
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
     )
-    lbl.mousePressEvent(ev)
+    lbl.mousePressEvent(ev_outside)
+    assert len(clicks) == 0
+
+    # 2. Click inside capsule -> emits clicked
+    ev_inside = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        capsule.center(),
+        capsule.center(),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    lbl.mousePressEvent(ev_inside)
     assert len(clicks) == 1
+
+    # 3. Non-interactive label (like artist row) -> never emits clicked, ignores hover
+    artist_lbl = AnimatedTrackLabel("Artist Name", interactive=False)
+    artist_lbl.resize(400, 26)
+    artist_clicks = []
+    artist_lbl.clicked.connect(lambda: artist_clicks.append(True))
+    artist_lbl.mousePressEvent(ev_inside)
+    assert len(artist_clicks) == 0
+    assert artist_lbl.get_capsule_rect() is None
 
     # Hover sync
     lbl.set_hovered(True)
     assert btn._hovered is True
     lbl.set_hovered(False)
     assert btn._hovered is False
+
+    # Menu active retention
+    lbl.set_menu_active(True)
+    assert lbl.is_menu_active() is True
+    lbl.leaveEvent(None)
+    # When menu is active, hover is retained
+    lbl.set_menu_active(False)
 
 
 def test_animated_track_label_chevron_positioning(qapp):

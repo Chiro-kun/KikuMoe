@@ -737,7 +737,7 @@ class ListenMoePlayer(QWidget):
         track_box.setSpacing(2)
 
         self.now_playing_title = AnimatedTrackLabel(
-            "–", font_px=16, font_weight=800, text_color="#ffffff"
+            "–", font_px=16, font_weight=800, text_color="#ffffff", interactive=True
         )
         self.now_playing_title.setObjectName("songTitleLabel")
         self.now_playing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -757,7 +757,7 @@ class ListenMoePlayer(QWidget):
         self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
 
         self.now_playing_artist = AnimatedTrackLabel(
-            "", font_px=13, font_weight=600, text_color="#c8cee0"
+            "", font_px=13, font_weight=600, text_color="#c8cee0", interactive=False
         )
         self.now_playing_artist.setObjectName("songArtistLabel")
         self.now_playing_artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2694,16 +2694,21 @@ class ListenMoePlayer(QWidget):
             )
             if hasattr(self, "track_menu_btn") and is_chevron:
                 self.track_menu_btn.set_active(True)
+            if hasattr(self, "now_playing_title") and (
+                is_chevron or self.sender() == getattr(self, "now_playing_title", None)
+            ):
+                self.now_playing_title.set_menu_active(True)
+
+            def _on_menu_hide() -> None:
+                if hasattr(self, "track_menu_btn"):
+                    self.track_menu_btn.set_active(False)
                 if hasattr(self, "now_playing_title"):
-                    self.now_playing_title.set_hovered(True)
+                    self.now_playing_title.set_menu_active(False)
+                    self.now_playing_title.set_hovered(False)
 
-                def _on_menu_hide() -> None:
-                    if hasattr(self, "track_menu_btn"):
-                        self.track_menu_btn.set_active(False)
-                    if hasattr(self, "now_playing_title"):
-                        self.now_playing_title.set_hovered(False)
+            menu.aboutToHide.connect(_on_menu_hide)
 
-                menu.aboutToHide.connect(_on_menu_hide)
+            if hasattr(self, "track_menu_btn") and is_chevron:
                 global_pos = self.track_menu_btn.mapToGlobal(
                     QPoint(0, self.track_menu_btn.height() + 2)
                 )

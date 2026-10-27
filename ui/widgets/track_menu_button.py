@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QPushButton, QWidget
 
@@ -46,7 +46,15 @@ class TrackMenuChevronButton(QPushButton):
         self.set_hovered(False)
         par = self.parent()
         if par is not None and hasattr(par, "set_hovered"):
-            par.set_hovered(False)
+            # Avoid clearing parent hover if menu is open or mouse is still inside title capsule
+            if not getattr(par, "_menu_active", False):
+                if hasattr(par, "get_capsule_rect") and hasattr(par, "mapFromGlobal"):
+                    r = par.get_capsule_rect()
+                    cur_pos = par.mapFromGlobal(self.cursor().pos())
+                    if r is not None and r.contains(QPointF(cur_pos)):
+                        super().leaveEvent(a0)  # type: ignore[arg-type]
+                        return
+                par.set_hovered(False)
         super().leaveEvent(a0)  # type: ignore[arg-type]
 
     def paintEvent(self, a0: object) -> None:
@@ -54,13 +62,6 @@ class TrackMenuChevronButton(QPushButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         w, h = float(self.width()), float(self.height())
-
-        # If standalone active state (e.g. menu open)
-        if self._active:
-            p.setBrush(QColor(236, 24, 108, 55))
-            p.setPen(QPen(QColor(PALETTE.get("accent", "#EC186C")), 1.0))
-            p.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), 5, 5)
-
         cx = w / 2.0
         # Vertically aligned with font x-height/baseline
         cy = (h / 2.0) + 2.0
