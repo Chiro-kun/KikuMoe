@@ -126,13 +126,9 @@ class MprisPlayer(ServiceInterface):
     def Rate(self, value: "d"):  # type: ignore[valid-type,no-redef]
         pass
 
-    @dbus_property()
-    def Shuffle(self) -> "b":  # type: ignore[valid-type]
-        return False
-
-    @Shuffle.setter
-    def Shuffle(self, value: "b"):  # type: ignore[valid-type,no-redef]
-        pass
+    # Shuffle is intentionally omitted while only radio streams are supported.
+    # This follows Chromium's compatibility behavior despite MPRIS listing it.
+    # Add it when local playlist playback implements shuffle.
 
     @dbus_property(access=PropertyAccess.READ)
     def Metadata(self) -> "a{sv}":  # type: ignore[valid-type]

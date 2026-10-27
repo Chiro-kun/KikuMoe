@@ -100,6 +100,9 @@ def test_mpris_properties_and_commands(qapp, monkeypatch):
     bridge.volume.connect(volumes.append)
     root = MprisRoot(bridge)
     player = MprisPlayer(bridge)
+    properties = {prop.name for prop in player.introspect().properties}
+    assert "Shuffle" not in properties
+    assert {"PlaybackStatus", "Metadata", "Volume", "CanControl"} <= properties
     changes = []
     monkeypatch.setattr(player, "emit_properties_changed", changes.append)
     state = MediaState(

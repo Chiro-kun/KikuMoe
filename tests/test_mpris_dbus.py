@@ -53,6 +53,9 @@ def test_mpris_session_bus_roundtrip():
             assert metadata['xesam:title'].value == 'Song'
             assert metadata['mpris:length'].value == 120000000
             assert (await props.call_get(iface, 'CanSeek')).value is False
+            properties = await props.call_get_all(iface)
+            assert 'Shuffle' not in properties
+            assert properties['CanControl'].value is True
             changes = []
             props.on_properties_changed(
                 lambda interface, values, invalid: changes.append((interface, values)))
