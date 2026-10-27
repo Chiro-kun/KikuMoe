@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Lyrics**: Show LRCLIB lyrics beside the album cover, with animated scrolling for synchronized tracks and a plain-text fallback.
 - **System Media Controls**: Integrate with Windows SMTC and Linux MPRIS for playback controls and track metadata, with a media-key fallback on Windows.
 - **Discord Rich Presence Button**: Add a localized button linking to the KikuMoe project page.
 - **Settings Shortcut**: Open settings with Ctrl+, including from the mini player.

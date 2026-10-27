@@ -2,6 +2,13 @@ from typing import Dict
 
 I18N: Dict[str, Dict[str, str]] = {
     "it": {
+        "lyrics_button": "Testo",
+        "lyrics_loading": "Cerco il testo…",
+        "lyrics_missing": "Testo non disponibile per questo brano.",
+        "lyrics_error": "Impossibile caricare il testo. Riprova più tardi.",
+        "lyrics_instrumental": "Brano strumentale",
+        "lyrics_plain": "Testo non sincronizzato",
+        "lyrics_no_timing": "Sincronizzazione non disponibile",
         "app_title": "KikuMoe",
         "header": "LISTEN.moe - {channel} - {format}",
         "channel_label": "Canale:",
@@ -209,6 +216,13 @@ I18N: Dict[str, Dict[str, str]] = {
         "tray_about": "Informazioni su KikuMoe...",
     },
     "en": {
+        "lyrics_button": "Lyrics",
+        "lyrics_loading": "Searching for lyrics…",
+        "lyrics_missing": "No lyrics found for this track.",
+        "lyrics_error": "Could not load lyrics. Please try again later.",
+        "lyrics_instrumental": "Instrumental track",
+        "lyrics_plain": "Unsynchronized lyrics",
+        "lyrics_no_timing": "Synchronization unavailable",
         "app_title": "KikuMoe",
         "header": "LISTEN.moe - {channel} - {format}",
         "channel_label": "Channel:",

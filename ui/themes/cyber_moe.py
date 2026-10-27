@@ -36,6 +36,8 @@ PALETTE: Dict[str, str] = {
     "scrollbar_handle": "rgba(236, 24, 108, 0.48)",
     "scrollbar_handle_hover": "#ec186c",
     "scrollbar_handle_pressed": "#ff2a85",
+    "lyrics_background": "rgba(18, 20, 32, 0.76)",
+    "lyrics_border": "rgba(255, 255, 255, 0.12)",
     # Status Colors
     "status_online": "#00e676",  # Connected / audio playing
     "status_warning": "#ffab00",  # Buffering / reconnecting
@@ -71,6 +73,19 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
     QWidget#mainWindowRoot {{
         background-color: {bg_main};
     }}
+
+    QWidget#lyricsPanel {{
+        background-color: {PALETTE["lyrics_background"]};
+        border: 1px solid {PALETTE["lyrics_border"]};
+        border-radius: 14px;
+    }}
+    QScrollArea#lyricsScroll {{ border: 0; background: transparent; }}
+    QLabel#lyricsHeading {{ color: {accent}; font-size: 10px; font-weight: 800; }}
+    QPushButton#lyricsButton {{
+        background-color: {bg_subtle}; border: 1px solid {border_card};
+        border-radius: 11px; padding: 4px 12px; font-weight: 700;
+    }}
+    QPushButton#lyricsButton:checked {{ background-color: {accent}; color: white; }}
 
     /* Glass Cards */
     QFrame#glassCard, QWidget#glassCard {{

@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
+    QPushButton,
     QSizeGrip,
     QSizePolicy,
     QStyle,
@@ -91,6 +92,7 @@ from core.constants import (
 from core.discord_presence import DiscordPresence, activity_payload
 from core.i18n import I18n
 from core.logger import get_logger
+from core.lyrics import LyricsProvider
 from core.media_state import MediaState
 from core.quick_search import (
     copy_to_clipboard,
@@ -125,6 +127,7 @@ from ui.widgets.ambient_cover import (
     TrackHoverGroup,
 )
 from ui.widgets.history_button import HistoryIconButton
+from ui.widgets.lyrics_panel import LyricsPanel
 from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniIconButton
 from ui.widgets.playback_controls import PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
@@ -736,7 +739,17 @@ class ListenMoePlayer(QWidget):
         self.ambient_cover = AmbientCoverCard(cover_size=self._album_cover_size)
         self.ambient_cover.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ambient_cover.customContextMenuRequested.connect(self._show_track_context_menu)
-        self._layout.addWidget(self.ambient_cover)
+        self._artwork_row = QHBoxLayout()
+        self._artwork_row.setSpacing(10)
+        self._artwork_row.addWidget(self.ambient_cover, 1)
+        self.lyrics_panel = LyricsPanel()
+        self.lyrics_panel.hide()
+        self._artwork_row.addWidget(self.lyrics_panel, 1)
+        self._layout.addLayout(self._artwork_row)
+        self.lyrics_provider = LyricsProvider(self)
+        self.lyrics_provider.finished.connect(self._on_lyrics_result)
+        self._lyrics_track = None
+        self._lyrics_original_width = None
 
         # Hidden legacy compatibility labels
         self.hero_card = QWidget()
@@ -792,6 +805,12 @@ class ListenMoePlayer(QWidget):
         track_box.addWidget(self.track_hover_group)
         self._layout.addLayout(track_box)
 
+        self.lyrics_button = QPushButton(self.i18n.t("lyrics_button"))
+        self.lyrics_button.setObjectName("lyricsButton")
+        self.lyrics_button.setCheckable(True)
+        self.lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lyrics_button.toggled.connect(self._toggle_lyrics)
+
         # Legacy label
         self.now_playing_label = QLabel("–")
         self.now_playing_label.setVisible(False)
@@ -839,6 +858,7 @@ class ListenMoePlayer(QWidget):
 
         time_row.addWidget(self.song_elapsed_label)
         time_row.addWidget(self.stream_tag_label, 1)
+        time_row.addWidget(self.lyrics_button)
         time_row.addWidget(self.song_time_label)
         prog_box.addLayout(time_row)
 
@@ -854,6 +874,65 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         self._set_album_cover_pixmap(None)
+
+    def _toggle_lyrics(self, enabled):
+        self.lyrics_panel.setVisible(enabled)
+        if enabled:
+            if self.width() < 650 and not self.isMaximized():
+                self._lyrics_original_width = self.width()
+                self.resize(650, self.height())
+            self._refresh_lyrics(force=True)
+        else:
+            self.lyrics_provider.cancel()
+            self._lyrics_track = None
+            if self._lyrics_original_width is not None and self.width() == 650:
+                self.resize(self._lyrics_original_width, self.height())
+            self._lyrics_original_width = None
+
+    def _refresh_lyrics(self, force=False):
+        if not self.lyrics_button.isChecked():
+            return
+        title = self._current_title or ""
+        artist = self._current_artist or ""
+        if title == self.i18n.t("unknown"):
+            title = ""
+        key = (title, artist, self._current_duration_seconds or 0)
+        if not force and key == self._lyrics_track:
+            return
+        self._lyrics_track = key
+        self.lyrics_panel.show_message(self.i18n.t("lyrics_loading"))
+        self.lyrics_provider.search(*key)
+
+    def _on_lyrics_result(self, record, status):
+        if not self.lyrics_button.isChecked():
+            return
+        self.lyrics_panel.heading.setText("LYRICS · LRCLIB")
+        if status == "error":
+            self.lyrics_panel.show_message(self.i18n.t("lyrics_error"))
+        elif not record:
+            self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+        elif record.get("instrumental"):
+            self.lyrics_panel.show_message(self.i18n.t("lyrics_instrumental"))
+        elif record.get("syncedLyrics") or record.get("plainLyrics"):
+            self.lyrics_panel.show_record(record, self.i18n.t("lyrics_plain"))
+            if self.lyrics_panel.lines and self._current_start_epoch is None:
+                self.lyrics_panel.heading.setText(self.i18n.t("lyrics_no_timing"))
+            else:
+                self.lyrics_panel.heading.setText("LYRICS · LRCLIB")
+            self._update_lyrics_position()
+        else:
+            self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+
+    def _update_lyrics_position(self):
+        if not self.lyrics_button.isChecked() or self._ui_paused:
+            return
+        epoch = self._current_start_epoch
+        duration = self._current_duration_seconds
+        if epoch is None or duration is None:
+            return
+        now = time.time() + self._clock_sync_offset
+        elapsed = duration - (epoch - now) if duration > 0 else now - epoch
+        self.lyrics_panel.set_position(max(0.0, elapsed))
 
     def _init_meta_section(self):
         """Preserves channel and format attributes for backwards compatibility."""
@@ -1613,6 +1692,8 @@ class ListenMoePlayer(QWidget):
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""
         try:
+            if hasattr(self, "lyrics_provider"):
+                self.lyrics_provider.cancel()
             if getattr(self, "system_media", None) is not None:
                 self._media_timer.stop()
                 self.system_media.stop()
@@ -1870,6 +1951,7 @@ class ListenMoePlayer(QWidget):
             self._current_cover_ref = (
                 album_cover if isinstance(album_cover, str) and album_cover.strip() else None
             )
+            self._refresh_lyrics()
 
             # --- Song Progress Bar Sync ---
             if hasattr(self, "song_progress"):
@@ -1984,6 +2066,10 @@ class ListenMoePlayer(QWidget):
                 clean_id == STATION_LISTENMOE and target_channel != old_channel
             )
             if station_or_chan_changed:
+                if self.lyrics_button.isChecked():
+                    self.lyrics_provider.cancel()
+                    self._lyrics_track = None
+                    self.lyrics_panel.show_message(self.i18n.t("lyrics_loading"))
                 self._current_cover_url = None
                 self._current_cover_ref = None
                 cfg = get_station_config(clean_id)
@@ -2094,6 +2180,8 @@ class ListenMoePlayer(QWidget):
         """Updates the song progress bar every second based on start timestamp."""
         try:
             import time
+
+            self._update_lyrics_position()
 
             now = time.time()
             epoch = getattr(self, "_current_start_epoch", None)
@@ -2254,6 +2342,8 @@ class ListenMoePlayer(QWidget):
             pass
 
     def apply_translations(self):
+        if hasattr(self, "lyrics_button"):
+            self.lyrics_button.setText(self.t("lyrics_button"))
         if hasattr(self, "mini_hud"):
             self.mini_button.setToolTip(self.t("mini_mode"))
             self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
@@ -2400,6 +2490,8 @@ class ListenMoePlayer(QWidget):
             # Synchronize custom progress bar color
             if hasattr(self, "song_progress"):
                 self.song_progress.setAccentColor(accent)
+            if hasattr(self, "lyrics_panel"):
+                self.lyrics_panel.set_accent(accent)
 
             try:
                 self._set_album_cover_pixmap(self._cover_cache.get(self._current_cover_url or ""))

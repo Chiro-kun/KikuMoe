@@ -701,6 +701,44 @@ def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
     player.deleteLater()
 
 
+def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatch):
+    from ui.main_window import ListenMoePlayer
+
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
+    window = ListenMoePlayer()
+    calls = []
+    monkeypatch.setattr(window.lyrics_provider, "search", lambda *args: calls.append(args))
+    window._current_title, window._current_artist = "Song", "Artist"
+    window._current_duration_seconds = 120
+    window.resize(400, 720)
+    window.show()
+    window.lyrics_button.click()
+    qapp.processEvents()
+    assert window.width() >= 650
+    assert window.lyrics_panel.isVisible()
+    assert window.lyrics_panel.x() > window.ambient_cover.x()
+    assert calls == [("Song", "Artist", 120)]
+    window.lyrics_provider.finished.emit({"syncedLyrics": "[00:01.00]Hello"}, "ok")
+    assert window.lyrics_panel.labels[0].text() == "Hello"
+    window._current_title = "Next"
+    window._refresh_lyrics()
+    assert calls[-1] == ("Next", "Artist", 120)
+    window.lyrics_button.click()
+    assert window.lyrics_panel.isHidden()
+    window.hide()
+    window.deleteLater()
+
+
 @pytest.mark.parametrize("linux", [False, True])
 def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_path, linux):
     from types import SimpleNamespace
