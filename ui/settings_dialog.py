@@ -1463,34 +1463,6 @@ class SettingsDialog(QDialog):
             background: transparent;
             border: none;
         }}
-        QScrollArea#settingsPageScroll QScrollBar:vertical {{
-            background: transparent;
-            width: 6px;
-            margin: 2px 0;
-        }}
-        QScrollArea#settingsPageScroll QScrollBar::handle:vertical {{
-            background: rgba(255, 255, 255, 70);
-            border-radius: 3px;
-            min-height: 24px;
-        }}
-        QScrollArea#settingsPageScroll QScrollBar::add-line:vertical,
-        QScrollArea#settingsPageScroll QScrollBar::sub-line:vertical {{
-            height: 0;
-        }}
-        QScrollArea#settingsPageScroll QScrollBar:horizontal {{
-            background: transparent;
-            height: 6px;
-            margin: 0 2px;
-        }}
-        QScrollArea#settingsPageScroll QScrollBar::handle:horizontal {{
-            background: rgba(255, 255, 255, 70);
-            border-radius: 3px;
-            min-width: 24px;
-        }}
-        QScrollArea#settingsPageScroll QScrollBar::add-line:horizontal,
-        QScrollArea#settingsPageScroll QScrollBar::sub-line:horizontal {{
-            width: 0;
-        }}
         QFrame#settingsFooterDeck {{
             background-color: #131624;
             border: 1px solid rgba(255, 255, 255, 0.10);

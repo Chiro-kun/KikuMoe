@@ -31,6 +31,11 @@ PALETTE: Dict[str, str] = {
     "text_secondary": "#a0a5b8",  # Artist, subtitle, labels
     "text_muted": "#64687d",  # Placeholders, minor hints
     "text_accent": "#ff2e7e",  # Accent highlights
+    # Scrollbars
+    "scrollbar_track": "rgba(255, 255, 255, 0.04)",
+    "scrollbar_handle": "rgba(236, 24, 108, 0.48)",
+    "scrollbar_handle_hover": "#ec186c",
+    "scrollbar_handle_pressed": "#ff2a85",
     # Status Colors
     "status_online": "#00e676",  # Connected / audio playing
     "status_warning": "#ffab00",  # Buffering / reconnecting
@@ -368,19 +373,40 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
         color: {text_primary};
     }}
     QScrollBar:vertical {{
-        background: transparent;
-        width: 8px;
-        margin: 0px;
+        background: {PALETTE["scrollbar_track"]};
+        width: 7px;
+        border-radius: 3px;
+        margin: 2px 0px;
     }}
     QScrollBar::handle:vertical {{
-        background: rgba(255, 255, 255, 0.15);
-        border-radius: 4px;
-        min-height: 20px;
+        background: {PALETTE["scrollbar_handle"]};
+        border-radius: 3px;
+        min-height: 24px;
     }}
-    QScrollBar::handle:vertical:hover {{
-        background: rgba(255, 255, 255, 0.30);
+    QScrollBar:horizontal {{
+        background: {PALETTE["scrollbar_track"]};
+        height: 7px;
+        border-radius: 3px;
+        margin: 0px 2px;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {PALETTE["scrollbar_handle"]};
+        border-radius: 3px;
+        min-width: 24px;
+    }}
+    QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {{
+        background: {PALETTE["scrollbar_handle_hover"]};
+    }}
+    QScrollBar::handle:vertical:pressed, QScrollBar::handle:horizontal:pressed {{
+        background: {PALETTE["scrollbar_handle_pressed"]};
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0px;
+    }}
+    QScrollBar::add-page, QScrollBar::sub-page {{
+        background: transparent;
     }}
     """
