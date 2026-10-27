@@ -3,6 +3,8 @@ import time
 from urllib.error import HTTPError
 
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from core.lyrics import LyricsProvider, parse_lrc, select_match
@@ -72,6 +74,41 @@ def test_panel_tracks_active_line_and_supports_plain_lyrics(qapp):
     assert not panel.lines
     assert panel.labels[0].text() == "Plain"
     assert panel.labels[1].text() == "Just text"
+    panel.close()
+
+
+def test_synced_lyrics_center_and_animate_through_line_changes(qapp):
+    panel = LyricsPanel()
+    panel.resize(320, 222)
+    panel.show()
+    panel.show_record(
+        {"syncedLyrics": "\n".join(f"[00:{n:02}.00]Line {n}" for n in range(1, 9))}, "Plain"
+    )
+    qapp.processEvents()
+    assert panel.labels[0].alignment() & Qt.AlignmentFlag.AlignHCenter
+    panel.set_position(1)
+    QTest.qWait(450)
+    first = panel.labels[0]
+    assert first._color.name() == panel._accent
+    assert (
+        abs(
+            first.mapTo(panel.scroll.viewport(), first.rect().center()).y()
+            - panel.scroll.viewport().height() // 2
+        )
+        < 5
+    )
+    panel.set_position(8)
+    QTest.qWait(450)
+    last = panel.labels[-1]
+    assert last._color.name() == panel._accent
+    assert first._color.alpha() == 165
+    assert (
+        abs(
+            last.mapTo(panel.scroll.viewport(), last.rect().center()).y()
+            - panel.scroll.viewport().height() // 2
+        )
+        < 5
+    )
     panel.close()
 
 
