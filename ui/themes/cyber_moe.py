@@ -41,7 +41,7 @@ PALETTE: Dict[str, str] = {
     "lyrics_skeleton_base": "#1affffff",
     "lyrics_skeleton_shine": "#4dffffff",
     # Radio selector glass
-    "station_glass_overlay": "#a80c0e18",
+    "station_glass_overlay": "#c00c0e18",
     "station_glass_fallback": "#f0141622",
     "station_glass_rim": "#30ffffff",
     # Status Colors
