@@ -165,8 +165,8 @@ def test_player_ffmpeg_is_ready_requires_ffmpeg(monkeypatch):
     """Verify PlayerFFmpeg.is_ready() returns False when ffmpeg is not available."""
     from audio.player_ffmpeg import PlayerFFmpeg
 
+    monkeypatch.setattr(PlayerFFmpeg, "_check_ffmpeg", lambda self: False)
     player = PlayerFFmpeg()
-    monkeypatch.setattr(player, "_check_ffmpeg", lambda: False)
     assert not player.is_ready()
 
 
@@ -367,17 +367,27 @@ def test_player_ffmpeg_rejects_bat_script(monkeypatch):
 
     from audio.player_ffmpeg import PlayerFFmpeg, _find_ffmpeg_bin
 
+    # Exercise Windows-specific validation on every CI platform.
+    monkeypatch.setattr("audio.player_ffmpeg._IS_WIN32", True)
+    monkeypatch.setattr(PlayerFFmpeg, "_init_audio", lambda self: None)
+
     with tempfile.TemporaryDirectory() as tmp_dir:
-        fake_bat = Path(tmp_dir) / "ffmpeg.bat"
-        fake_bat.write_text("@echo off\nexit /b 0", encoding="utf-8")
+        for extension in (".bat", ".cmd"):
+            fake_script = Path(tmp_dir) / f"ffmpeg{extension}"
+            fake_script.write_text("@echo off\nexit /b 0", encoding="utf-8")
 
-        # If FFMPEG_PATH points to a .bat, it must be ignored on Windows
-        monkeypatch.setenv("FFMPEG_PATH", str(fake_bat))
-        found = _find_ffmpeg_bin()
-        assert not found.lower().endswith((".bat", ".cmd"))
+            monkeypatch.setenv("FFMPEG_PATH", str(fake_script))
+            assert not _find_ffmpeg_bin().lower().endswith((".bat", ".cmd"))
 
-        # Even if somehow assigned, _check_ffmpeg must return False without executing it
-        player = PlayerFFmpeg()
-        player._ffmpeg_bin = str(fake_bat)
-        assert player._check_ffmpeg() is False
-        assert player.get_version() is None
+            player = PlayerFFmpeg()
+            player._ffmpeg_bin = str(fake_script)
+            calls = []
+
+            def unexpected_run(*args, **kwargs):
+                calls.append(args)
+                raise RuntimeError("Windows batch files must not be executed")
+
+            monkeypatch.setattr("audio.player_ffmpeg.subprocess.run", unexpected_run)
+            assert player._check_ffmpeg() is False
+            assert player.get_version() is None
+            assert not calls
