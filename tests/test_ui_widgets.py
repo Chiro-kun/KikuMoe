@@ -462,6 +462,35 @@ def test_settings_pages_scroll_in_compact_window(qapp):
     host.close()
 
 
+def test_compact_settings_controls_remain_reachable_horizontally(qapp):
+    from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
+
+    from ui.settings_dialog import SettingsDialog
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    dlg = SettingsDialog(host, embedded=True)
+    layout.addWidget(dlg)
+    host.resize(380, 700)
+    host.show()
+    for tab, controls in (
+        (1, (dlg.cmb_format, dlg.cmb_audio_backend, dlg.btn_audio_refresh, dlg.btn_browse)),
+        (3, (dlg.about_widget.btn_telegram, dlg.about_widget.btn_truckersfm)),
+    ):
+        dlg.set_tab(tab)
+        qapp.processEvents()
+        scroll = dlg.pages.currentWidget()
+        assert isinstance(scroll, QScrollArea)
+        for control in controls:
+            scroll.ensureWidgetVisible(control, 0, 0)
+            qapp.processEvents()
+            left = control.mapTo(scroll.viewport(), control.rect().topLeft())
+            right = control.mapTo(scroll.viewport(), control.rect().bottomRight())
+            assert 0 <= left.x() <= right.x() < scroll.viewport().width()
+        assert dlg.btn_apply.isVisible()
+    host.close()
+
+
 def test_settings_prewarm_and_logo_cache(qapp):
     from PyQt6.QtCore import QSettings
     from PyQt6.QtWidgets import QWidget

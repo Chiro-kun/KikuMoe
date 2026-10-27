@@ -1029,6 +1029,10 @@ class SettingsDialog(QDialog):
         audio_dev_row.setContentsMargins(0, 0, 0, 0)
         audio_dev_row.setSpacing(6)
         self.cmb_audio_device = GlassComboBox()
+        self.cmb_audio_device.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.cmb_audio_device.setMinimumContentsLength(1)
         self.cmb_audio_device.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.cmb_audio_device.addItem(self.i18n.t("settings_audio_default"), userData=None)
         audio_dev_row.addWidget(self.cmb_audio_device, 1)
@@ -1291,7 +1295,7 @@ class SettingsDialog(QDialog):
         scroll.setObjectName("settingsPageScroll")
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setMinimumSize(0, 0)
         scroll.setWidget(page)
         self.pages.addWidget(scroll)
@@ -1472,6 +1476,20 @@ class SettingsDialog(QDialog):
         QScrollArea#settingsPageScroll QScrollBar::add-line:vertical,
         QScrollArea#settingsPageScroll QScrollBar::sub-line:vertical {{
             height: 0;
+        }}
+        QScrollArea#settingsPageScroll QScrollBar:horizontal {{
+            background: transparent;
+            height: 6px;
+            margin: 0 2px;
+        }}
+        QScrollArea#settingsPageScroll QScrollBar::handle:horizontal {{
+            background: rgba(255, 255, 255, 70);
+            border-radius: 3px;
+            min-width: 24px;
+        }}
+        QScrollArea#settingsPageScroll QScrollBar::add-line:horizontal,
+        QScrollArea#settingsPageScroll QScrollBar::sub-line:horizontal {{
+            width: 0;
         }}
         QFrame#settingsFooterDeck {{
             background-color: #131624;
