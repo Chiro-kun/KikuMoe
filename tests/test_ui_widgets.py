@@ -619,6 +619,33 @@ def test_close_confirm_dialog(qapp):
     dlg_anim.close()
 
 
+def test_close_dialog_remember_checkbox_alignment_and_animation(qapp):
+    from PyQt6.QtCore import QPoint, Qt
+
+    from ui.close_dialog import CloseConfirmDialog
+
+    dlg = CloseConfirmDialog()
+    dlg.show()
+    qapp.processEvents()
+    assert dlg.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    checkbox_x = dlg.cb_remember.mapTo(dlg, QPoint(0, 0)).x()
+    prompt_x = dlg.prompt_label.mapTo(dlg, QPoint(0, 0)).x()
+    assert checkbox_x == prompt_x
+    dlg.cb_remember.click()
+    assert dlg.cb_remember.isChecked()
+    assert dlg.cb_remember._animation.endValue() == 1.0
+    dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
+    assert dlg.cb_remember._progress == 1.0
+    image = dlg.cb_remember.grab().toImage()
+    check_color = image.pixelColor(8, image.height() // 2)
+    assert check_color.red() > check_color.green()
+    dlg.cb_remember.click()
+    assert not dlg.cb_remember.isChecked()
+    dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
+    assert dlg.cb_remember._progress == 0.0
+    dlg._on_cancel()
+
+
 def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
     """Verify starting sleep timer does not spawn detached top-level labels or windows."""
     from ui.main_window import ListenMoePlayer

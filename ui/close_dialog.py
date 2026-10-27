@@ -11,15 +11,20 @@ from PyQt6.QtCore import (
     QPointF,
     QPropertyAnimation,
     QRectF,
+    QSize,
     Qt,
+    QVariantAnimation,
 )
 from PyQt6.QtGui import (
     QCloseEvent,
     QColor,
+    QFont,
+    QFontMetrics,
     QIcon,
     QKeyEvent,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPen,
     QShowEvent,
 )
@@ -71,6 +76,91 @@ class DialogIconBadge(QWidget):
         painter.end()
 
 
+class RememberCheckBox(QCheckBox):
+    """Compact checkbox with an animated vector checkmark."""
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(24)
+        self._progress = 0.0
+        self._hovered = False
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(160)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_progress)
+        self.toggled.connect(self._animate_toggle)
+
+    def sizeHint(self) -> QSize:
+        font = QFont(self.font())
+        font.setPixelSize(12)
+        return QSize(26 + QFontMetrics(font).horizontalAdvance(self.text()), 24)
+
+    def _set_progress(self, value: float) -> None:
+        self._progress = float(value)
+        self.update()
+
+    def _animate_toggle(self, checked: bool) -> None:
+        self._animation.stop()
+        self._animation.setStartValue(self._progress)
+        self._animation.setEndValue(1.0 if checked else 0.0)
+        self._animation.start()
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        rect = QRectF(0.5, (self.height() - 18.0) / 2.0, 17.0, 17.0)
+        painter.setBrush(QColor("#25293a"))
+        focused = self._hovered or self.hasFocus()
+        painter.setPen(QPen(QColor(PALETTE["accent"] if focused else "#4a5066")))
+        painter.drawRoundedRect(rect, 5, 5)
+        if self._progress > 0:
+            color = QColor(PALETTE["accent"])
+            color.setAlphaF(self._progress)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(color)
+            painter.drawRoundedRect(rect, 5, 5)
+            painter.setPen(
+                QPen(
+                    QColor("#ffffff"),
+                    1.8,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenJoinStyle.RoundJoin,
+                )
+            )
+            path = QPainterPath()
+            x, y = rect.x(), rect.y()
+            path.moveTo(x + 4.0, y + 8.8)
+            t = min(1.0, self._progress * 2.0)
+            path.lineTo(x + 4.0 + 3.0 * t, y + 8.8 + 3.0 * t)
+            if self._progress > 0.5:
+                t = (self._progress - 0.5) * 2.0
+                path.lineTo(x + 7.0 + 6.0 * t, y + 11.8 - 6.0 * t)
+            painter.drawPath(path)
+        font = QFont(self.font())
+        font.setPixelSize(12)
+        painter.setFont(font)
+        painter.setPen(QColor("#e2e8f0" if self._hovered else "#94a3b8"))
+        painter.drawText(
+            QRectF(26, 0, max(0, self.width() - 26), self.height()),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            self.text(),
+        )
+        painter.end()
+
+
 class CloseConfirmDialog(QDialog):
     """Cyber-Moe styled modal dialog asking to minimize to tray or quit the application."""
 
@@ -88,6 +178,7 @@ class CloseConfirmDialog(QDialog):
             | Qt.WindowType.Dialog
             | Qt.WindowType.WindowStaysOnTopHint
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedWidth(430)
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
@@ -146,14 +237,12 @@ class CloseConfirmDialog(QDialog):
         body_layout.addLayout(header_row)
 
         # Checkbox: Remember Choice (aligned directly under the text column)
-        self.cb_remember = QCheckBox(self.i18n.t("close_remember"))
-        self.cb_remember.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cb_remember.setStyleSheet(
-            "QCheckBox { font-size: 12px; color: #94a3b8; spacing: 8px; "
-            "margin-left: 50px; background: transparent; }\n"
-            "QCheckBox:hover { color: #e2e8f0; }"
-        )
-        body_layout.addWidget(self.cb_remember)
+        self.cb_remember = RememberCheckBox(self.i18n.t("close_remember"))
+        checkbox_row = QHBoxLayout()
+        checkbox_row.setContentsMargins(50, 0, 0, 0)
+        checkbox_row.addWidget(self.cb_remember, 0, Qt.AlignmentFlag.AlignLeft)
+        checkbox_row.addStretch(1)
+        body_layout.addLayout(checkbox_row)
         outer_layout.addWidget(body_widget, 1)
 
         # 3. Action Buttons Footer Bar
@@ -197,6 +286,15 @@ class CloseConfirmDialog(QDialog):
     def showEvent(self, a0: QShowEvent | None) -> None:
         super().showEvent(a0)
         self._animate_entrance()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
+        painter.setBrush(QColor(PALETTE["bg_main"]))
+        painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0))
+        painter.drawRoundedRect(rect, 12.0, 12.0)
+        painter.end()
 
     def _animate_entrance(self) -> None:
         if self._entrance_animated:
@@ -313,9 +411,8 @@ class CloseConfirmDialog(QDialog):
 
         extra_qss = f"""
         QDialog#closeConfirmDialogRoot {{
-            background-color: #0c0e17;
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 12px;
+            background: transparent;
+            border: none;
         }}
         QFrame#dialogFooter {{
             background-color: rgba(14, 17, 27, 0.70);
