@@ -196,6 +196,35 @@ class StationRowWithChannels(QWidget):
             layout.addWidget(chip)
 
 
+class StationCheckmark(QWidget):
+    """Font-independent indicator for the selected station."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(16, 16)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, event: QPaintEvent | None) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(
+            QPen(
+                QColor(PALETTE["accent"]),
+                1.8,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        check = QPainterPath()
+        check.moveTo(3.5, 8.0)
+        check.lineTo(6.5, 11.0)
+        check.lineTo(12.5, 4.5)
+        painter.drawPath(check)
+        painter.end()
+
+
 class SimpleStationRow(QPushButton):
     """Clean row for stations without subchannels."""
 
@@ -240,12 +269,8 @@ class SimpleStationRow(QPushButton):
 
         # Checkmark
         if is_selected:
-            self._check_lbl = QLabel("✔")
-            self._check_lbl.setStyleSheet(
-                "color: #EC186C; font-size: 11px; font-weight: bold; "
-                "background: transparent; border: none;"
-            )
-            layout.addWidget(self._check_lbl)
+            self._check_icon = StationCheckmark(self)
+            layout.addWidget(self._check_icon, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._update_style()
 
