@@ -331,6 +331,9 @@ def test_station_ui_integration(monkeypatch):
     monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
     monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
 
     player = ListenMoePlayer()

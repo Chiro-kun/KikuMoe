@@ -654,6 +654,9 @@ def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
     monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
     monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
 
     player = ListenMoePlayer()
@@ -682,6 +685,9 @@ def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
     monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
     monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
     player = ListenMoePlayer()
     player.resize(200, 200)
@@ -716,6 +722,7 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
     monkeypatch.setattr(cls, "_init_websocket", lambda self: None)
     monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
     monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
     calls = []
     monkeypatch.setattr(cls, "_tray_toggle_play_pause", lambda self: calls.append("play"))

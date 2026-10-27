@@ -65,6 +65,7 @@ jobs:
       - name: Run automated test suite
         env:
           QT_QPA_PLATFORM: offscreen
+          PYTHONFAULTHANDLER: '1'
         run: poetry run pytest -v
 
   build-linux:
