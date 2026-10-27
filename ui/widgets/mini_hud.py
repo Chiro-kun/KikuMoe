@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QSlider,
@@ -170,6 +171,10 @@ class MiniHud(QWidget):
             "border-radius: 2px; }"
             "QSlider::handle:horizontal { background: white; width: 10px; margin: -4px 0; "
             f"border: 2px solid {PALETTE['accent']}; border-radius: 6px; }}"
+            "QProgressBar#miniTrackProgress { background: #35394d; border: none; "
+            "border-radius: 2px; }"
+            f"QProgressBar#miniTrackProgress::chunk {{ background: {PALETTE['accent']}; "
+            "border-radius: 2px; }"
         )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -185,6 +190,26 @@ class MiniHud(QWidget):
         self.artist = MarqueeLabel("#a0a5b8")
         details.addWidget(self.title)
         details.addWidget(self.artist)
+        time_row = QHBoxLayout()
+        time_row.setSpacing(4)
+        self.elapsed_label = QLabel("--:--")
+        self.duration_label = QLabel("--:--")
+        for label in (self.elapsed_label, self.duration_label):
+            label.setStyleSheet(
+                f"color: {PALETTE['text_secondary']}; background: transparent; "
+                "border: none; font-size: 9px; font-weight: 600;"
+            )
+            label.setFixedHeight(12)
+        self.track_progress = QProgressBar()
+        self.track_progress.setObjectName("miniTrackProgress")
+        self.track_progress.setRange(0, 1000)
+        self.track_progress.setValue(0)
+        self.track_progress.setTextVisible(False)
+        self.track_progress.setFixedHeight(3)
+        time_row.addWidget(self.elapsed_label)
+        time_row.addWidget(self.track_progress, 1)
+        time_row.addWidget(self.duration_label)
+        details.addLayout(time_row)
         self.volume = QSlider(Qt.Orientation.Horizontal)
         self.volume.setRange(0, 100)
         self.volume.setFixedHeight(18)
@@ -237,6 +262,31 @@ class MiniHud(QWidget):
         window = self.window()
         if window is not None:
             window.close()
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        minutes, seconds_part = divmod(max(0, int(seconds)), 60)
+        return f"{minutes}:{seconds_part:02d}"
+
+    def set_track_progress(
+        self, elapsed: Optional[float], duration: Optional[float], live: bool = False
+    ) -> None:
+        if duration is not None and duration > 0:
+            if elapsed is not None:
+                elapsed = max(0.0, min(elapsed, duration))
+            self.elapsed_label.setText(
+                self._format_time(elapsed) if elapsed is not None else "--:--"
+            )
+            self.duration_label.setText(self._format_time(duration))
+            self.track_progress.setValue(
+                int(elapsed * 1000 / duration) if elapsed is not None else 0
+            )
+        else:
+            self.elapsed_label.setText(
+                self._format_time(elapsed) if elapsed is not None else "--:--"
+            )
+            self.duration_label.setText("LIVE" if live else "--:--")
+            self.track_progress.setValue(0)
 
     def _show_volume_popup(self, value: int) -> None:
         if not self.isVisible():

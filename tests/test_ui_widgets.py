@@ -645,6 +645,25 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     assert window.mini_hud.title._text == "A long song title"
     assert window.mini_hud.artist._text == "Artist"
     assert window.mini_hud.play_button.kind == "pause"
+    monkeypatch.setattr(main_window.time, "time", lambda: 900.0)
+    window._clock_sync_offset = 0
+    window._current_start_epoch = 1000
+    window._current_duration_seconds = 200
+    window._sync_mini_hud()
+    assert window.mini_hud.elapsed_label.text() == "1:40"
+    assert window.mini_hud.duration_label.text() == "3:20"
+    assert window.mini_hud.track_progress.value() == 500
+    window._current_duration_seconds = 0
+    window._current_start_epoch = 840
+    window._sync_mini_hud()
+    assert window.mini_hud.elapsed_label.text() == "1:00"
+    assert window.mini_hud.duration_label.text() == "LIVE"
+    assert window.mini_hud.track_progress.value() == 0
+    window._current_duration_seconds = 180
+    window._current_start_epoch = None
+    window._sync_mini_hud()
+    assert window.mini_hud.elapsed_label.text() == "--:--"
+    assert window.mini_hud.duration_label.text() == "3:00"
     window.mini_hud.volume.setValue(37)
     assert window.volume_slider.value() == 37
     assert window.mini_hud.volume_popup.isVisible()

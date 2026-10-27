@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Mini Player Track Progress**: Show elapsed time, duration and a compact progress indicator, with a live label for streams without a known duration.
 - **Mini Player Volume Feedback**: Show an animated percentage bubble when the mini player volume changes.
 - **Mini Player HUD**: Toggle a compact player with F9 or the title bar button, with cover art, scrolling track information, playback, volume, always-on-top, and separately saved window geometry.
 - **Settings Feedback**: Show a short, animated confirmation when settings are applied.

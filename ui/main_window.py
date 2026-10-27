@@ -1255,6 +1255,20 @@ class ListenMoePlayer(QWidget):
             return
         self.mini_hud.title.set_text(self._current_title or "–")
         self.mini_hud.artist.set_text(self._current_artist or "")
+        duration = self._current_duration_seconds
+        epoch = self._current_start_epoch
+        elapsed = None
+        if epoch is not None and duration is not None:
+            now_synced = time.time() + self._clock_sync_offset
+            elapsed = (duration - (epoch - now_synced)) if duration > 0 else (now_synced - epoch)
+        title = (self._current_title or "").strip()
+        live = (duration is None or duration <= 0) and title not in (
+            "",
+            "–",
+            "-",
+            self.i18n.t("unknown"),
+        )
+        self.mini_hud.set_track_progress(elapsed, duration, live=live)
         try:
             playing = bool(self.player and self.player.is_playing() and not self._ui_paused)
         except Exception:
