@@ -35,7 +35,8 @@ def activity_payload(title, artist, station, cover, end_epoch, duration, paused)
         activity["assets"] = {"large_image": cover, "large_text": (station or "KikuMoe")[:128]}
     if not paused and end_epoch and duration and duration > 0:
         activity["timestamps"] = {
-            "start": int(end_epoch - duration), "end": int(end_epoch),
+            "start": int(end_epoch - duration),
+            "end": int(end_epoch),
         }
     return activity
 
@@ -81,8 +82,14 @@ class DiscordPresence(QObject):
     def set_activity(self, activity):
         self.activity = activity
         if self.ready and self.sent != activity:
-            self._send(1, {"cmd": "SET_ACTIVITY", "args": {"pid": os.getpid(),
-                       "activity": activity}, "nonce": str(uuid.uuid4())})
+            self._send(
+                1,
+                {
+                    "cmd": "SET_ACTIVITY",
+                    "args": {"pid": os.getpid(), "activity": activity},
+                    "nonce": str(uuid.uuid4()),
+                },
+            )
             self.sent = activity
 
     def _send(self, opcode, payload):
@@ -114,7 +121,7 @@ class DiscordPresence(QObject):
                 return
             if len(self.buffer) < 8 + length:
                 return
-            body, self.buffer = self.buffer[8:8 + length], self.buffer[8 + length:]
+            body, self.buffer = self.buffer[8 : 8 + length], self.buffer[8 + length :]
             if opcode == 3:
                 self.socket.write(struct.pack("<II", 4, len(body)) + body)
             elif opcode == 2:

@@ -2,12 +2,8 @@ name: Build & Release
 
 on:
   push:
-    # Temporaneamente disattivato su commit di branch per evitare build ad ogni push
-    # branches:
-    #   - devel
-    #   - main
-    #   - redesign
-    #   - linux-build-opx
+    branches:
+      - redesign
     tags:
       - 'v*'
   pull_request:

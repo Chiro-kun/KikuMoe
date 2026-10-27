@@ -359,10 +359,16 @@ def test_track_hover_group_connects_rows_and_syncs_state(qapp):
     clicks = []
     artist.clicked.connect(lambda: clicks.append(True))
     point = artist_rect.center()
-    artist.mousePressEvent(QMouseEvent(
-        QMouseEvent.Type.MouseButtonPress, point, point,
-        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
-    ))
+    artist.mousePressEvent(
+        QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            point,
+            point,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
     assert clicks == [True]
     assert group.click_scale < 1.0
     for _ in range(6):

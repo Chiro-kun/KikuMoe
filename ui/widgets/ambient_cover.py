@@ -336,7 +336,7 @@ class AnimatedTrackLabel(QLabel):
         self._hovered: bool = False
         self._menu_active: bool = False
         self._interactive: bool = interactive
-        self._hover_group = None
+        self._hover_group: Optional["TrackHoverGroup"] = None  # noqa: UP037
 
         self.setFixedHeight(max(22, font_px + 8))
         self.setMinimumWidth(0)
@@ -616,7 +616,7 @@ class TrackHoverGroup(QWidget):
             layout.addWidget(label)
         self.setMouseTracking(True)
 
-    def _set_opacity(self, value: object) -> None:
+    def _set_opacity(self, value: float) -> None:
         self._opacity = float(value)
         self.update()
 
@@ -680,16 +680,23 @@ class TrackHoverGroup(QWidget):
             right = min(rects[0].right(), rects[1].right())
             if right > left:
                 bridge = QPainterPath()
-                bridge.addRect(QRectF(left, rects[0].center().y(), right - left,
-                                      rects[1].center().y() - rects[0].center().y()))
+                bridge.addRect(
+                    QRectF(
+                        left,
+                        rects[0].center().y(),
+                        right - left,
+                        rects[1].center().y() - rects[0].center().y(),
+                    )
+                )
                 path = path.united(bridge)
         return path
 
     def refresh_pointer(self) -> None:
         self.set_hovered(self._shape().contains(QPointF(self.mapFromGlobal(QCursor.pos()))))
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        self.set_hovered(self._shape().contains(event.position()))
+    def mouseMoveEvent(self, event: Optional[QMouseEvent]) -> None:
+        if event is not None:
+            self.set_hovered(self._shape().contains(event.position()))
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event: object) -> None:

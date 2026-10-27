@@ -33,8 +33,9 @@ def receive(qapp, socket):
 
 
 def test_activity_timestamps_and_pause():
-    playing = activity_payload("Song", "Artist", "Radio", "https://example.com/cover.png",
-                               200, 60, False)
+    playing = activity_payload(
+        "Song", "Artist", "Radio", "https://example.com/cover.png", 200, 60, False
+    )
     assert playing["timestamps"] == {"start": 140, "end": 200}
     assert playing["assets"]["large_image"] == "https://example.com/cover.png"
     paused = activity_payload("Song", "Artist", "Radio", "local.png", 200, 60, True)

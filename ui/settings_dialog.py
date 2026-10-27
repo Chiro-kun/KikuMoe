@@ -959,9 +959,7 @@ class SettingsDialog(QDialog):
             self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
         )
         play_lay.addWidget(self.chk_discord_rpc)
-        self.txt_discord_client_id = QLineEdit(
-            str(self.settings.value(KEY_DISCORD_CLIENT_ID, ""))
-        )
+        self.txt_discord_client_id = QLineEdit(str(self.settings.value(KEY_DISCORD_CLIENT_ID, "")))
         self.txt_discord_client_id.setPlaceholderText("KikuMoe (default)")
         self.discord_id_row = QWidget()
         self.discord_id_row.setLayout(
