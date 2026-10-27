@@ -79,7 +79,7 @@ class HistoryIconButton(QPushButton):
             act_col = (
                 PALETTE.get("accent_hover", "#FF3388")
                 if self._hovered
-                else PALETTE.get("accent", "#EC186C")
+                else getattr(self, "_accent", PALETTE.get("accent", "#EC186C"))
             )
             bg = QColor(act_col)
             border = QColor(255, 255, 255, 110)
@@ -98,7 +98,11 @@ class HistoryIconButton(QPushButton):
         painter.setPen(QPen(border, 1.0))
         painter.drawRoundedRect(r, 6.0, 6.0)
 
-        # 2. Vector History Clock Icon
+        self._draw_icon(painter, cx, cy, fg)
+        painter.end()
+
+    def _draw_icon(self, painter, cx, cy, fg):
+        # Vector History Clock Icon
         pen = QPen(fg, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -121,4 +125,22 @@ class HistoryIconButton(QPushButton):
         painter.setBrush(fg)
         painter.drawEllipse(QPointF(cx, cy), 1.0, 1.0)
 
-        painter.end()
+
+class LyricsButton(HistoryIconButton):
+    """Lyrics toggle matching the history and settings buttons."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.toggled.connect(self.set_active)
+        self._accent = PALETTE["accent"]
+
+    def set_accent_color(self, color_str: str) -> None:
+        self._accent = color_str
+        self.update()
+
+    def _draw_icon(self, painter, cx, cy, fg):
+        painter.setPen(QPen(fg, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(cx - 5, cy - 4), QPointF(cx + 5, cy - 4))
+        painter.drawLine(QPointF(cx - 5, cy), QPointF(cx + 5, cy))
+        painter.drawLine(QPointF(cx - 5, cy + 4), QPointF(cx + 2, cy + 4))

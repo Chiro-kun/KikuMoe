@@ -109,47 +109,6 @@ class AnimatedVectorButton(QPushButton):
         painter.translate(-cx, -cy)
 
 
-class LyricsButton(AnimatedVectorButton):
-    """Small lyrics toggle with the same tactile feedback as the player controls."""
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setCheckable(True)
-        self.setFixedSize(26, 26)
-        self._accent = QColor(PALETTE["accent"])
-
-    def set_accent_color(self, color_str: str) -> None:
-        self._accent = QColor(color_str)
-        self.update()
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self._apply_scale_and_ripple(painter, 13.0, 13.0, 11.0, self._accent)
-
-        if self.isChecked():
-            fill = QColor(self._accent)
-            fill.setAlpha(55)
-            border = QColor(self._accent)
-            icon = QColor("#ffffff")
-        elif self._hover:
-            fill = QColor(255, 255, 255, 24)
-            border = QColor(255, 255, 255, 55)
-            icon = QColor("#ffffff")
-        else:
-            fill = QColor(255, 255, 255, 10)
-            border = QColor(255, 255, 255, 24)
-            icon = QColor(PALETTE["text_secondary"])
-        painter.setBrush(fill)
-        painter.setPen(QPen(border, 1.0))
-        painter.drawRoundedRect(QRectF(1.0, 1.0, 24.0, 24.0), 8.0, 8.0)
-        painter.setPen(QPen(icon, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        painter.drawLine(QPointF(8.0, 9.0), QPointF(18.0, 9.0))
-        painter.drawLine(QPointF(8.0, 13.0), QPointF(18.0, 13.0))
-        painter.drawLine(QPointF(8.0, 17.0), QPointF(15.0, 17.0))
-        painter.end()
-
-
 class HeroPlayButton(AnimatedVectorButton):
     """
     62x62px sculpted Hero Play/Pause button:

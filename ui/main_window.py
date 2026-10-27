@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Set
 
 from PyQt6.QtCore import (
+    QEasingCurve,
     QEvent,
     QPoint,
     QPointF,
@@ -20,6 +21,7 @@ from PyQt6.QtCore import (
     Qt,
     QThread,
     QTimer,
+    QVariantAnimation,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
@@ -37,6 +39,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -125,10 +128,10 @@ from ui.widgets.ambient_cover import (
     LiveEqualizerBadge,
     TrackHoverGroup,
 )
-from ui.widgets.history_button import HistoryIconButton
+from ui.widgets.history_button import HistoryIconButton, LyricsButton
 from ui.widgets.lyrics_panel import LyricsPanel
 from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniIconButton
-from ui.widgets.playback_controls import LyricsButton, PlaybackControls
+from ui.widgets.playback_controls import PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
 from ui.widgets.station_pill import StationPillButton
@@ -701,7 +704,7 @@ class ListenMoePlayer(QWidget):
         center_hud_layout.addStretch(1)
 
         right_wing = QWidget()
-        right_wing.setFixedWidth(98)
+        right_wing.setFixedWidth(102)
         right_wing_layout = QHBoxLayout(right_wing)
         right_wing_layout.setContentsMargins(0, 0, 0, 0)
         right_wing_layout.setSpacing(6)
@@ -756,6 +759,15 @@ class ListenMoePlayer(QWidget):
         self.lyrics_provider.finished.connect(self._on_lyrics_result)
         self._lyrics_track = None
         self._lyrics_original_width = None
+        self._lyrics_effect = QGraphicsOpacityEffect(self.lyrics_panel)
+        self.lyrics_panel.setGraphicsEffect(self._lyrics_effect)
+        self._lyrics_effect.setOpacity(0.0)
+        self._lyrics_transition = QVariantAnimation(self)
+        self._lyrics_transition.setDuration(280)
+        self._lyrics_transition.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._lyrics_transition.valueChanged.connect(self._animate_lyrics_transition)
+        self._lyrics_transition.finished.connect(self._finish_lyrics_transition)
+        self._lyrics_transition_values = None
 
         # Hidden legacy compatibility labels
         self.hero_card = QWidget()
@@ -875,19 +887,80 @@ class ListenMoePlayer(QWidget):
         self._set_album_cover_pixmap(None)
 
     def _toggle_lyrics(self, enabled):
-        self.lyrics_panel.setVisible(enabled)
-        self.ambient_cover.setMaximumWidth(self._album_cover_size + 26 if enabled else 16777215)
+        was_running = self._lyrics_transition.state() == QVariantAnimation.State.Running
+        self._lyrics_transition.stop()
+        start_width = self.width()
+        start_cover = self.ambient_cover.width()
+        start_panel = self.lyrics_panel.width() if not self.lyrics_panel.isHidden() else 0
+        target_width = start_width
         if enabled:
-            if self.width() < 650 and not self.isMaximized():
-                self._lyrics_original_width = self.width()
-                self.resize(650, self.height())
+            if self._lyrics_original_width is None and start_width < 650 and not self.isMaximized():
+                self._lyrics_original_width = start_width
+            if self._lyrics_original_width is not None:
+                target_width = max(start_width, 650)
+            self.lyrics_panel.setMinimumWidth(0)
+            self.lyrics_panel.setMaximumWidth(start_panel)
+            self.lyrics_panel.show()
             self._refresh_lyrics(force=True)
         else:
             self.lyrics_provider.cancel()
             self._lyrics_track = None
-            if self._lyrics_original_width is not None and self.width() == 650:
-                self.resize(self._lyrics_original_width, self.height())
+            if self._lyrics_original_width is not None and (start_width == 650 or was_running):
+                target_width = self._lyrics_original_width
+            self.lyrics_panel.skeleton.timer.stop()
+            self.lyrics_panel.setMinimumWidth(0)
+
+        target_cover = self._album_cover_size + 26 if enabled else max(222, target_width - 32)
+        target_panel = max(190, target_width - 32 - target_cover - 10) if enabled else 0
+        self._lyrics_transition_values = (
+            start_width,
+            target_width,
+            start_cover,
+            target_cover,
+            start_panel,
+            target_panel,
+            self._lyrics_effect.opacity(),
+            1.0 if enabled else 0.0,
+            enabled,
+        )
+        self._lyrics_transition.setStartValue(0.0)
+        self._lyrics_transition.setEndValue(1.0)
+        self._lyrics_transition.start()
+
+    def _animate_lyrics_transition(self, progress):
+        values = self._lyrics_transition_values
+        if not values:
+            return
+        (
+            start_width,
+            end_width,
+            start_cover,
+            end_cover,
+            start_panel,
+            end_panel,
+            start_op,
+            end_op,
+            _,
+        ) = values
+        self.ambient_cover.setMaximumWidth(
+            round(start_cover + (end_cover - start_cover) * progress)
+        )
+        self.lyrics_panel.setMaximumWidth(round(start_panel + (end_panel - start_panel) * progress))
+        self._lyrics_effect.setOpacity(start_op + (end_op - start_op) * progress)
+        if start_width != end_width:
+            self.resize(round(start_width + (end_width - start_width) * progress), self.height())
+
+    def _finish_lyrics_transition(self):
+        if not self._lyrics_transition_values:
+            return
+        enabled = self._lyrics_transition_values[-1]
+        self._lyrics_transition_values = None
+        if not enabled:
+            self.lyrics_panel.hide()
+            self.ambient_cover.setMaximumWidth(16777215)
             self._lyrics_original_width = None
+        self.lyrics_panel.setMaximumWidth(16777215)
+        self.lyrics_panel.setMinimumWidth(190)
 
     def _refresh_lyrics(self, force=False):
         if not self.lyrics_button.isChecked():
@@ -900,7 +973,7 @@ class ListenMoePlayer(QWidget):
         if not force and key == self._lyrics_track:
             return
         self._lyrics_track = key
-        self.lyrics_panel.show_message(self.i18n.t("lyrics_loading"))
+        self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
         self.lyrics_provider.search(*key)
 
     def _on_lyrics_result(self, record, status):
@@ -1375,6 +1448,8 @@ class ListenMoePlayer(QWidget):
                 self.mini_hud.set_cover(self._icon_app.pixmap(MINI_COVER_SIZE, MINI_COVER_SIZE))
 
     def toggle_mini_hud(self) -> None:
+        if self._lyrics_transition.state() == QVariantAnimation.State.Running:
+            self._lyrics_transition.setCurrentTime(self._lyrics_transition.duration())
         if not self._mini_mode:
             self._normal_geometry = self.saveGeometry()
             self.settings.setValue(KEY_WINDOW_GEOMETRY, self._normal_geometry)
@@ -2066,7 +2141,7 @@ class ListenMoePlayer(QWidget):
                 if self.lyrics_button.isChecked():
                     self.lyrics_provider.cancel()
                     self._lyrics_track = None
-                    self.lyrics_panel.show_message(self.i18n.t("lyrics_loading"))
+                    self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
                 self._current_cover_url = None
                 self._current_cover_ref = None
                 cfg = get_station_config(clean_id)

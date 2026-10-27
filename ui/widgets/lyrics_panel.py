@@ -1,8 +1,16 @@
 """Compact lyric panel with animated scrolling for timed lines."""
 
-from PyQt6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, Qt, QTimer, QVariantAnimation
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QLabel, QScrollArea, QVBoxLayout, QWidget
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+)
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter
+from PyQt6.QtWidgets import QLabel, QScrollArea, QStackedWidget, QVBoxLayout, QWidget
 
 from core.lyrics import parse_lrc
 from ui.themes.cyber_moe import PALETTE
@@ -41,6 +49,52 @@ class LyricLine(QLabel):
         self._animation.start()
 
 
+class LyricsSkeleton(QWidget):
+    """Shimmering placeholders while the lyrics request is in flight."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._phase = 0.0
+        self.timer = QTimer(self)
+        self.timer.setInterval(32)
+        self.timer.timeout.connect(self._tick)
+
+    def _tick(self):
+        self._phase = (self._phase + 0.025) % 1.0
+        self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.timer.start()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        width = float(self.width())
+        center_y = float(self.height()) / 2
+        for index, fraction in enumerate((0.55, 0.76, 0.63, 0.82, 0.48)):
+            line_width = max(10.0, width * fraction)
+            rect = QRectF((width - line_width) / 2, center_y - 61 + index * 27, line_width, 10)
+            gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
+            base = QColor(PALETTE["lyrics_skeleton_base"])
+            shine = QColor(PALETTE["lyrics_skeleton_shine"])
+            pos = self._phase * 1.5 - 0.25
+            center = max(0.0, min(1.0, pos))
+            for stop in (0.0, max(0.0, center - 0.23), center, min(1.0, center + 0.23), 1.0):
+                strength = max(0.0, 1.0 - abs(stop - pos) / 0.23)
+                color = QColor(base)
+                color.setAlpha(round(base.alpha() + (shine.alpha() - base.alpha()) * strength))
+                gradient.setColorAt(stop, color)
+            painter.setBrush(gradient)
+            painter.drawRoundedRect(rect, 5, 5)
+        painter.end()
+
+
 class LyricsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -67,7 +121,11 @@ class LyricsPanel(QWidget):
         self.content_layout.setSpacing(9)
         self.content_layout.addStretch()
         self.scroll.setWidget(self.content)
-        layout.addWidget(self.scroll, 1)
+        self.skeleton = LyricsSkeleton()
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.scroll)
+        self.stack.addWidget(self.skeleton)
+        layout.addWidget(self.stack, 1)
         self.animation = QPropertyAnimation(self.scroll.verticalScrollBar(), b"value", self)
         self.animation.setDuration(350)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -90,6 +148,7 @@ class LyricsPanel(QWidget):
         self.labels.append(label)
 
     def show_message(self, text):
+        self.stack.setCurrentWidget(self.scroll)
         self._clear()
         self.content_layout.setContentsMargins(0, 0, 4, 0)
         self._add_line(text)
@@ -98,6 +157,7 @@ class LyricsPanel(QWidget):
         self.scroll.verticalScrollBar().setValue(0)
 
     def show_record(self, record, plain_note, timing_note=""):
+        self.stack.setCurrentWidget(self.scroll)
         self._clear()
         self.lines = parse_lrc(record.get("syncedLyrics"))
         if self.lines and not timing_note:
@@ -113,6 +173,13 @@ class LyricsPanel(QWidget):
             self.content_layout.addStretch()
         self._update_styles()
         self.scroll.verticalScrollBar().setValue(0)
+
+    def show_loading(self, text):
+        self._clear()
+        self.skeleton.setAccessibleName(text)
+        self.stack.setCurrentWidget(self.skeleton)
+        if self.skeleton.isVisible():
+            self.skeleton.timer.start()
 
     def _update_styles(self, animate=False):
         for index, label in enumerate(self.labels):

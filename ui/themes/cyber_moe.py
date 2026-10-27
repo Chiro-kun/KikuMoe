@@ -38,6 +38,8 @@ PALETTE: Dict[str, str] = {
     "scrollbar_handle_pressed": "#ff2a85",
     "lyrics_background": "transparent",
     "lyrics_border": "transparent",
+    "lyrics_skeleton_base": "#1affffff",
+    "lyrics_skeleton_shine": "#4dffffff",
     # Status Colors
     "status_online": "#00e676",  # Connected / audio playing
     "status_warning": "#ffab00",  # Buffering / reconnecting

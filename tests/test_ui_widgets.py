@@ -702,6 +702,8 @@ def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
 
 
 def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatch):
+    from PyQt6.QtTest import QTest
+
     from ui.main_window import ListenMoePlayer
 
     for name in (
@@ -725,12 +727,16 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     window.show()
     qapp.processEvents()
     assert window.lyrics_button.parentWidget() is window.history_button.parentWidget()
+    assert window.lyrics_button.size() == window.history_button.size()
     assert window.lyrics_button.geometry().right() < window.history_button.geometry().left()
     assert window.station_pill.mapTo(window, window.station_pill.rect().topRight()).x() < (
         window.lyrics_button.mapTo(window, window.lyrics_button.rect().topLeft()).x()
     )
     window.lyrics_button.click()
     qapp.processEvents()
+    assert window._lyrics_transition.state() == window._lyrics_transition.State.Running
+    assert window.lyrics_panel.stack.currentWidget() is window.lyrics_panel.skeleton
+    QTest.qWait(350)
     assert window.width() >= 650
     assert window.lyrics_panel.isVisible()
     assert window.lyrics_button.isCheckable()
@@ -739,13 +745,24 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     assert window.ambient_cover.width() == window._album_cover_size + 26
     assert window.lyrics_panel.x() > window.ambient_cover.x()
     assert calls == [("Song", "Artist", 120)]
+    assert window.lyrics_panel.skeleton.timer.isActive()
     window.lyrics_provider.finished.emit({"syncedLyrics": "[00:01.00]Hello"}, "ok")
+    assert not window.lyrics_panel.skeleton.timer.isActive()
     assert window.lyrics_panel.labels[0].text() == "Hello"
     window._current_title = "Next"
     window._refresh_lyrics()
     assert calls[-1] == ("Next", "Artist", 120)
     window.lyrics_button.click()
+    QTest.qWait(350)
     assert window.lyrics_panel.isHidden()
+    assert not window.lyrics_panel.skeleton.timer.isActive()
+    assert window.width() == 380
+    window.lyrics_button.click()
+    QTest.qWait(80)
+    window.lyrics_button.click()
+    QTest.qWait(350)
+    assert window.lyrics_panel.isHidden()
+    assert window.width() == 380
     window.hide()
     window.deleteLater()
 
