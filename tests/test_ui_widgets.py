@@ -613,7 +613,8 @@ def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
     player.deleteLater()
 
 
-def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_path):
+@pytest.mark.parametrize("linux", [False, True])
+def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_path, linux):
     from types import SimpleNamespace
 
     from PyQt6.QtCore import QSettings, Qt
@@ -628,6 +629,7 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     old_mini.resize(360, 88)
     settings.setValue(KEY_MINI_GEOMETRY, old_mini.saveGeometry())
     monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(main_window, "_IS_LINUX", linux)
     monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
     monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
     monkeypatch.setattr(cls, "_init_websocket", lambda self: None)
@@ -646,6 +648,16 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     qapp.processEvents()
     assert window._mini_mode and window.mini_hud.isVisible()
     assert 400 <= window.width() and 104 <= window.height() <= 140
+    assert window.mini_button.toolTip() == window.i18n.t("mini_mode")
+    assert "Ctrl+," in window.settings_button.toolTip()
+    assert window._settings_shortcut.key().toString() == "Ctrl+,"
+    if linux:
+        window.resize(2000, 500)
+        assert window.width() == 420 and window.height() == 112
+        window.showMaximized()
+        qapp.processEvents()
+        qapp.processEvents()
+        assert not window.isMaximized()
     assert window.mini_hud.cover.width() == 68
     assert window.mini_hud.track_progress.width() > 40
     assert window.mini_hud.title._text == "A long song title"
@@ -706,7 +718,10 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     window.closeEvent(close_event)
     assert close_event.isAccepted()
     assert settings.value(KEY_WINDOW_GEOMETRY) == normal_geometry
-    window.toggle_mini_hud()
+    opened_settings = []
+    monkeypatch.setattr(window, "open_settings", lambda: opened_settings.append(True))
+    window._settings_shortcut.activated.emit()
+    assert not window._mini_mode and opened_settings == [True]
     window.hide()
     window.deleteLater()
 

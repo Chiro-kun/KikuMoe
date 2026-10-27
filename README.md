@@ -33,6 +33,9 @@ tornare alla finestra completa. Il pulsante con la puntina attiva la modalità
 sempre in primo piano; posizione e dimensioni delle due viste vengono salvate
 separatamente.
 
+Premi **Ctrl+,** per aprire o chiudere le impostazioni; dal Mini HUD la
+scorciatoia ripristina prima la finestra completa.
+
 ## Discord Rich Presence
 
 In **Impostazioni → Generale**, abilita Discord Rich Presence per usare

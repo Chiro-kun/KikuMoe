@@ -133,6 +133,7 @@ from ui.widgets.track_menu_button import TrackMenuChevronButton
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
+_IS_LINUX = sys.platform.startswith("linux")
 _MIN_WINDOW_HEIGHT = 700
 
 
@@ -705,7 +706,7 @@ class ListenMoePlayer(QWidget):
         self.history_button.clicked.connect(self.toggle_history_popover)
 
         self.settings_button = SettingsIconButton()
-        self.settings_button.setToolTip(self.i18n.t("settings_button"))
+        self.settings_button.setToolTip(f"{self.i18n.t('settings_button')} (Ctrl+,)")
         self.settings_button.clicked.connect(self.open_settings)
 
         right_wing_layout.addStretch(1)
@@ -1228,6 +1229,8 @@ class ListenMoePlayer(QWidget):
         self._mini_timer.timeout.connect(self._sync_mini_hud)
         self._mini_shortcut = QShortcut(QKeySequence("F9"), self)
         self._mini_shortcut.activated.connect(self.toggle_mini_hud)
+        self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self._settings_shortcut.activated.connect(self._shortcut_settings)
 
         self.mini_button = MiniIconButton("mini", self._title_bar)
         self.mini_button.setFixedSize(28, 28)
@@ -1293,12 +1296,17 @@ class ListenMoePlayer(QWidget):
                 self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
             )
             self._mini_mode = True
+            if self.isMaximized() or self.isFullScreen():
+                self.showNormal()
             self._content_widget.hide()
             grip = self.findChild(QSizeGrip)
             if grip is not None:
                 grip.hide()
-            self.setMinimumSize(400, 104)
-            self.setMaximumSize(16777215, 140)
+            if _IS_LINUX:
+                self.setFixedSize(420, 112)
+            else:
+                self.setMinimumSize(400, 104)
+                self.setMaximumSize(16777215, 140)
             self.mini_hud.show()
             self.resize(420, 112)
             geometry = self.settings.value(KEY_MINI_GEOMETRY)
@@ -1321,6 +1329,11 @@ class ListenMoePlayer(QWidget):
             self._set_window_on_top(self._normal_always_on_top)
             if self._normal_geometry:
                 self.restoreGeometry(self._normal_geometry)
+
+    def _shortcut_settings(self) -> None:
+        if self._mini_mode:
+            self.toggle_mini_hud()
+        self.open_settings()
 
     def _init_extra_logic(self):
         """Final UI polish and logic hooks (Theme, Autoplay, Global Shortcuts)."""
@@ -1514,6 +1527,12 @@ class ListenMoePlayer(QWidget):
         event = a0
         try:
             if event.type() == QEvent.Type.WindowStateChange:
+                if (
+                    _IS_LINUX
+                    and getattr(self, "_mini_mode", False)
+                    and (self.isMaximized() or self.isFullScreen())
+                ):
+                    QTimer.singleShot(0, self._restore_mini_window_state)
                 title_bar = getattr(self, "_title_bar", None)
                 if title_bar is not None:
                     title_bar.sync_maximize_button()
@@ -1528,6 +1547,10 @@ class ListenMoePlayer(QWidget):
             super().changeEvent(event)
         except Exception:
             pass
+
+    def _restore_mini_window_state(self) -> None:
+        if self._mini_mode and (self.isMaximized() or self.isFullScreen()):
+            self.showNormal()
 
     # 2. Player Backend & Audio Events
     def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
@@ -2125,7 +2148,7 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         if hasattr(self, "settings_button"):
-            self.settings_button.setToolTip(self.i18n.t("settings_button"))
+            self.settings_button.setToolTip(f"{self.i18n.t('settings_button')} (Ctrl+,)")
         # Sleep UI texts
         if hasattr(self, "sleep_timer_widget"):
             self.sleep_timer_widget.apply_translations(

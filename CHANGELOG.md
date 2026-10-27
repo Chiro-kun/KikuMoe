@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Settings Shortcut**: Open settings with Ctrl+, including from the mini player.
 - **Mini Player Track Progress**: Show elapsed time, duration and a compact progress indicator, with a live label for streams without a known duration.
 - **Mini Player Volume Feedback**: Show an animated percentage bubble when the mini player volume changes.
 - **Mini Player HUD**: Toggle a compact player with F9 or the title bar button, with cover art, scrolling track information, playback, volume, always-on-top, and separately saved window geometry.
@@ -54,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **Mini Player on Linux**: Keep the compact window at its intended size and reject maximize/full-screen requests.
 - **FFmpeg Rapid Pause**: Avoid stopping the audio output while another thread is writing, preventing host errors during rapid pause and resume.
 - **Mini Player Artwork**: Clip album covers to rounded corners, including on high-DPI displays.
 - **Discord Settings Labels**: Match the wording and localization of the other settings.
