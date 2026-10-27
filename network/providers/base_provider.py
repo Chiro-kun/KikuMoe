@@ -9,6 +9,7 @@ from typing import Callable, Optional
 NowPlayingCallback = Callable[[str, str, Optional[int], Optional[float], Optional[str]], None]
 ErrorCallback = Callable[[str], None]
 StatusCallback = Callable[[str], None]
+DEFAULT_POLL_INTERVAL = 5.0
 
 
 class BaseMetadataProvider(ABC):

@@ -13,6 +13,7 @@ from typing import Any
 
 from core.constants import APP_VERSION
 from network.providers.base_provider import (
+    DEFAULT_POLL_INTERVAL,
     BaseMetadataProvider,
     ErrorCallback,
     NowPlayingCallback,
@@ -33,7 +34,7 @@ class AnisonProvider(BaseMetadataProvider):
         on_now_playing: NowPlayingCallback,
         on_error_text: ErrorCallback,
         on_status_text: StatusCallback | None = None,
-        poll_interval: float = 10.0,
+        poll_interval: float = DEFAULT_POLL_INTERVAL,
     ) -> None:
         super().__init__(
             station_id="anison",

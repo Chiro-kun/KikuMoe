@@ -12,6 +12,20 @@ from network.providers.truckersfm_provider import TruckersFMProvider
 from network.station_manager import StationManager
 
 
+@pytest.mark.parametrize(
+    "provider_class", [AnisonProvider, GensokyoProvider, Neuro21Provider, TruckersFMProvider]
+)
+def test_polling_fetches_immediately_and_uses_short_interval(provider_class, monkeypatch):
+    provider = provider_class(on_now_playing=lambda *args: None, on_error_text=lambda _: None)
+    calls = []
+    monkeypatch.setattr(provider, "_fetch_and_dispatch", lambda: calls.append("fetch"))
+    monkeypatch.setattr(provider._stop_event, "wait", lambda timeout: calls.append(timeout) or True)
+
+    provider._poll_worker()
+
+    assert calls == ["fetch", 5.0]
+
+
 def test_station_definitions_integrity():
     """Verify all defined stations contain required metadata, formats, and valid streams."""
     expected_stations = ["listenmoe", "gensokyo", "anison", "neuro21", "truckersfm"]
