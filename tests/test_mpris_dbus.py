@@ -19,7 +19,7 @@ def test_mpris_session_bus_roundtrip():
         import asyncio
         import logging
         from PyQt6.QtCore import QCoreApplication
-        from dbus_next import Variant
+        from dbus_next import Message, MessageType, Variant
         from dbus_next.aio import MessageBus
         from core.media_state import MediaState
         from core.mpris import MprisBridge, OBJECT_PATH
@@ -56,6 +56,13 @@ def test_mpris_session_bus_roundtrip():
             changes = []
             props.on_properties_changed(
                 lambda interface, values, invalid: changes.append((interface, values)))
+            # dbus-next registers the signal match asynchronously. A later reply
+            # from the same connection ensures the bus has processed AddMatch.
+            reply = await bus.call(Message(destination='org.freedesktop.DBus',
+                                           path='/org/freedesktop/DBus',
+                                           interface='org.freedesktop.DBus',
+                                           member='GetId'))
+            assert reply.message_type == MessageType.METHOD_RETURN
             bridge.update(MediaState(status='Paused', title='New Song',
                                      track_id='/me/chiro/kikumoe/track/t2'))
             for _ in range(100):
@@ -64,7 +71,8 @@ def test_mpris_session_bus_roundtrip():
                        for _, values in changes):
                     break
                 await asyncio.sleep(0.05)
-            assert any('PlaybackStatus' in values and 'Metadata' in values for _, values in changes)
+            assert any('PlaybackStatus' in values and 'Metadata' in values
+                       for _, values in changes), f'Unexpected changes: {changes!r}'
             await player.call_play_pause()
             await props.call_set(iface, 'Volume', Variant('d', 0.7))
             for _ in range(100):

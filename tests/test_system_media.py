@@ -86,7 +86,7 @@ def test_windows_media_key_fallback(qapp):
     assert native.nativeEventFilter(b"windows_generic_MSG", ctypes.addressof(msg)) == (False, 0)
 
 
-def test_mpris_properties_and_commands(qapp):
+def test_mpris_properties_and_commands(qapp, monkeypatch):
     pytest.importorskip("dbus_next")
     from core.mpris import MprisPlayer, MprisRoot
 
@@ -100,6 +100,8 @@ def test_mpris_properties_and_commands(qapp):
     bridge.volume.connect(volumes.append)
     root = MprisRoot(bridge)
     player = MprisPlayer(bridge)
+    changes = []
+    monkeypatch.setattr(player, "emit_properties_changed", changes.append)
     state = MediaState(
         status="Playing",
         title="Song",
@@ -112,6 +114,8 @@ def test_mpris_properties_and_commands(qapp):
         volume=0.4,
     )
     player.update_state(state)
+    assert changes[-1]["PlaybackStatus"] == "Playing"
+    assert changes[-1]["Metadata"]["xesam:title"].value == "Song"
     assert root.Identity == "KikuMoe"
     assert player.PlaybackStatus == "Playing"
     assert player.Metadata["mpris:trackid"].value == state.track_id
