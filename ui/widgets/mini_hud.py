@@ -156,6 +156,29 @@ class MiniIconButton(QPushButton):
             p.drawLine(QPointF(18, 9), QPointF(9, 18))
 
 
+class MiniTrackProgress(QProgressBar):
+    """A smooth track with rounded ends, including the filled portion."""
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        track = QRectF(0, 0, self.width(), self.height())
+        radius = track.height() / 2.0
+        painter.setBrush(QColor("#35394d"))
+        painter.drawRoundedRect(track, radius, radius)
+        maximum = self.maximum() - self.minimum()
+        if maximum > 0:
+            ratio = max(0.0, min(1.0, (self.value() - self.minimum()) / maximum))
+            width = track.width() * ratio
+            if width > 0:
+                painter.setBrush(QColor(PALETTE["accent"]))
+                painter.drawRoundedRect(
+                    QRectF(0, 0, width, track.height()), min(radius, width / 2.0), radius
+                )
+        painter.end()
+
+
 class MiniHud(QWidget):
     restore_requested = pyqtSignal()
     play_requested = pyqtSignal()
@@ -173,10 +196,6 @@ class MiniHud(QWidget):
             "border-radius: 2px; }"
             "QSlider::handle:horizontal { background: white; width: 10px; margin: -4px 0; "
             f"border: 2px solid {PALETTE['accent']}; border-radius: 6px; }}"
-            "QProgressBar#miniTrackProgress { background: #35394d; border: none; "
-            "border-radius: 2px; }"
-            f"QProgressBar#miniTrackProgress::chunk {{ background: {PALETTE['accent']}; "
-            "border-radius: 2px; }"
         )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
@@ -202,12 +221,12 @@ class MiniHud(QWidget):
                 "border: none; font-size: 9px; font-weight: 600;"
             )
             label.setFixedHeight(12)
-        self.track_progress = QProgressBar()
+        self.track_progress = MiniTrackProgress()
         self.track_progress.setObjectName("miniTrackProgress")
         self.track_progress.setRange(0, 1000)
         self.track_progress.setValue(0)
         self.track_progress.setTextVisible(False)
-        self.track_progress.setFixedHeight(3)
+        self.track_progress.setFixedHeight(4)
         time_row.addWidget(self.elapsed_label)
         time_row.addWidget(self.track_progress, 1)
         time_row.addWidget(self.duration_label)
