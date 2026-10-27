@@ -918,8 +918,10 @@ class AmbientCoverCard(QWidget):
         # 1. Rich Dynamic Ambient Halo behind the artwork (smoothly color-interpolated)
         cur_amb = _lerp_color(self._prev_ambient_color, self._ambient_color, ease)
         glow_radius = max(side * 0.85, 155.0)
+        glow_x = min(glow_radius, max(1.0, w / 2.0 - 1.0))
+        glow_y = min(glow_radius, max(1.0, h / 2.0 - 1.0))
         center = QPointF(w / 2.0, h / 2.0)
-        rad_grad = QRadialGradient(center, glow_radius)
+        rad_grad = QRadialGradient(QPointF(0.0, 0.0), 1.0)
 
         glow_col = QColor(cur_amb)
         glow_col.setAlpha(95)
@@ -929,9 +931,13 @@ class AmbientCoverCard(QWidget):
         rad_grad.setColorAt(0.58, glow_mid)
         rad_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
 
+        painter.save()
+        painter.translate(center)
+        painter.scale(glow_x, glow_y)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(rad_grad))
-        painter.drawEllipse(center, glow_radius, glow_radius)
+        painter.drawEllipse(QPointF(0.0, 0.0), 1.0, 1.0)
+        painter.restore()
 
         # 2. Outer Frosted Glass Frame Pedestal around the cover
         frame_rect = QRectF(cover_x - 6, cover_y - 6, side + 12, side + 12)

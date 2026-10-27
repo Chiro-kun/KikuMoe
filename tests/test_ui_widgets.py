@@ -140,6 +140,21 @@ def test_ambient_cover(qapp):
     assert lbl._anim_progress == 0.0
 
 
+@pytest.mark.parametrize("width", [222, 380])
+def test_cover_halo_fades_before_widget_edges(qapp, width):
+    from PyQt6.QtCore import Qt
+
+    cover = AmbientCoverCard(cover_size=196)
+    cover.resize(width, cover.height())
+    pixmap = QPixmap(cover.size())
+    pixmap.fill(Qt.GlobalColor.transparent)
+    cover.render(pixmap)
+    image = pixmap.toImage()
+    assert image.pixelColor(width // 2, 0).alpha() == 0
+    assert image.pixelColor(0, cover.height() // 2).alpha() == 0
+    assert image.pixelColor(0, 0).alpha() == 0
+
+
 def test_settings_dialog_and_toggles(qapp):
     from ui.settings_dialog import AnimatedToggleSwitch, SettingsDialog
 
