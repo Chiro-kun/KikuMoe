@@ -420,32 +420,15 @@ class PlayerFFmpeg:
         if not self.is_ready():
             return
 
-        try:
-            if self._playing:
-                if self._audio_stream and getattr(self._audio_stream, "is_active", lambda: False)():
-                    try:
-                        self._audio_stream.stop_stream()
-                        self._paused = True
-                        try:
-                            self.log.debug("[DEBUG] pause_toggle: paused")
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                    self._emit("paused", None)
-                elif self._audio_stream:
-                    try:
-                        self._audio_stream.start_stream()
-                        self._paused = False
-                        try:
-                            self.log.debug("[DEBUG] pause_toggle: resumed -> playing")
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                    self._emit("playing", None)
-        except Exception:
-            self._emit("error", None)
+        # Keep the live output stream running: stopping PortAudio while its worker
+        # is writing can trigger host errors, especially on rapid toggles.
+        with self._state_lock:
+            if not self._playing or self._stop_event.is_set():
+                return
+            self._paused = not self._paused
+            paused = self._paused
+        self.log.debug("[DEBUG] pause_toggle: %s", "paused" if paused else "resumed")
+        self._emit("paused" if paused else "playing", None)
 
     def set_volume(self, vol: int) -> None:
         self._user_volume = max(0, min(100, int(vol)))
@@ -680,7 +663,7 @@ class PlayerFFmpeg:
         except Exception:
             stream_active = False
 
-        if not stream_active or self._paused:
+        if not stream_active:
             time.sleep(0.02)
             return
 
@@ -688,7 +671,9 @@ class PlayerFFmpeg:
         if n_bytes == 0:
             return
 
-        if self._muted:
+        with self._state_lock:
+            paused = self._paused
+        if self._muted or paused:
             try:
                 stream.write(b"\x00" * n_bytes, exception_on_underflow=False)
             except Exception:
@@ -1062,7 +1047,7 @@ class PlayerFFmpeg:
                                 "[DEBUG] _stream_worker: pre-buffer filled (%d B), playing",
                                 sum(len(c) for c in prebuffer),
                             )
-                            self._emit("playing", None)
+                            self._emit("paused" if self.is_paused() else "playing", None)
                             for pre_chunk in prebuffer:
                                 if self._stop_event.is_set():
                                     break
