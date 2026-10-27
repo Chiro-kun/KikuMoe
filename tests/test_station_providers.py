@@ -456,6 +456,33 @@ def test_station_popover_animations():
     pill.deleteLater()
 
 
+def test_station_popover_blurs_app_content():
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QApplication, QWidget
+
+    from ui.widgets.station_pill import StationGlassPopover
+
+    app = QApplication.instance() or QApplication([])
+    source = QWidget()
+    source.resize(300, 260)
+    source.setStyleSheet("background: white;")
+    dark = QWidget(source)
+    dark.setGeometry(120, 0, 180, 260)
+    dark.setStyleSheet("background: black;")
+    source.show()
+    app.processEvents()
+    popover = StationGlassPopover("listenmoe", "J-POP", parent=source)
+    popover.adjustSize()
+    position = source.mapToGlobal(QPoint(0, 0))
+    popover._capture_backdrop(position.x(), position.y())
+    assert popover._blurred_backdrop is not None
+    image = popover._blurred_backdrop.toImage()
+    boundary = image.pixelColor(round(120 * image.devicePixelRatio()), 40)
+    assert 0 < boundary.red() < 255
+    popover.close()
+    source.close()
+
+
 @pytest.mark.parametrize("linux", [False, True])
 def test_station_selection_emitted_before_popup_animation_finishes(monkeypatch, linux):
     from PyQt6.QtWidgets import QApplication

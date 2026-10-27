@@ -19,6 +19,7 @@ from PyQt6.QtCore import (  # type: ignore[attr-defined]
     QPoint,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
     QSize,
     Qt,
@@ -30,7 +31,6 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QGuiApplication,
-    QLinearGradient,
     QPainter,
     QPainterPath,
     QPaintEvent,
@@ -261,15 +261,9 @@ class SimpleStationRow(QPushButton):
 
     def _update_style(self) -> None:
         if self._hovered:
-            bg = (
-                "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                "stop:0 rgba(255, 120, 175, 0.24), stop:1 rgba(236, 24, 108, 0.13))"
-            )
+            bg = "rgba(236, 24, 108, 0.18)"
         elif self.is_selected:
-            bg = (
-                "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                "stop:0 rgba(255, 255, 255, 0.10), stop:1 rgba(255, 255, 255, 0.03))"
-            )
+            bg = "rgba(255, 255, 255, 0.05)"
         else:
             bg = "transparent"
 
@@ -322,6 +316,7 @@ class StationGlassPopover(QWidget):
         self._anim_group: QParallelAnimationGroup | None = None
         self._is_closing = False
         self._closed_emitted = False
+        self._blurred_backdrop: QPixmap | None = None
 
         self.setFixedWidth(240)
 
@@ -417,6 +412,7 @@ class StationGlassPopover(QWidget):
             bounds = screen.availableGeometry()
             target_x = max(bounds.left(), min(target_x, bounds.right() - w + 1))
             target_y = max(bounds.top(), min(target_y, bounds.bottom() - self.height() + 1))
+        self._capture_backdrop(target_x, target_y)
         if _IS_LINUX:
             self.move(target_x, target_y)
             self.setWindowOpacity(1.0)
@@ -497,6 +493,45 @@ class StationGlassPopover(QWidget):
         self._emit_closed()
         super().closeEvent(event)
 
+    def _capture_backdrop(self, global_x: int, global_y: int) -> None:
+        """Blur the underlying app content before showing the popup."""
+        self._blurred_backdrop = None
+        parent = self.parentWidget()
+        if parent is None or not parent.isVisible():
+            return
+        source = parent.window()
+        if source is None:
+            return
+        local = source.mapFromGlobal(QPoint(global_x, global_y))
+        popup_rect = QRect(local, self.size())
+        visible = popup_rect.intersected(source.rect())
+        if visible.isEmpty():
+            return
+
+        ratio = source.devicePixelRatioF()
+        snapshot = QPixmap(round(self.width() * ratio), round(self.height() * ratio))
+        snapshot.setDevicePixelRatio(ratio)
+        snapshot.fill(QColor(PALETTE["station_glass_fallback"]))
+        painter = QPainter(snapshot)
+        painter.drawPixmap(visible.topLeft() - local, source.grab(visible))
+        painter.end()
+        # Aggressive downsampling and smooth upsampling create a soft blur with
+        # no platform-specific effects or screenshot access to other windows.
+        tiny = snapshot.scaled(
+            max(1, snapshot.width() // 14),
+            max(1, snapshot.height() // 14),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        blurred = tiny.scaled(
+            snapshot.width(),
+            snapshot.height(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        blurred.setDevicePixelRatio(ratio)
+        self._blurred_backdrop = blurred
+
     def paintEvent(self, event: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -508,26 +543,17 @@ class StationGlassPopover(QWidget):
         path = QPainterPath()
         path.addRoundedRect(rect, 12.0, 12.0)
 
-        glass = QLinearGradient(0, 0, 0, h)
-        glass.setColorAt(0.0, QColor(PALETTE["station_glass_top"]))
-        glass.setColorAt(0.32, QColor(PALETTE["station_glass_middle"]))
-        glass.setColorAt(1.0, QColor(PALETTE["station_glass_bottom"]))
-        painter.fillPath(path, glass)
-
-        # A subtle neutral reflection preserves the app's dark glass appearance.
         painter.save()
         painter.setClipPath(path)
-        reflection = QLinearGradient(0, 0, 0, h * 0.45)
-        reflection.setColorAt(0.0, QColor(255, 255, 255, 12))
-        reflection.setColorAt(0.55, QColor(255, 255, 255, 3))
-        reflection.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.fillRect(QRectF(0, 0, w, h * 0.45), reflection)
+        if self._blurred_backdrop is not None:
+            painter.drawPixmap(QPointF(0, 0), self._blurred_backdrop)
+            painter.fillRect(rect, QColor(PALETTE["station_glass_overlay"]))
+        else:
+            painter.fillRect(rect, QColor(PALETTE["station_glass_fallback"]))
         painter.restore()
 
         painter.setPen(QPen(QColor(PALETTE["station_glass_rim"]), 1.0))
         painter.drawPath(path)
-        painter.setPen(QPen(QColor(255, 255, 255, 18), 1.0))
-        painter.drawLine(QPointF(13, 2), QPointF(w - 13, 2))
         painter.end()
 
 
