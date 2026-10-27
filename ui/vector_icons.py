@@ -36,13 +36,13 @@ _YOUTUBE_SVG = QByteArray(
 _APPLE_MUSIC_SVG = QByteArray(
     b'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
     b"<defs>"
-    b'<linearGradient id="apple_grad" x1="0" y1="0" x2="1" y2="1">'
-    b'<stop offset="0%" stop-color="#FA2D48"/>'
-    b'<stop offset="100%" stop-color="#FA5570"/>'
+    b'<linearGradient id="apple_grad" x1="0%" y1="0%" x2="0%" y2="100%">'
+    b'<stop offset="0%" stop-color="#FA5A6A"/>'
+    b'<stop offset="100%" stop-color="#E91E45"/>'
     b"</linearGradient>"
     b"</defs>"
     b'<rect width="24" height="24" rx="5.5" fill="url(#apple_grad)"/>'
-    b'<path fill="#FFFFFF" d="M17.15 4.35c-.32-.1-.7-.03-.95.18l-6.8 5.67c-.25.21-.4.52-.4.85v5.82c-.52-.35-1.18-.54-1.9-.52-1.71.05-3.1 1.34-3.1 2.87 0 1.58 1.48 2.86 3.3 2.78 1.63-.07 2.95-1.28 3.1-2.73V11.2l5.7-4.75v5.6c-.52-.35-1.18-.54-1.9-.52-1.71.05-3.1 1.34-3.1 2.87 0 1.58 1.48 2.86 3.3 2.78 1.63-.07 2.95-1.28 3.1-2.73V4.9c0-.25-.09-.45-.25-.55z"/>'  # noqa: E501
+    b'<path fill="#fff" d="M17.8 4.4a.9.9 0 0 0-.7-.2l-7.4 1.5a.9.9 0 0 0-.7.9v8.2a3.2 3.2 0 0 0-1.5 0c-1.5.3-2.5 1.3-2.4 2.5.1 1.1 1.4 1.8 2.9 1.5 1.5-.3 2.4-1.2 2.4-2.6V9l6-1.2v5.5a3.2 3.2 0 0 0-1.5 0c-1.5.3-2.5 1.3-2.4 2.5.1 1.1 1.4 1.8 2.9 1.5 1.5-.3 2.4-1.2 2.4-2.6V5.1a.9.9 0 0 0-.3-.7z"/>'  # noqa: E501
     b"</svg>"
 )
 

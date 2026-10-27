@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import threading
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -54,6 +55,7 @@ from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
     APP_VERSION,
+    DEFAULT_DISCORD_CLIENT_ID,
     DEFAULT_STATION,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
@@ -62,6 +64,8 @@ from core.constants import (
     KEY_CLOSE_TO_TRAY,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_DEV_CONSOLE_SHOW_DEV,
+    KEY_DISCORD_CLIENT_ID,
+    KEY_DISCORD_RPC_ENABLED,
     KEY_DONT_ASK_ON_CLOSE,
     KEY_FORMAT,
     KEY_LANG,
@@ -80,6 +84,7 @@ from core.constants import (
     ORG_NAME,
     STATION_LISTENMOE,
 )
+from core.discord_presence import DiscordPresence, activity_payload
 from core.i18n import I18n
 from core.logger import get_logger
 from core.quick_search import (
@@ -112,6 +117,7 @@ from ui.widgets.ambient_cover import (
     AnimatedTrackLabel,
     FullBleedCanvas,
     LiveEqualizerBadge,
+    TrackHoverGroup,
 )
 from ui.widgets.history_button import HistoryIconButton
 from ui.widgets.playback_controls import PlaybackControls
@@ -442,6 +448,7 @@ class ListenMoePlayer(QWidget):
         self._init_footer_section()
         self._init_audio_backend()
         self._init_timers_and_console()
+        self._init_discord_presence()
         self._init_websocket()
         self._init_tray()
         self._init_extra_logic()
@@ -734,7 +741,7 @@ class ListenMoePlayer(QWidget):
         # 3. Track Info (Title & Artist with fixed vertical policy so no vertical stretch)
         track_box = QVBoxLayout()
         track_box.setContentsMargins(6, 2, 6, 0)
-        track_box.setSpacing(2)
+        track_box.setSpacing(0)
 
         self.now_playing_title = AnimatedTrackLabel(
             "–", font_px=16, font_weight=800, text_color="#ffffff", interactive=True
@@ -757,7 +764,7 @@ class ListenMoePlayer(QWidget):
         self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
 
         self.now_playing_artist = AnimatedTrackLabel(
-            "", font_px=13, font_weight=600, text_color="#c8cee0", interactive=False
+            "", font_px=13, font_weight=600, text_color="#c8cee0", interactive=True
         )
         self.now_playing_artist.setObjectName("songArtistLabel")
         self.now_playing_artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -766,9 +773,13 @@ class ListenMoePlayer(QWidget):
         )
         self.now_playing_artist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.now_playing_artist.customContextMenuRequested.connect(self._show_track_context_menu)
+        self.now_playing_artist.clicked.connect(
+            lambda: self._show_track_context_menu(from_chevron=True)
+        )
 
-        track_box.addWidget(self.now_playing_title)
-        track_box.addWidget(self.now_playing_artist)
+        self.track_hover_group = TrackHoverGroup(self.now_playing_title, self.now_playing_artist)
+        self.track_menu_btn.pressed.connect(self.track_hover_group.animate_click)
+        track_box.addWidget(self.track_hover_group)
         self._layout.addLayout(track_box)
 
         # Legacy label
@@ -1103,6 +1114,64 @@ class ListenMoePlayer(QWidget):
         self.ws = getattr(self.station_mgr, "_active_provider", None)
         self.station_mgr.start()
 
+    def _init_discord_presence(self):
+        self.discord_presence = DiscordPresence(self)
+        self._discord_timer = QTimer(self)
+        self._discord_timer.setInterval(1000)
+        self._discord_timer.timeout.connect(self._sync_discord_presence)
+        self._discord_timer.start()
+        self._sync_discord_presence()
+
+    def _sync_discord_presence(self):
+        rpc = self.discord_presence
+        client_id = str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
+        client_id = (
+            client_id
+            or os.environ.get("KIKUMOE_DISCORD_CLIENT_ID", "").strip()
+            or DEFAULT_DISCORD_CLIENT_ID
+        )
+        rpc.configure(self._get_bool(KEY_DISCORD_RPC_ENABLED, False), client_id)
+        if not rpc.enabled:
+            return
+        try:
+            paused = bool(self._ui_paused or getattr(self.player, "is_paused", lambda: False)())
+            playing = bool(self.player.is_playing())
+        except Exception:
+            playing, paused = False, False
+        if not playing and not paused:
+            self._discord_live_start = None
+            self._discord_live_key = None
+            rpc.set_activity(None)
+            return
+        title = self._current_title or ""
+        if title == self.i18n.t("unknown"):
+            title = ""
+        station_id = getattr(self, "_current_radio_provider", DEFAULT_STATION)
+        station = str(STATIONS.get(station_id, {}).get("name", station_id))
+        end = self._current_start_epoch
+        if end and self._current_duration_seconds:
+            end -= self._clock_sync_offset
+        cover = self._normalize_album_cover_url(self._current_cover_ref)
+        activity = activity_payload(
+            title, self._current_artist, station, cover, end, self._current_duration_seconds, paused
+        )
+        if activity and paused:
+            activity["state"] = (activity["state"] + " · " + self.i18n.t("pause"))[:128]
+        icon = os.environ.get("KIKUMOE_DISCORD_ICON", "").strip()
+        if activity and icon:
+            activity.setdefault("assets", {})["small_image"] = icon[:300]
+            activity["assets"]["small_text"] = "KikuMoe"
+        if activity and not paused and not self._current_duration_seconds:
+            live_key = (station_id, title, self._current_artist)
+            if getattr(self, "_discord_live_key", None) != live_key:
+                self._discord_live_start = int(time.time())
+                self._discord_live_key = live_key
+            activity["timestamps"] = {"start": self._discord_live_start}
+        else:
+            self._discord_live_start = None
+            self._discord_live_key = None
+        rpc.set_activity(activity)
+
     def _init_tray(self):
         """Initialize system tray manager."""
         try:
@@ -1269,6 +1338,8 @@ class ListenMoePlayer(QWidget):
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""
         try:
+            if hasattr(self, "discord_presence"):
+                self.discord_presence.stop()
             if hasattr(self, "tray_mgr") and self.tray_mgr:
                 try:
                     if hasattr(self.tray_mgr, "_tray") and self.tray_mgr._tray:
@@ -2698,6 +2769,7 @@ class ListenMoePlayer(QWidget):
                 is_chevron or self.sender() == getattr(self, "now_playing_title", None)
             ):
                 self.now_playing_title.set_menu_active(True)
+                self.now_playing_artist.set_menu_active(True)
 
             def _on_menu_hide() -> None:
                 if hasattr(self, "track_menu_btn"):
@@ -2705,6 +2777,8 @@ class ListenMoePlayer(QWidget):
                 if hasattr(self, "now_playing_title"):
                     self.now_playing_title.set_menu_active(False)
                     self.now_playing_title.set_hovered(False)
+                    self.now_playing_artist.set_menu_active(False)
+                    self.track_hover_group.refresh_pointer()
 
             menu.aboutToHide.connect(_on_menu_hide)
 

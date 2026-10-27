@@ -63,6 +63,12 @@ class TrackMenuChevronButton(QPushButton):
 
         w, h = float(self.width()), float(self.height())
         cx = w / 2.0
+        parent = self.parent()
+        group = getattr(parent, "_hover_group", None)
+        if group is not None:
+            p.translate(cx, h / 2.0)
+            p.scale(group.click_scale, group.click_scale)
+            p.translate(-cx, -h / 2.0)
         # Vertically aligned with font x-height/baseline
         cy = (h / 2.0) + 2.0
 

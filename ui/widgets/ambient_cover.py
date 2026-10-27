@@ -11,10 +11,21 @@ Features:
 import math
 from typing import Optional
 
-from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QElapsedTimer,
+    QPointF,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QFont,
     QFontMetrics,
     QLinearGradient,
@@ -25,7 +36,7 @@ from PyQt6.QtGui import (
     QPixmap,
     QRadialGradient,
 )
-from PyQt6.QtWidgets import QLabel, QWidget
+from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ui.themes.cyber_moe import PALETTE
 
@@ -325,6 +336,7 @@ class AnimatedTrackLabel(QLabel):
         self._hovered: bool = False
         self._menu_active: bool = False
         self._interactive: bool = interactive
+        self._hover_group = None
 
         self.setFixedHeight(max(22, font_px + 8))
         self.setMinimumWidth(0)
@@ -386,6 +398,8 @@ class AnimatedTrackLabel(QLabel):
         if self._menu_active != active:
             self._menu_active = active
             self.update()
+            if self._hover_group is not None:
+                self._hover_group.refresh_hover()
 
     def is_menu_active(self) -> bool:
         return self._menu_active
@@ -399,6 +413,8 @@ class AnimatedTrackLabel(QLabel):
             if self._chevron_btn and hasattr(self._chevron_btn, "set_hovered"):
                 self._chevron_btn.set_hovered(hovered)
             self.update()
+            if self._hover_group is not None:
+                self._hover_group.set_hovered(hovered)
 
     def enterEvent(self, a0: object) -> None:
         super().enterEvent(a0)  # type: ignore[arg-type]
@@ -406,7 +422,9 @@ class AnimatedTrackLabel(QLabel):
     def leaveEvent(self, a0: object) -> None:
         if self._interactive:
             if not self._menu_active:
-                if self._chevron_btn and self._chevron_btn.underMouse():
+                if self._hover_group is not None:
+                    QTimer.singleShot(0, self._hover_group.refresh_pointer)
+                elif self._chevron_btn and self._chevron_btn.underMouse():
                     pass
                 else:
                     self.set_hovered(False)
@@ -433,6 +451,8 @@ class AnimatedTrackLabel(QLabel):
         ):
             rect = self.get_capsule_rect()
             if rect is not None and rect.contains(a0.position()):
+                if self._hover_group is not None:
+                    self._hover_group.animate_click()
                 self.clicked.emit()
                 return
         super().mousePressEvent(a0)  # type: ignore[arg-type]
@@ -445,6 +465,8 @@ class AnimatedTrackLabel(QLabel):
         self._prev_text = old_txt
         super().setText(new_txt)
         self._update_chevron_position()
+        if self._hover_group is not None:
+            self._hover_group.update()
         if self.isVisible():
             self._anim_progress = 0.0
             self._elapsed.start()
@@ -526,10 +548,16 @@ class AnimatedTrackLabel(QLabel):
 
         # Sleek cyber-glass hover capsule when user points at title / chevron
         rect = self.get_capsule_rect() if self._interactive else None
-        if (self._hovered or self._menu_active) and rect is not None:
+        if self._hover_group is None and (self._hovered or self._menu_active) and rect is not None:
             painter.setBrush(QColor(255, 255, 255, 14))
             painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
             painter.drawRoundedRect(rect, 6.0, 6.0)
+
+        if self._hover_group is not None:
+            scale = self._hover_group.click_scale
+            painter.translate(w / 2.0, h / 2.0)
+            painter.scale(scale, scale)
+            painter.translate(-w / 2.0, -h / 2.0)
 
         ease = 1.0 - ((1.0 - self._anim_progress) ** 3)
 
@@ -557,6 +585,129 @@ class AnimatedTrackLabel(QLabel):
             Qt.AlignmentFlag.AlignCenter,
             in_elided,
         )
+        painter.end()
+
+
+class TrackHoverGroup(QWidget):
+    """Paint one connected, animated highlight behind the track metadata."""
+
+    def __init__(self, title: AnimatedTrackLabel, artist: AnimatedTrackLabel):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.title = title
+        self.artist = artist
+        self._hovered = False
+        self._opacity = 0.0
+        self.click_scale = 1.0
+        self._click_step = 0
+        self._click_timer = QTimer(self)
+        self._click_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._click_timer.setInterval(16)
+        self._click_timer.timeout.connect(self._tick_click)
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(160)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_opacity)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        for label in (title, artist):
+            label._hover_group = self
+            layout.addWidget(label)
+        self.setMouseTracking(True)
+
+    def _set_opacity(self, value: object) -> None:
+        self._opacity = float(value)
+        self.update()
+
+    def animate_click(self) -> None:
+        """Give the whole highlight a small tactile bounce without delaying the menu."""
+        self.click_scale = 0.94
+        self._click_step = 0
+        self._click_timer.start()
+        self._update_click_visuals()
+
+    def _tick_click(self) -> None:
+        scales = (0.96, 0.98, 1.0, 1.015, 1.01, 1.0)
+        self.click_scale = scales[self._click_step]
+        self._click_step += 1
+        if self._click_step == len(scales):
+            self._click_timer.stop()
+        self._update_click_visuals()
+
+    def _update_click_visuals(self) -> None:
+        self.update()
+        self.title.update()
+        self.artist.update()
+        if self.title._chevron_btn is not None:
+            self.title._chevron_btn.update()
+
+    def set_hovered(self, hovered: bool) -> None:
+        self._hovered = hovered
+        for label in (self.title, self.artist):
+            if label._hovered != hovered:
+                label.set_hovered(hovered)
+        self.refresh_hover()
+
+    def refresh_hover(self) -> None:
+        target = 1.0 if self._hovered or self.title.is_menu_active() else 0.0
+        if (
+            self._animation.endValue() == target
+            and self._animation.state() == self._animation.State.Running
+        ):
+            return
+        self._animation.stop()
+        self._animation.setStartValue(self._opacity)
+        self._animation.setEndValue(target)
+        self._animation.start()
+        self.update()
+
+    def _shape(self) -> QPainterPath:
+        path = QPainterPath()
+        if self.title.get_capsule_rect() is None:
+            return path
+        rects = []
+        for label in (self.title, self.artist):
+            rect = label.get_capsule_rect()
+            if rect is not None:
+                rect.translate(float(label.x()), float(label.y()))
+                rects.append(rect)
+                part = QPainterPath()
+                part.addRoundedRect(rect, 6.0, 6.0)
+                path = path.united(part)
+        if len(rects) == 2:
+            left = max(rects[0].left(), rects[1].left())
+            right = min(rects[0].right(), rects[1].right())
+            if right > left:
+                bridge = QPainterPath()
+                bridge.addRect(QRectF(left, rects[0].center().y(), right - left,
+                                      rects[1].center().y() - rects[0].center().y()))
+                path = path.united(bridge)
+        return path
+
+    def refresh_pointer(self) -> None:
+        self.set_hovered(self._shape().contains(QPointF(self.mapFromGlobal(QCursor.pos()))))
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self.set_hovered(self._shape().contains(event.position()))
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event: object) -> None:
+        QTimer.singleShot(0, self.refresh_pointer)
+        super().leaveEvent(event)  # type: ignore[arg-type]
+
+    def paintEvent(self, event: object) -> None:
+        if self._opacity <= 0.0:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setOpacity(self._opacity)
+        painter.translate(self.width() / 2.0, self.height() / 2.0)
+        painter.scale(self.click_scale, self.click_scale)
+        painter.translate(-self.width() / 2.0, -self.height() / 2.0)
+        painter.setBrush(QColor(255, 255, 255, 14))
+        painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
+        painter.drawPath(self._shape())
         painter.end()
 
 

@@ -334,6 +334,62 @@ def test_animated_track_label_click_and_hover(qapp):
     lbl.set_menu_active(False)
 
 
+def test_track_hover_group_connects_rows_and_syncs_state(qapp):
+    from PyQt6.QtCore import QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+
+    from ui.widgets.ambient_cover import AnimatedTrackLabel, TrackHoverGroup
+
+    title = AnimatedTrackLabel("A considerably longer song title", interactive=True)
+    artist = AnimatedTrackLabel("Artist", interactive=True)
+    group = TrackHoverGroup(title, artist)
+    group.resize(400, 46)
+    group.show()
+    qapp.processEvents()
+    title_rect = title.get_capsule_rect()
+    artist_rect = artist.get_capsule_rect()
+    assert title_rect.width() > artist_rect.width()
+    shape = group._shape()
+    assert shape.contains(QPointF(200, title.height()))
+    assert not shape.contains(QPointF(10, title.height()))
+
+    artist.set_hovered(True)
+    assert title._hovered and artist._hovered
+    clicks = []
+    artist.clicked.connect(lambda: clicks.append(True))
+    point = artist_rect.center()
+    artist.mousePressEvent(QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress, point, point,
+        Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+    ))
+    assert clicks == [True]
+    assert group.click_scale < 1.0
+    for _ in range(6):
+        group._tick_click()
+    assert group.click_scale == 1.0
+    assert not group._click_timer.isActive()
+    title.set_menu_active(True)
+    artist.set_hovered(False)
+    assert group._animation.endValue() == 1.0
+    title.set_menu_active(False)
+    assert group._animation.endValue() == 0.0
+    title.setText("–")
+    assert group._shape().isEmpty()
+    group.close()
+
+    # Extra vertical space in the main layout must not separate the two rows.
+    parent = QWidget()
+    layout = QVBoxLayout(parent)
+    layout.addWidget(group)
+    parent.resize(400, 200)
+    parent.show()
+    qapp.processEvents()
+    assert group.height() == title.height() + artist.height()
+    assert artist.y() == title.y() + title.height()
+    parent.close()
+
+
 def test_animated_track_label_chevron_positioning(qapp):
     """Verify AnimatedTrackLabel positions attached chevron button next to title text."""
     from ui.widgets.ambient_cover import AnimatedTrackLabel

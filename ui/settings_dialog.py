@@ -64,6 +64,8 @@ from core.constants import (
     KEY_CHANNEL,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_DEV_CONSOLE_SHOW_DEV,
+    KEY_DISCORD_CLIENT_ID,
+    KEY_DISCORD_RPC_ENABLED,
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
@@ -952,6 +954,23 @@ class SettingsDialog(QDialog):
         self.chk_autoplay.setToolTip(self.i18n.t("settings_autoplay_tip"))
         play_lay.addWidget(self.chk_autoplay)
 
+        self.chk_discord_rpc = AnimatedToggleSwitch("Discord Rich Presence")
+        self.chk_discord_rpc.setChecked(
+            self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
+        )
+        play_lay.addWidget(self.chk_discord_rpc)
+        self.txt_discord_client_id = QLineEdit(
+            str(self.settings.value(KEY_DISCORD_CLIENT_ID, ""))
+        )
+        self.txt_discord_client_id.setPlaceholderText("KikuMoe (default)")
+        self.discord_id_row = QWidget()
+        self.discord_id_row.setLayout(
+            self._make_field_row("Discord Application ID", self.txt_discord_client_id)
+        )
+        self.discord_id_row.setVisible(self.chk_discord_rpc.isChecked())
+        self.chk_discord_rpc.toggled.connect(self.discord_id_row.setVisible)
+        play_lay.addWidget(self.discord_id_row)
+
         self.chk_sleep_stop = AnimatedToggleSwitch(self.i18n.t("settings_sleep_stop_on_end"))
         self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true")
         play_lay.addWidget(self.chk_sleep_stop)
@@ -1297,6 +1316,10 @@ class SettingsDialog(QDialog):
                 self.cmb_audio_backend.setCurrentIndex(i)
                 break
         self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
+        self.chk_discord_rpc.setChecked(
+            self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
+        )
+        self.txt_discord_client_id.setText(str(self.settings.value(KEY_DISCORD_CLIENT_ID, "")))
         self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true")
         self.chk_session_timer.setChecked(
             self.settings.value(KEY_SESSION_TIMER_ENABLED, "true") == "true"
@@ -1520,6 +1543,10 @@ class SettingsDialog(QDialog):
     def _save_settings(self):
         """Logica comune per salvare le impostazioni."""
         self.settings.setValue(KEY_AUTOPLAY, "true" if self.chk_autoplay.isChecked() else "false")
+        self.settings.setValue(
+            KEY_DISCORD_RPC_ENABLED, "true" if self.chk_discord_rpc.isChecked() else "false"
+        )
+        self.settings.setValue(KEY_DISCORD_CLIENT_ID, self.txt_discord_client_id.text().strip())
         self.settings.setValue(
             KEY_SLEEP_STOP_ON_END, "true" if self.chk_sleep_stop.isChecked() else "false"
         )

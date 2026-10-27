@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Discord Rich Presence**: Optional local IPC integration for Discord desktop and compatible arRPC clients, with configurable Application ID, track metadata, artwork, playback state, and automatic reconnection.
 - **Multi-Station Radio Engine**:
   - Integrated community and partner web radio stations: LISTEN.moe (J-POP & K-POP), Gensokyo Radio (Touhou Project 24/7), ANISON.FM (Japanese anime music), Neuro 21 Radio (Neuro & Evil karaoke covers), and TruckersFM (Euro Truck & gaming hits).
   - Modernized top HUD station selector: `StationPillButton` featuring an animated vector chevron, active station branding, and the `StationGlassPopover` frosted glass channel switcher.
@@ -37,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rendered across the Now Playing context menu, history popover action buttons, and system tray.
 
 ### Changed
+- **Track Metadata Hover**: Connected title and artist highlights follow each text width, fade smoothly, and open the track actions from either row.
+- **Apple Music Icon**: Refined the gradient badge and music note for clearer rendering at menu sizes.
 - **Close Confirmation Dialog UI**:
   - Modernized `CloseConfirmDialog` with custom Cyber-Glass title bar (`CustomTitleBar`), dialog title "Chiudere l'app?", and clean non-redundant description body.
   - Replaced asymmetric dialog icon with a perfectly balanced standby power emblem badge (`DialogIconBadge`).
@@ -48,7 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Title Capsule Hit-Testing**: Hit-testing is now strictly bounded to the title text and chevron geometry (`get_capsule_rect()`). Mouse movements and clicks in empty margin areas to the left or right of centered text are properly ignored.
 - **Active Menu State Retention**: The unified title hover capsule remains fully illuminated while the dropdown search context menu is open (`set_menu_active(True)`), preventing the capsule from prematurely collapsing on `leaveEvent`.
 - **Chevron Button Clean Rendering**: Removed standalone square box background from `TrackMenuChevronButton` when clicked/active; the chevron icon seamlessly tints to the accent color `#EC186C` inside the unified title capsule without an isolated bounding box.
-- **Artist Label Hover Isolation**: Removed hover capsule, pointer cursor, and left-click triggers from the artist row (`now_playing_artist`, `interactive=False`), keeping song metadata interactive only on the title row.
 - **CloseConfirmDialog Geometry Conflict**: Resolved Windows platform window geometry error (`QWindowsWindow::setGeometry: Unable to set geometry 430x180 ... Resulting geometry: 430x181`) by dynamically clamping the height to `max(186, self.sizeHint().height())`.
 - **History Popover Widget Overlap**: Fixed visual ghosting and overlapping text rows in `SongHistoryPopover` by explicitly invoking `w.setParent(None)` prior to `w.deleteLater()` when clearing and rebuilding the scrollable track list.
 - **Station Selection Persistence**: Fixed issue where switching to Neuro 21 or TruckersFM reverted back to LISTEN.moe due to station ID normalization.
