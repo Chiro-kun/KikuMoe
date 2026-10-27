@@ -1,4 +1,5 @@
 import email.utils
+import hashlib
 import os
 import re
 import sys
@@ -90,6 +91,7 @@ from core.constants import (
 from core.discord_presence import DiscordPresence, activity_payload
 from core.i18n import I18n
 from core.logger import get_logger
+from core.media_state import MediaState
 from core.quick_search import (
     copy_to_clipboard,
     search_apple_music,
@@ -458,6 +460,7 @@ class ListenMoePlayer(QWidget):
         self._init_websocket()
         self._init_tray()
         self._init_mini_hud()
+        self._init_system_media()
         self._init_extra_logic()
 
     # ------------------- Initialization Helpers -------------------
@@ -1342,6 +1345,131 @@ class ListenMoePlayer(QWidget):
             self.toggle_mini_hud()
         self.open_settings()
 
+    def _init_system_media(self):
+        self.system_media = None
+        self._media_last_state = MediaState()
+        try:
+            if _IS_LINUX:
+                from core.mpris import MprisBridge
+
+                self.system_media = MprisBridge(self.log, self)
+                self.system_media.volume.connect(self._set_system_media_volume)
+            elif _IS_WIN32:
+                from core.windows_media import WindowsMediaBridge
+
+                self.system_media = WindowsMediaBridge(self.log, self)
+            if self.system_media is not None:
+                bridge = self.system_media
+                self.destroyed.connect(lambda *_: bridge.stop())
+                self.system_media.command.connect(self._on_system_media_command)
+                self._media_timer = QTimer(self)
+                self._media_timer.setInterval(1000)
+                self._media_timer.timeout.connect(self._sync_system_media)
+                self._media_timer.start()
+                self._sync_system_media()
+        except Exception as exc:
+            self.log.warning("[MEDIA] System media controls unavailable: %s", exc)
+
+    def _sync_system_media(self) -> None:
+        bridge = self.system_media
+        if bridge is None:
+            return
+        try:
+            if _IS_WIN32:
+                bridge.bind(int(self.winId()))
+            player = getattr(self, "player", None)
+            playing = bool(player and player.is_playing())
+            paused = bool(
+                player and (self._ui_paused or getattr(player, "is_paused", lambda: False)())
+            )
+            status = "Paused" if paused else ("Playing" if playing else "Stopped")
+            title = (self._current_title or "").strip()
+            if title in ("–", "-", self.i18n.t("unknown")):
+                title = ""
+            artist = (self._current_artist or "").strip()
+            station_id = getattr(self, "_current_radio_provider", DEFAULT_STATION)
+            station = str(STATIONS.get(station_id, {}).get("name", station_id))
+            duration = max(0, self._current_duration_seconds or 0)
+            epoch = self._current_start_epoch
+            position = 0.0
+            if epoch is not None and duration > 0:
+                position = max(
+                    0.0,
+                    min(
+                        float(duration), duration - (epoch - time.time() - self._clock_sync_offset)
+                    ),
+                )
+            track_id = "/org/mpris/MediaPlayer2/TrackList/NoTrack"
+            if title:
+                identity = f"{station_id}\0{title}\0{artist}\0{epoch}"
+                track_id = (
+                    "/me/chiro/kikumoe/track/t"
+                    + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+                )
+            previous = self._media_last_state
+            if (
+                status == "Paused"
+                and previous.status in ("Playing", "Paused")
+                and previous.track_id == track_id
+            ):
+                position = previous.position_us / 1000000
+            muted = bool(player and getattr(player, "get_mute", lambda: False)())
+            state = MediaState(
+                status=status,
+                title=title,
+                artist=artist,
+                station=station,
+                cover_url=self._normalize_album_cover_url(self._current_cover_ref) or "",
+                track_id=track_id,
+                duration_us=int(duration * 1000000),
+                position_us=int(position * 1000000),
+                volume=0.0 if muted else self.volume_slider.value() / 100.0,
+            )
+            self._media_last_state = state
+            bridge.update(state)
+        except Exception as exc:
+            self.log.debug("[MEDIA] Could not update system media state: %s", exc)
+
+    def _on_system_media_command(self, command: str) -> None:
+        if command == "raise":
+            if not self.isVisible() or self.isMinimized():
+                self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            return
+        if command == "toggle":
+            self._tray_toggle_play_pause()
+        elif command == "stop":
+            self.stop_stream()
+        elif command == "mute":
+            self.toggle_mute_shortcut()
+        elif command == "volume_up":
+            self._vol_up()
+        elif command == "volume_down":
+            self._vol_down()
+        elif command in ("play", "pause"):
+            player = getattr(self, "player", None)
+            playing = bool(player and player.is_playing())
+            paused = bool(
+                player and (self._ui_paused or getattr(player, "is_paused", lambda: False)())
+            )
+            if command == "play":
+                if paused:
+                    self.pause_resume()
+                elif not playing:
+                    self.play_stream()
+            elif playing and not paused:
+                self.pause_resume()
+        self._sync_system_media()
+
+    def _set_system_media_volume(self, value: float) -> None:
+        value = max(0.0, min(1.0, value))
+        player = getattr(self, "player", None)
+        if value > 0 and player and getattr(player, "get_mute", lambda: False)():
+            self.toggle_mute_shortcut()
+        self.volume_slider.setValue(round(value * 100))
+        self._sync_system_media()
+
     def _init_extra_logic(self):
         """Final UI polish and logic hooks (Theme, Autoplay, Global Shortcuts)."""
         try:
@@ -1485,6 +1613,9 @@ class ListenMoePlayer(QWidget):
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""
         try:
+            if getattr(self, "system_media", None) is not None:
+                self._media_timer.stop()
+                self.system_media.stop()
             if hasattr(self, "discord_presence"):
                 self.discord_presence.stop()
             if hasattr(self, "tray_mgr") and self.tray_mgr:

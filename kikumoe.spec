@@ -116,12 +116,26 @@ else:
 
 block_cipher = None
 
+hidden_imports = ["certifi", "mpv", "pyaudio", "_portaudio"]
+if _IS_WIN32:
+    hidden_imports.extend(
+        [
+            "winrt._winrt",
+            "winrt.windows.foundation",
+            "winrt.windows.media",
+            "winrt.windows.media.interop",
+            "winrt.windows.storage.streams",
+        ]
+    )
+else:
+    hidden_imports.extend(["dbus_next.aio", "dbus_next.service"])
+
 a = Analysis(
     [str(repo_root / "KikuMoe.py")],
     pathex=[str(repo_root)],
     binaries=binaries_list,
     datas=datas,
-    hiddenimports=["certifi", "mpv", "pyaudio", "_portaudio"],
+    hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[str(repo_root / "pyi_rthook_vlc.py")],

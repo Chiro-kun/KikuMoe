@@ -12,6 +12,7 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Avvio](#avvio)
 - [Interfaccia](#interfaccia)
 - [Mini player](#mini-player)
+- [Controlli multimediali di sistema](#controlli-multimediali-di-sistema)
 - [Funzionalità](#funzionalità)
 - [Impostazioni](#impostazioni)
 - [Discord Rich Presence](#discord-rich-presence)
@@ -23,6 +24,18 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Build](#build)
 
 ---
+
+## Controlli multimediali di sistema
+
+KikuMoe supporta i controlli multimediali di Windows (SMTC) e Linux (MPRIS).
+Il sistema può mostrare titolo, artista, stazione e copertina disponibili;
+i controlli permettono di avviare, mettere in pausa o fermare la radio. Su Linux
+è disponibile anche il controllo del volume MPRIS. Gli stream radio non
+supportano lo spostamento nella traccia o il salto al brano successivo.
+
+Su Linux è necessaria una sessione D-Bus. Su Windows, se SMTC non è disponibile,
+KikuMoe usa i messaggi multimediali della finestra come ripiego per i tasti
+supportati dal sistema.
 
 ## Mini player
 
