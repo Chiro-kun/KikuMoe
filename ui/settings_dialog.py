@@ -13,9 +13,11 @@ import sys
 from typing import List, Optional
 
 from PyQt6.QtCore import (
+    QEasingCurve,
     QElapsedTimer,
     QPoint,
     QPointF,
+    QPropertyAnimation,
     QRectF,
     QSettings,
     QSize,
@@ -41,6 +43,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -1234,9 +1237,29 @@ class SettingsDialog(QDialog):
         body_layout.addWidget(footer_frame)
 
         outer_layout.addLayout(body_layout, 1)
+        self._apply_toast = QLabel(self)
+        self._apply_toast.setObjectName("settingsApplyToast")
+        self._apply_toast.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._apply_toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._apply_toast.setStyleSheet(
+            "QLabel#settingsApplyToast { background: #202538; color: #f5f7ff; "
+            "border: 1px solid #ec186c; border-radius: 12px; "
+            "padding: 10px 18px; font-size: 13px; font-weight: 600; }"
+        )
+        self._apply_toast.hide()
+        self._toast_effect = QGraphicsOpacityEffect(self._apply_toast)
+        self._apply_toast.setGraphicsEffect(self._toast_effect)
+        self._toast_animation = QPropertyAnimation(self._toast_effect, b"opacity", self)
+        self._toast_animation.setDuration(180)
+        self._toast_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._toast_animation.finished.connect(self._on_toast_animation_finished)
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(self._hide_apply_toast)
         if hasattr(self, "cmb_station"):
             self.cmb_station.currentIndexChanged.connect(self._on_settings_station_changed)
             self._on_settings_station_changed()
+        self._applied_values = self._settings_values()
         if embedded:
             # When embedded, defer audio device enumeration to idle
             # so it never interrupts transitions
@@ -1258,6 +1281,8 @@ class SettingsDialog(QDialog):
             return
         self._devices_populated = True
         self._populate_audio_devices()
+        if hasattr(self, "_applied_values"):
+            self._applied_values["audio_device"] = self.cmb_audio_device.currentData()
 
     def set_tab(self, idx: int, animated: bool = False) -> None:
         """Programmatically switch to tab index (0=General, 1=Audio, 2=Advanced, 3=Info)."""
@@ -1308,6 +1333,18 @@ class SettingsDialog(QDialog):
         self._on_settings_station_changed()
         self.cmb_channel.setCurrentText(str(self.settings.value(KEY_CHANNEL, "J-POP")))
         self.cmb_format.setCurrentText(str(self.settings.value(KEY_FORMAT, "Vorbis")))
+        self.txt_vlc_path.setText(str(self.settings.value(KEY_LIBVLC_PATH, "") or ""))
+        try:
+            self.spin_network_caching.setValue(int(self.settings.value(KEY_NETWORK_CACHING, 1000)))
+        except (TypeError, ValueError):
+            self.spin_network_caching.setValue(1000)
+        if self._devices_populated:
+            saved_device = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+            try:
+                device_index = self.cmb_audio_device.findData(int(saved_device))
+            except (TypeError, ValueError):
+                device_index = 0
+            self.cmb_audio_device.setCurrentIndex(max(0, device_index))
         saved_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
         for i in range(self.cmb_audio_backend.count()):
             if self.cmb_audio_backend.itemData(i) == saved_backend:
@@ -1357,6 +1394,7 @@ class SettingsDialog(QDialog):
                     else "Auto"
                 )
                 self.about_widget.set_backend_name(be)
+        self._applied_values = self._settings_values()
 
     @staticmethod
     def _make_card(section_title: str):
@@ -1513,11 +1551,75 @@ class SettingsDialog(QDialog):
 
     def _on_apply(self):
         """Salva i valori senza chiudere il pannello."""
+        values = self._settings_values()
+        if values == self._applied_values:
+            self._show_apply_toast("settings_unchanged")
+            return
         self._save_settings()
+        self._applied_values = values
         try:
             self.settings_changed.emit()
         except Exception:
             pass
+        self._show_apply_toast("settings_saved")
+
+    def _settings_values(self) -> dict:
+        return {
+            "autoplay": self.chk_autoplay.isChecked(),
+            "discord_rpc": self.chk_discord_rpc.isChecked(),
+            "discord_id": self.txt_discord_client_id.text().strip(),
+            "sleep_stop": self.chk_sleep_stop.isChecked(),
+            "session_timer": self.chk_session_timer.isChecked(),
+            "dev_console": self.chk_dev_console.isChecked(),
+            "dev_show": self.chk_dev_show_dev.isChecked(),
+            "language": self.cmb_lang.currentIndex(),
+            "station": self.cmb_station.currentData() or DEFAULT_STATION,
+            "channel": self.cmb_channel.currentText(),
+            "format": self.cmb_format.currentText(),
+            "vlc_path": self.txt_vlc_path.text().strip(),
+            "network_caching": self.spin_network_caching.value(),
+            "tray": self.chk_tray_enabled.isChecked(),
+            "tray_hide": self.chk_tray_hide_on_minimize.isChecked(),
+            "tray_notifications": self.chk_tray_notifications.isChecked(),
+            "audio_backend": self.cmb_audio_backend.currentData() or "auto",
+            "audio_device": self.cmb_audio_device.currentData(),
+        }
+
+    def _position_apply_toast(self) -> None:
+        self._apply_toast.move(
+            (self.width() - self._apply_toast.width()) // 2,
+            (self.height() - self._apply_toast.height()) // 2,
+        )
+
+    def _show_apply_toast(self, message_key: str) -> None:
+        lang = "it" if self.cmb_lang.currentIndex() == 0 else "en"
+        self._apply_toast.setText(I18n(lang).t(message_key))
+        self._apply_toast.adjustSize()
+        self._position_apply_toast()
+        self._toast_timer.stop()
+        self._toast_animation.stop()
+        self._toast_effect.setOpacity(0.0)
+        self._apply_toast.show()
+        self._apply_toast.raise_()
+        self._toast_animation.setStartValue(0.0)
+        self._toast_animation.setEndValue(1.0)
+        self._toast_animation.start()
+        self._toast_timer.start(1800)
+
+    def _hide_apply_toast(self) -> None:
+        self._toast_animation.stop()
+        self._toast_animation.setStartValue(self._toast_effect.opacity())
+        self._toast_animation.setEndValue(0.0)
+        self._toast_animation.start()
+
+    def _on_toast_animation_finished(self) -> None:
+        if self._toast_effect.opacity() <= 0.0:
+            self._apply_toast.hide()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_apply_toast"):
+            self._position_apply_toast()
 
     def _on_ok(self):
         """Salva i valori e chiude il pannello."""
@@ -1582,13 +1684,15 @@ class SettingsDialog(QDialog):
         except Exception:
             pass
         try:
-            idx_data = self.cmb_audio_device.currentData()
-            if idx_data is None:
-                self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, "")
-            else:
-                self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, int(idx_data))
+            if self._devices_populated:
+                idx_data = self.cmb_audio_device.currentData()
+                if idx_data is None:
+                    self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, "")
+                else:
+                    self.settings.setValue(KEY_AUDIO_DEVICE_INDEX, int(idx_data))
         except Exception:
             pass
+        self._applied_values = self._settings_values()
 
     def showEvent(self, a0):
         try:

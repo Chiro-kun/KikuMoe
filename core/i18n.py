@@ -97,6 +97,8 @@ I18N: Dict[str, Dict[str, str]] = {
         "settings_ok": "OK",
         "settings_cancel": "Annulla",
         "settings_apply": "Applica",
+        "settings_saved": "Impostazioni salvate",
+        "settings_unchanged": "Nessuna modifica da applicare",
         # Audio backend selection
         "settings_audio_backend": "Backend audio",
         "settings_audio_backend_auto": "Automatico (FFmpeg → MPV → VLC)",
@@ -291,6 +293,8 @@ I18N: Dict[str, Dict[str, str]] = {
         "settings_ok": "OK",
         "settings_cancel": "Cancel",
         "settings_apply": "Apply",
+        "settings_saved": "Settings saved",
+        "settings_unchanged": "No changes to apply",
         # Audio backend selection
         "settings_audio_backend": "Audio backend",
         "settings_audio_backend_auto": "Auto (FFmpeg → MPV → VLC)",

@@ -134,6 +134,66 @@ def test_settings_dialog_and_toggles(qapp):
     assert hasattr(dlg, "btn_ok")
 
 
+def test_settings_apply_shows_and_restarts_toast(qapp, monkeypatch):
+    from ui.settings_dialog import SettingsDialog
+
+    dlg = SettingsDialog(embedded=True)
+    dlg.resize(400, 600)
+    dlg.show()
+    qapp.processEvents()
+    saved = []
+    monkeypatch.setattr(dlg, "_save_settings", lambda: saved.append(True))
+    emitted = []
+    dlg.settings_changed.connect(lambda: emitted.append(True))
+    dlg.cmb_lang.setCurrentIndex(0)
+    dlg._applied_values = dlg._settings_values()
+    dlg.btn_apply.click()
+    assert not saved and not emitted
+    assert dlg._apply_toast.text() == "Nessuna modifica da applicare"
+    initial_autoplay = dlg.chk_autoplay.isChecked()
+    dlg.chk_autoplay.setChecked(not initial_autoplay)
+    dlg.chk_autoplay.setChecked(initial_autoplay)
+    dlg.btn_apply.click()
+    assert not saved and not emitted
+    assert dlg._apply_toast.text() == "Nessuna modifica da applicare"
+    dlg.chk_autoplay.setChecked(not dlg.chk_autoplay.isChecked())
+    dlg.btn_apply.click()
+    assert saved == [True] and emitted == [True]
+    assert dlg._apply_toast.isVisible()
+    assert dlg._apply_toast.text() == "Impostazioni salvate"
+    assert abs(dlg._apply_toast.geometry().center().x() - dlg.rect().center().x()) <= 1
+    dlg._hide_apply_toast()
+    dlg.cmb_lang.setCurrentIndex(1)
+    dlg.btn_apply.click()
+    assert dlg._apply_toast.isVisible()
+    assert dlg._apply_toast.text() == "Settings saved"
+    dlg.btn_apply.click()
+    assert dlg._apply_toast.text() == "No changes to apply"
+    assert len(saved) == len(emitted) == 2
+    assert dlg._toast_timer.isActive()
+    dlg._hide_apply_toast()
+    dlg._toast_animation.setCurrentTime(dlg._toast_animation.duration())
+    assert dlg._apply_toast.isHidden()
+    dlg.close()
+
+
+def test_apply_before_device_enumeration_preserves_audio_device(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtCore import QSettings
+
+    import ui.settings_dialog as settings_module
+    from core.constants import KEY_AUDIO_DEVICE_INDEX
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_AUDIO_DEVICE_INDEX, 7)
+    monkeypatch.setattr(settings_module, "QSettings", lambda *args: settings)
+    dlg = settings_module.SettingsDialog(embedded=True)
+    assert not dlg._devices_populated
+    dlg.chk_autoplay.setChecked(not dlg.chk_autoplay.isChecked())
+    dlg._on_apply()
+    assert int(settings.value(KEY_AUDIO_DEVICE_INDEX)) == 7
+    dlg.close()
+
+
 def test_embedded_settings_slide_and_console_button(qapp):
     from PyQt6.QtWidgets import QWidget
 

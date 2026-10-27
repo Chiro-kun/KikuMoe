@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Settings Feedback**: Show a short, animated confirmation when settings are applied.
 - **Discord Rich Presence**: Optional local IPC integration for Discord desktop and compatible arRPC clients, with configurable Application ID, track metadata, artwork, playback state, and automatic reconnection.
 - **Multi-Station Radio Engine**:
   - Integrated community and partner web radio stations: LISTEN.moe (J-POP & K-POP), Gensokyo Radio (Touhou Project 24/7), ANISON.FM (Japanese anime music), Neuro 21 Radio (Neuro & Evil karaoke covers), and TruckersFM (Euro Truck & gaming hits).
