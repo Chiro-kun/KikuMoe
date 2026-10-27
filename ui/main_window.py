@@ -2680,7 +2680,7 @@ class ListenMoePlayer(QWidget):
             pass
 
     def _show_track_context_menu(
-        self, pos: QPoint | None = None, from_chevron: bool = False
+        self, pos: Optional[QPoint] = None, from_chevron: bool = False
     ) -> None:
         """Display context menu with Quick Search & Clipboard actions for current track."""
         try:
