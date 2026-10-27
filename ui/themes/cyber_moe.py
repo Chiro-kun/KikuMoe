@@ -41,11 +41,10 @@ PALETTE: Dict[str, str] = {
     "lyrics_skeleton_base": "#1affffff",
     "lyrics_skeleton_shine": "#4dffffff",
     # Radio selector glass
-    "station_glass_top": "#ee35394c",
-    "station_glass_middle": "#f01a1d2b",
-    "station_glass_bottom": "#f00c0e18",
-    "station_glass_rim": "#80ffffff",
-    "station_glass_glow": "#32ec186c",
+    "station_glass_top": "#df202332",
+    "station_glass_middle": "#e0161825",
+    "station_glass_bottom": "#e30c0e18",
+    "station_glass_rim": "#30ffffff",
     # Status Colors
     "status_online": "#00e676",  # Connected / audio playing
     "status_warning": "#ffab00",  # Buffering / reconnecting

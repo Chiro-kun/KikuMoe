@@ -36,7 +36,6 @@ from PyQt6.QtGui import (
     QPaintEvent,
     QPen,
     QPixmap,
-    QRadialGradient,
 )
 from PyQt6.QtWidgets import (
     QFrame,
@@ -515,24 +514,19 @@ class StationGlassPopover(QWidget):
         glass.setColorAt(1.0, QColor(PALETTE["station_glass_bottom"]))
         painter.fillPath(path, glass)
 
-        # A restrained reflection and accent glow suggest polished glass without
-        # depending on compositor-specific background blur.
+        # A subtle neutral reflection preserves the app's dark glass appearance.
         painter.save()
         painter.setClipPath(path)
-        glow = QRadialGradient(QPointF(w * 0.15, 0), w * 0.85)
-        glow.setColorAt(0.0, QColor(PALETTE["station_glass_glow"]))
-        glow.setColorAt(1.0, QColor(236, 24, 108, 0))
-        painter.fillRect(rect, glow)
         reflection = QLinearGradient(0, 0, 0, h * 0.45)
-        reflection.setColorAt(0.0, QColor(255, 255, 255, 30))
-        reflection.setColorAt(0.55, QColor(255, 255, 255, 7))
+        reflection.setColorAt(0.0, QColor(255, 255, 255, 12))
+        reflection.setColorAt(0.55, QColor(255, 255, 255, 3))
         reflection.setColorAt(1.0, QColor(255, 255, 255, 0))
         painter.fillRect(QRectF(0, 0, w, h * 0.45), reflection)
         painter.restore()
 
         painter.setPen(QPen(QColor(PALETTE["station_glass_rim"]), 1.0))
         painter.drawPath(path)
-        painter.setPen(QPen(QColor(255, 255, 255, 36), 1.0))
+        painter.setPen(QPen(QColor(255, 255, 255, 18), 1.0))
         painter.drawLine(QPointF(13, 2), QPointF(w - 13, 2))
         painter.end()
 
