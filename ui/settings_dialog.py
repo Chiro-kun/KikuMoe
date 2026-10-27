@@ -958,7 +958,7 @@ class SettingsDialog(QDialog):
         self.chk_autoplay.setToolTip(self.i18n.t("settings_autoplay_tip"))
         play_lay.addWidget(self.chk_autoplay)
 
-        self.chk_discord_rpc = AnimatedToggleSwitch("Discord Rich Presence")
+        self.chk_discord_rpc = AnimatedToggleSwitch(self.i18n.t("settings_discord_rpc"))
         self.chk_discord_rpc.setChecked(
             self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
         )
@@ -966,9 +966,12 @@ class SettingsDialog(QDialog):
         self.txt_discord_client_id = QLineEdit(str(self.settings.value(KEY_DISCORD_CLIENT_ID, "")))
         self.txt_discord_client_id.setPlaceholderText("KikuMoe (default)")
         self.discord_id_row = QWidget()
-        self.discord_id_row.setLayout(
-            self._make_field_row("Discord Application ID", self.txt_discord_client_id)
+        discord_id_layout = self._make_field_row(
+            self.i18n.t("settings_discord_id"), self.txt_discord_client_id
         )
+        discord_label_item = discord_id_layout.itemAt(0)
+        self.discord_id_label = discord_label_item.widget() if discord_label_item else None
+        self.discord_id_row.setLayout(discord_id_layout)
         self.discord_id_row.setVisible(self.chk_discord_rpc.isChecked())
         self.chk_discord_rpc.toggled.connect(self.discord_id_row.setVisible)
         play_lay.addWidget(self.discord_id_row)
@@ -1340,6 +1343,9 @@ class SettingsDialog(QDialog):
         self.settings.sync()
         lang = str(self.settings.value(KEY_LANG, "it"))
         self.i18n.set_lang(lang)
+        self.chk_discord_rpc.setText(self.i18n.t("settings_discord_rpc"))
+        if isinstance(self.discord_id_label, QLabel):
+            self.discord_id_label.setText(self.i18n.t("settings_discord_id"))
         self.cmb_lang.setCurrentIndex(0 if lang == "it" else 1)
         saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
         for i in range(self.cmb_station.count()):

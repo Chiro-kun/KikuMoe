@@ -213,14 +213,22 @@ class MiniHud(QWidget):
         if pixmap is None or pixmap.isNull():
             self.cover.clear()
             return
-        self.cover.setPixmap(
-            pixmap.scaled(
-                58,
-                58,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        size = 58.0
+        dpr = max(1.0, self.cover.devicePixelRatioF())
+        rounded = QPixmap(round(size * dpr), round(size * dpr))
+        rounded.setDevicePixelRatio(dpr)
+        rounded.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(rounded)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(0, 0, size, size), 8, 8)
+        painter.setClipPath(clip)
+        side = float(min(pixmap.width(), pixmap.height()))
+        source = QRectF((pixmap.width() - side) / 2, (pixmap.height() - side) / 2, side, side)
+        painter.drawPixmap(QRectF(0, 0, size, size), pixmap, source)
+        painter.end()
+        self.cover.setPixmap(rounded)
 
     def mousePressEvent(self, event: Optional[QMouseEvent]) -> None:
         if event is not None and event.button() == Qt.MouseButton.LeftButton:

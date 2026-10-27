@@ -708,3 +708,23 @@ def test_mini_hud_marquee_and_paused_playback(qapp):
     )
     ListenMoePlayer._tray_toggle_play_pause(window)
     assert actions == ["resume"]
+
+
+def test_mini_hud_cover_is_rounded_and_clears(qapp):
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from ui.widgets.mini_hud import MiniHud
+
+    hud = MiniHud()
+    cover = QPixmap(90, 60)
+    cover.fill(QColor("red"))
+    hud.set_cover(cover)
+    pixmap = hud.cover.pixmap()
+    assert pixmap is not None
+    image = pixmap.toImage()
+    assert image.pixelColor(0, 0).alpha() == 0
+    assert image.pixelColor(image.width() // 2, image.height() // 2).red() == 255
+    assert image.pixelColor(image.width() // 2, image.height() // 2).alpha() == 255
+    hud.set_cover(None)
+    assert hud.cover.pixmap() is None or hud.cover.pixmap().isNull()
+    hud.close()

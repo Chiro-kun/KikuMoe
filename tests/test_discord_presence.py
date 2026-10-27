@@ -140,6 +140,8 @@ def test_custom_id_row_follows_toggle(tmp_path, monkeypatch):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     monkeypatch.setattr(settings_module, "QSettings", lambda *args: settings)
     dialog = settings_module.SettingsDialog(embedded=True)
+    assert dialog.chk_discord_rpc.text() == dialog.i18n.t("settings_discord_rpc")
+    assert dialog.discord_id_label.text() == dialog.i18n.t("settings_discord_id")
     assert dialog.discord_id_row.isHidden()
     dialog.chk_discord_rpc.setChecked(True)
     assert not dialog.discord_id_row.isHidden()
@@ -147,5 +149,9 @@ def test_custom_id_row_follows_toggle(tmp_path, monkeypatch):
     dialog.chk_discord_rpc.setChecked(False)
     assert dialog.discord_id_row.isHidden()
     assert dialog.txt_discord_client_id.text() == "987654321"
+    settings.setValue("lang", "en")
+    dialog.reload_from_settings()
+    assert dialog.chk_discord_rpc.text() == "Enable Discord Rich Presence"
+    assert dialog.discord_id_label.text() == "Discord Application ID"
     dialog.close()
     qapp.processEvents()

@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **Mini Player Artwork**: Clip album covers to rounded corners, including on high-DPI displays.
+- **Discord Settings Labels**: Match the wording and localization of the other settings.
 - **Settings Horizontal Clipping**: Allow horizontal scrolling when a narrow window cannot fit a settings page, and keep the audio device selector flexible.
 - **Minimum Window Size**: Prevent the main window from being resized below the height needed by the player layout.
 - **Compact Settings Layout**: Settings pages scroll vertically when the window is too small for their contents, preventing overlapping cards while keeping the action buttons visible.
