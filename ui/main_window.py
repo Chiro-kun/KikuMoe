@@ -123,7 +123,7 @@ from ui.widgets.ambient_cover import (
     TrackHoverGroup,
 )
 from ui.widgets.history_button import HistoryIconButton
-from ui.widgets.mini_hud import MiniHud, MiniIconButton
+from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniIconButton
 from ui.widgets.playback_controls import PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
@@ -1283,7 +1283,7 @@ class ListenMoePlayer(QWidget):
             if cover is not None and not cover.isNull():
                 self.mini_hud.set_cover(cover)
             else:
-                self.mini_hud.set_cover(self._icon_app.pixmap(58, 58))
+                self.mini_hud.set_cover(self._icon_app.pixmap(MINI_COVER_SIZE, MINI_COVER_SIZE))
 
     def toggle_mini_hud(self) -> None:
         if not self._mini_mode:
@@ -1297,10 +1297,10 @@ class ListenMoePlayer(QWidget):
             grip = self.findChild(QSizeGrip)
             if grip is not None:
                 grip.hide()
-            self.setMinimumSize(320, 88)
-            self.setMaximumSize(16777215, 100)
+            self.setMinimumSize(400, 104)
+            self.setMaximumSize(16777215, 140)
             self.mini_hud.show()
-            self.resize(360, 88)
+            self.resize(420, 112)
             geometry = self.settings.value(KEY_MINI_GEOMETRY)
             if geometry:
                 self.restoreGeometry(geometry)

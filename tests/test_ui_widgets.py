@@ -617,12 +617,16 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     from types import SimpleNamespace
 
     from PyQt6.QtCore import QSettings, Qt
+    from PyQt6.QtWidgets import QWidget
 
     from core.constants import KEY_MINI_ALWAYS_ON_TOP, KEY_MINI_GEOMETRY, KEY_WINDOW_GEOMETRY
     from ui import main_window
 
     cls = main_window.ListenMoePlayer
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    old_mini = QWidget()
+    old_mini.resize(360, 88)
+    settings.setValue(KEY_MINI_GEOMETRY, old_mini.saveGeometry())
     monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
     monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
     monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
@@ -641,7 +645,9 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     window.toggle_mini_hud()
     qapp.processEvents()
     assert window._mini_mode and window.mini_hud.isVisible()
-    assert window.height() <= 100
+    assert 400 <= window.width() and 104 <= window.height() <= 140
+    assert window.mini_hud.cover.width() == 68
+    assert window.mini_hud.track_progress.width() > 40
     assert window.mini_hud.title._text == "A long song title"
     assert window.mini_hud.artist._text == "Artist"
     assert window.mini_hud.play_button.kind == "pause"

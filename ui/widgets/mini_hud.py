@@ -27,6 +27,8 @@ from PyQt6.QtWidgets import (
 
 from ui.themes.cyber_moe import PALETTE
 
+MINI_COVER_SIZE = 68
+
 
 class MarqueeLabel(QWidget):
     def __init__(self, color: str, bold: bool = False, parent: Optional[QWidget] = None):
@@ -38,7 +40,7 @@ class MarqueeLabel(QWidget):
         self.setFixedHeight(18)
         self.setMinimumWidth(0)
         font = QFont("Segoe UI")
-        font.setPixelSize(12 if bold else 11)
+        font.setPixelSize(13 if bold else 12)
         font.setBold(bold)
         self.setFont(font)
         self._timer = QTimer(self)
@@ -177,15 +179,15 @@ class MiniHud(QWidget):
             "border-radius: 2px; }"
         )
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(9)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(12)
         self.cover = QLabel()
-        self.cover.setFixedSize(58, 58)
+        self.cover.setFixedSize(MINI_COVER_SIZE, MINI_COVER_SIZE)
         self.cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cover.setStyleSheet("background: #25293a; border-radius: 8px;")
         layout.addWidget(self.cover)
         details = QVBoxLayout()
-        details.setSpacing(1)
+        details.setSpacing(3)
         self.title = MarqueeLabel("#ffffff", True)
         self.artist = MarqueeLabel("#a0a5b8")
         details.addWidget(self.title)
@@ -335,7 +337,7 @@ class MiniHud(QWidget):
         if pixmap is None or pixmap.isNull():
             self.cover.clear()
             return
-        size = 58.0
+        size = float(MINI_COVER_SIZE)
         dpr = max(1.0, self.cover.devicePixelRatioF())
         rounded = QPixmap(round(size * dpr), round(size * dpr))
         rounded.setDevicePixelRatio(dpr)

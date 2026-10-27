@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rendered across the Now Playing context menu, history popover action buttons, and system tray.
 
 ### Changed
+- **Mini Player Layout**: Increased its compact window size and cover art to give track information, progress, and volume more room.
 - **Scrollbars**: Apply Cyber-Moe track and accent colors to vertical and horizontal scrollbars, with hover and pressed states defined in the theme palette.
 - **Track Metadata Hover**: Connected title and artist highlights follow each text width, fade smoothly, and open the track actions from either row.
 - **Apple Music Icon**: Refined the gradient badge and music note for clearer rendering at menu sizes.
