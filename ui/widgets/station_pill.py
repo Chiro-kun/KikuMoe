@@ -30,11 +30,13 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QGuiApplication,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPaintEvent,
     QPen,
     QPixmap,
+    QRadialGradient,
 )
 from PyQt6.QtWidgets import (
     QFrame,
@@ -260,9 +262,15 @@ class SimpleStationRow(QPushButton):
 
     def _update_style(self) -> None:
         if self._hovered:
-            bg = "rgba(236, 24, 108, 0.22)"
+            bg = (
+                "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                "stop:0 rgba(255, 120, 175, 0.24), stop:1 rgba(236, 24, 108, 0.13))"
+            )
         elif self.is_selected:
-            bg = "rgba(255, 255, 255, 0.05)"
+            bg = (
+                "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                "stop:0 rgba(255, 255, 255, 0.10), stop:1 rgba(255, 255, 255, 0.03))"
+            )
         else:
             bg = "transparent"
 
@@ -498,16 +506,34 @@ class StationGlassPopover(QWidget):
         h = float(self.height())
         rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
 
-        # Solid dark cyber-glass with subtle magenta border
-        bg = QColor(18, 20, 32, 245)
-        border = QColor(236, 24, 108, 120)
-
         path = QPainterPath()
-        path.addRoundedRect(rect, 10.0, 10.0)
+        path.addRoundedRect(rect, 12.0, 12.0)
 
-        painter.fillPath(path, bg)
-        painter.setPen(QPen(border, 1.0))
+        glass = QLinearGradient(0, 0, 0, h)
+        glass.setColorAt(0.0, QColor(PALETTE["station_glass_top"]))
+        glass.setColorAt(0.32, QColor(PALETTE["station_glass_middle"]))
+        glass.setColorAt(1.0, QColor(PALETTE["station_glass_bottom"]))
+        painter.fillPath(path, glass)
+
+        # A restrained reflection and accent glow suggest polished glass without
+        # depending on compositor-specific background blur.
+        painter.save()
+        painter.setClipPath(path)
+        glow = QRadialGradient(QPointF(w * 0.15, 0), w * 0.85)
+        glow.setColorAt(0.0, QColor(PALETTE["station_glass_glow"]))
+        glow.setColorAt(1.0, QColor(236, 24, 108, 0))
+        painter.fillRect(rect, glow)
+        reflection = QLinearGradient(0, 0, 0, h * 0.45)
+        reflection.setColorAt(0.0, QColor(255, 255, 255, 30))
+        reflection.setColorAt(0.55, QColor(255, 255, 255, 7))
+        reflection.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.fillRect(QRectF(0, 0, w, h * 0.45), reflection)
+        painter.restore()
+
+        painter.setPen(QPen(QColor(PALETTE["station_glass_rim"]), 1.0))
         painter.drawPath(path)
+        painter.setPen(QPen(QColor(255, 255, 255, 36), 1.0))
+        painter.drawLine(QPointF(13, 2), QPointF(w - 13, 2))
         painter.end()
 
 
