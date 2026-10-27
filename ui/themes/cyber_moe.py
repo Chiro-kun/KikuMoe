@@ -81,11 +81,6 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
     }}
     QScrollArea#lyricsScroll {{ border: 0; background: transparent; }}
     QLabel#lyricsHeading {{ color: {accent}; font-size: 10px; font-weight: 800; }}
-    QPushButton#lyricsButton {{
-        background-color: {bg_subtle}; border: 1px solid {border_card};
-        border-radius: 11px; padding: 4px 12px; font-weight: 700;
-    }}
-    QPushButton#lyricsButton:checked {{ background-color: {accent}; color: white; }}
 
     /* Glass Cards */
     QFrame#glassCard, QWidget#glassCard {{

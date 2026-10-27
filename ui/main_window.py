@@ -42,7 +42,6 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
-    QPushButton,
     QSizeGrip,
     QSizePolicy,
     QStyle,
@@ -129,7 +128,7 @@ from ui.widgets.ambient_cover import (
 from ui.widgets.history_button import HistoryIconButton
 from ui.widgets.lyrics_panel import LyricsPanel
 from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniIconButton
-from ui.widgets.playback_controls import PlaybackControls
+from ui.widgets.playback_controls import LyricsButton, PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
 from ui.widgets.station_pill import StationPillButton
@@ -805,10 +804,10 @@ class ListenMoePlayer(QWidget):
         track_box.addWidget(self.track_hover_group)
         self._layout.addLayout(track_box)
 
-        self.lyrics_button = QPushButton(self.i18n.t("lyrics_button"))
+        self.lyrics_button = LyricsButton()
         self.lyrics_button.setObjectName("lyricsButton")
-        self.lyrics_button.setCheckable(True)
-        self.lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lyrics_button.setToolTip(self.i18n.t("lyrics_button"))
+        self.lyrics_button.setAccessibleName(self.i18n.t("lyrics_button"))
         self.lyrics_button.toggled.connect(self._toggle_lyrics)
 
         # Legacy label
@@ -857,8 +856,8 @@ class ListenMoePlayer(QWidget):
         self.song_time_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         time_row.addWidget(self.song_elapsed_label)
-        time_row.addWidget(self.stream_tag_label, 1)
         time_row.addWidget(self.lyrics_button)
+        time_row.addWidget(self.stream_tag_label, 1)
         time_row.addWidget(self.song_time_label)
         prog_box.addLayout(time_row)
 
@@ -2344,7 +2343,8 @@ class ListenMoePlayer(QWidget):
 
     def apply_translations(self):
         if hasattr(self, "lyrics_button"):
-            self.lyrics_button.setText(self.t("lyrics_button"))
+            self.lyrics_button.setToolTip(self.t("lyrics_button"))
+            self.lyrics_button.setAccessibleName(self.t("lyrics_button"))
         if hasattr(self, "mini_hud"):
             self.mini_button.setToolTip(self.t("mini_mode"))
             self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
@@ -2493,6 +2493,8 @@ class ListenMoePlayer(QWidget):
                 self.song_progress.setAccentColor(accent)
             if hasattr(self, "lyrics_panel"):
                 self.lyrics_panel.set_accent(accent)
+            if hasattr(self, "lyrics_button"):
+                self.lyrics_button.set_accent_color(accent)
 
             try:
                 self._set_album_cover_pixmap(self._cover_cache.get(self._current_cover_url or ""))

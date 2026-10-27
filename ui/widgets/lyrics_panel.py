@@ -63,6 +63,7 @@ class LyricsPanel(QWidget):
         self.scroll.setObjectName("lyricsScroll")
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.viewport().installEventFilter(self)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)

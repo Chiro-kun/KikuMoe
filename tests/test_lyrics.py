@@ -81,6 +81,7 @@ def test_synced_lyrics_center_and_animate_through_line_changes(qapp):
     panel = LyricsPanel()
     panel.resize(320, 222)
     panel.show()
+    assert panel.scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     panel.show_record(
         {"syncedLyrics": "\n".join(f"[00:{n:02}.00]Line {n}" for n in range(1, 9))}, "Plain"
     )

@@ -726,6 +726,9 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     qapp.processEvents()
     assert window.width() >= 650
     assert window.lyrics_panel.isVisible()
+    assert window.lyrics_button.isCheckable()
+    assert window.lyrics_button.toolTip() == window.i18n.t("lyrics_button")
+    assert not window.lyrics_button.text()
     assert window.ambient_cover.width() == window._album_cover_size + 26
     assert window.lyrics_panel.x() > window.ambient_cover.x()
     assert calls == [("Song", "Artist", 120)]
