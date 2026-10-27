@@ -647,8 +647,14 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     assert window.mini_hud.play_button.kind == "pause"
     window.mini_hud.volume.setValue(37)
     assert window.volume_slider.value() == 37
+    assert window.mini_hud.volume_popup.isVisible()
+    assert window.mini_hud.volume_popup.text() == "37%"
+    first_x = window.mini_hud.volume_popup.x()
     window.volume_slider.setValue(55)
     assert window.mini_hud.volume.value() == 55
+    assert window.mini_hud.volume_popup.text() == "55%"
+    assert window.mini_hud.volume_popup.x() > first_x
+    assert window.mini_hud._volume_timer.isActive()
     window.mini_hud.play_button.click()
     assert calls == ["play"]
     window.mini_hud.pin_button.setChecked(True)
@@ -658,6 +664,7 @@ def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_p
     window.toggle_mini_hud()
     qapp.processEvents()
     assert not window._mini_mode and window.height() >= 700
+    assert window.mini_hud.volume_popup.isHidden()
     assert not window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
     assert settings.value(KEY_WINDOW_GEOMETRY) is not None
     assert settings.value(KEY_MINI_GEOMETRY) is not None

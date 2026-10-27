@@ -620,7 +620,7 @@ class AnimatedToggleSwitch(QCheckBox):
         painter.setPen(text_col)
         font = QFont(self.font())
         font.setPixelSize(12 if w < 350 else 13)
-        font.setWeight(QFont.Weight.DemiBold if self.isChecked() else QFont.Weight.Medium)
+        font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(font)
 
         sw_w = 42.0
@@ -1486,7 +1486,7 @@ class SettingsDialog(QDialog):
         QLabel#settingsFieldLabel {{
             color: #e4e8f6;
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 700;
             background: transparent;
             border: none;
             padding-left: 2px;

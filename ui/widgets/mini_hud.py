@@ -2,9 +2,19 @@
 
 from typing import Optional
 
-from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -180,6 +190,25 @@ class MiniHud(QWidget):
         self.volume.setFixedHeight(18)
         self.volume.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         details.addWidget(self.volume)
+        self.volume_popup = QLabel(self)
+        self.volume_popup.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.volume_popup.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.volume_popup.setStyleSheet(
+            f"background: {PALETTE['bg_surface_elevated']}; color: {PALETTE['text_primary']}; "
+            f"border: 1px solid {PALETTE['accent']}; border-radius: 6px; "
+            "font-size: 11px; font-weight: 700; padding: 3px 7px;"
+        )
+        self.volume_popup.hide()
+        self._volume_opacity = QGraphicsOpacityEffect(self.volume_popup)
+        self.volume_popup.setGraphicsEffect(self._volume_opacity)
+        self._volume_animation = QPropertyAnimation(self._volume_opacity, b"opacity", self)
+        self._volume_animation.setDuration(160)
+        self._volume_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._volume_animation.finished.connect(self._finish_volume_animation)
+        self._volume_timer = QTimer(self)
+        self._volume_timer.setSingleShot(True)
+        self._volume_timer.timeout.connect(self._hide_volume_popup)
+        self.volume.valueChanged.connect(self._show_volume_popup)
         layout.addLayout(details, 1)
         controls = QVBoxLayout()
         controls.setSpacing(4)
@@ -208,6 +237,49 @@ class MiniHud(QWidget):
         window = self.window()
         if window is not None:
             window.close()
+
+    def _show_volume_popup(self, value: int) -> None:
+        if not self.isVisible():
+            return
+        self.volume_popup.setText(f"{value}%")
+        self.volume_popup.adjustSize()
+        slider_pos = self.volume.mapTo(self, QPoint(0, 0))
+        usable_width = max(0, self.volume.width() - 14)
+        center_x = slider_pos.x() + 7 + round(usable_width * value / 100)
+        x = max(
+            2,
+            min(
+                self.width() - self.volume_popup.width() - 2,
+                center_x - self.volume_popup.width() // 2,
+            ),
+        )
+        y = max(2, slider_pos.y() - self.volume_popup.height() - 2)
+        self.volume_popup.move(x, y)
+        was_hidden = self.volume_popup.isHidden()
+        self._volume_animation.stop()
+        self._volume_timer.stop()
+        self.volume_popup.show()
+        self.volume_popup.raise_()
+        self._volume_animation.setStartValue(0.0 if was_hidden else self._volume_opacity.opacity())
+        self._volume_animation.setEndValue(1.0)
+        self._volume_animation.start()
+        self._volume_timer.start(1200)
+
+    def _hide_volume_popup(self) -> None:
+        self._volume_animation.stop()
+        self._volume_animation.setStartValue(self._volume_opacity.opacity())
+        self._volume_animation.setEndValue(0.0)
+        self._volume_animation.start()
+
+    def _finish_volume_animation(self) -> None:
+        if self._volume_opacity.opacity() <= 0.0:
+            self.volume_popup.hide()
+
+    def hideEvent(self, event) -> None:
+        self._volume_timer.stop()
+        self._volume_animation.stop()
+        self.volume_popup.hide()
+        super().hideEvent(event)
 
     def set_cover(self, pixmap: Optional[QPixmap]) -> None:
         if pixmap is None or pixmap.isNull():
