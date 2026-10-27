@@ -877,6 +877,7 @@ class ListenMoePlayer(QWidget):
 
     def _toggle_lyrics(self, enabled):
         self.lyrics_panel.setVisible(enabled)
+        self.ambient_cover.setMaximumWidth(self._album_cover_size + 26 if enabled else 16777215)
         if enabled:
             if self.width() < 650 and not self.isMaximized():
                 self._lyrics_original_width = self.width()

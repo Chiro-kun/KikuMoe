@@ -1,3 +1,7 @@
+import threading
+import time
+from urllib.error import HTTPError
+
 import pytest
 from PyQt6.QtWidgets import QApplication
 
@@ -31,16 +35,29 @@ def test_search_rejects_unrelated_tracks_and_wrong_duration():
 def test_provider_cancels_stale_fallback_and_reuses_cached_results(qapp, monkeypatch):
     provider = LyricsProvider()
     calls, results = [], []
-    monkeypatch.setattr(provider, "_request", lambda *args: calls.append(args))
+    started, release = threading.Event(), threading.Event()
+
+    def request(endpoint, params):
+        calls.append((endpoint, params))
+        if params["track_name"] == "Song":
+            started.set()
+            release.wait(2)
+        return {"plainLyrics": params["track_name"]}
+
+    monkeypatch.setattr(provider, "_request", request)
     provider.finished.connect(lambda record, status: results.append((record, status)))
     provider.search("Song", "Artist", 200)
-    old_generation = provider.generation
+    assert started.wait(2)
     provider.search("New", "Artist", 180)
-    provider._fallback({}, ("Song", "Artist", 200), old_generation)
+    release.set()
+    deadline = time.monotonic() + 3
+    while not results and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert results == [({"plainLyrics": "New"}, "ok")]
     assert len(calls) == 2
-    provider.cache[("Song", "Artist", 200)] = {"plainLyrics": "Words"}
-    provider.search("Song", "Artist", 200)
-    assert results[-1] == ({"plainLyrics": "Words"}, "ok")
+    provider.search("New", "Artist", 180)
+    assert results[-1] == ({"plainLyrics": "New"}, "ok")
     assert len(calls) == 2
 
 
@@ -56,3 +73,27 @@ def test_panel_tracks_active_line_and_supports_plain_lyrics(qapp):
     assert panel.labels[0].text() == "Plain"
     assert panel.labels[1].text() == "Just text"
     panel.close()
+
+
+def test_lookup_falls_back_after_404_and_honors_retry_after(qapp, monkeypatch):
+    provider = LyricsProvider()
+    calls = []
+
+    def request(endpoint, params):
+        calls.append(endpoint)
+        if endpoint == "get":
+            raise HTTPError("https://lrclib.net", 404, "Not found", {}, None)
+        return [{"trackName": "Song", "artistName": "Artist", "duration": 200}]
+
+    monkeypatch.setattr(provider, "_request", request)
+    record, status, retry = provider._lookup({}, ("Song", "Artist", 200), provider.generation)
+    assert calls == ["get", "search"]
+    assert status == "ok" and record["trackName"] == "Song" and retry == 0
+
+    def rate_limited(endpoint, params):
+        raise HTTPError("https://lrclib.net", 429, "Rate limited", {"Retry-After": "30"}, None)
+
+    monkeypatch.setattr(provider, "_request", rate_limited)
+    record, status, retry = provider._lookup({}, ("Song", "Artist", 200), provider.generation)
+    assert record is None and status == "error"
+    assert retry >= time.monotonic() + 29

@@ -1,16 +1,22 @@
 """LRCLIB lookup and timestamped lyric parsing."""
 
 import json
+import logging
 import re
+import threading
+import time
+import urllib.error
+import urllib.request
 from difflib import SequenceMatcher
 from urllib.parse import urlencode
 
-from PyQt6.QtCore import QObject, QTimer, QUrl, pyqtSignal
-from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from core.constants import APP_VERSION, URL_FORGEJO
+from core.ssl_compat import get_ssl_context
 
 _TIME = re.compile(r"\[(\d+):(\d{1,2}(?:\.\d+)?)\]")
+logger = logging.getLogger("kikumoe.lyrics")
 
 
 def parse_lrc(text):
@@ -54,27 +60,28 @@ def select_match(records, title, artist, duration):
 
 
 class LyricsProvider(QObject):
-    """Single in-flight, cancellable LRCLIB lookup; results always delivered on Qt's thread."""
+    """Perform sequential LRCLIB lookups off the UI thread, ignoring stale results."""
 
     finished = pyqtSignal(object, str)
+    _result = pyqtSignal(int, object, object, str, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.manager = QNetworkAccessManager(self)
-        self.reply = None
         self.generation = 0
         self.cache = {}
         self.retry_after = 0.0
+        self._lock = threading.Lock()
+        self._pending = None
+        self._worker = None
+        self._last_request = 0.0
+        self._result.connect(self._deliver)
 
     def cancel(self):
         self.generation += 1
-        if self.reply is not None:
-            reply, self.reply = self.reply, None
-            reply.abort()
+        with self._lock:
+            self._pending = None
 
     def search(self, title, artist, duration=0):
-        import time
-
         self.cancel()
         title, artist = str(title or "").strip(), str(artist or "").strip()
         if not title or not artist or title in ("–", "-"):
@@ -90,57 +97,83 @@ class LyricsProvider(QObject):
         params = {"track_name": title, "artist_name": artist}
         if 0 < (duration or 0) <= 3600:
             params["duration"] = int(duration)
-        self._request("get", params, key, self.generation)
+        with self._lock:
+            self._pending = (params, key, self.generation)
+            if self._worker is None:
+                self._worker = threading.Thread(target=self._run, name="LyricsLookup", daemon=True)
+                self._worker.start()
 
-    def _request(self, endpoint, params, key, generation):
+    def _request(self, endpoint, params):
+        delay = 0.3 - (time.monotonic() - self._last_request)
+        if delay > 0:
+            time.sleep(delay)
+        self._last_request = time.monotonic()
         url = "https://lrclib.net/api/" + endpoint + "?" + urlencode(params)
-        request = QNetworkRequest(QUrl(url))
-        request.setRawHeader(b"User-Agent", f"KikuMoe/{APP_VERSION} ({URL_FORGEJO})".encode())
-        request.setTransferTimeout(8000)
-        reply = self.manager.get(request)
-        self.reply = reply
-        reply.finished.connect(lambda: self._completed(reply, endpoint, key, generation))
+        request = urllib.request.Request(
+            url, headers={"User-Agent": f"KikuMoe/{APP_VERSION} ({URL_FORGEJO})"}
+        )
+        with urllib.request.urlopen(request, timeout=8, context=get_ssl_context()) as response:
+            return json.loads(response.read(2_000_000).decode("utf-8"))
 
-    def _completed(self, reply, endpoint, key, generation):
-        import time
-
-        if self.reply is reply:
-            self.reply = None
-        status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
-        body = bytes(reply.readAll())
-        error = reply.error()
-        retry = bytes(reply.rawHeader(b"Retry-After"))
-        reply.deleteLater()
-        if generation != self.generation:
-            return
-        if status in (429, 503):
-            try:
-                self.retry_after = time.monotonic() + max(1, int(retry))
-            except ValueError:
-                self.retry_after = time.monotonic() + 60
-            self.finished.emit(None, "error")
-            return
-        if endpoint == "get" and status == 404:
-            params = {"track_name": key[0], "artist_name": key[1]}
-            QTimer.singleShot(300, lambda: self._fallback(params, key, generation))
-            return
-        if error != QNetworkReply.NetworkError.NoError or status != 200:
-            self.finished.emit(None, "error")
-            return
+    def _lookup(self, params, key, generation):
         try:
-            data = json.loads(body.decode("utf-8"))
-            record = data if endpoint == "get" and isinstance(data, dict) else None
-            if endpoint == "search" and isinstance(data, list):
-                record = select_match(data, *key)
-        except (ValueError, UnicodeDecodeError):
-            self.finished.emit(None, "error")
+            try:
+                data = self._request("get", params)
+                record = data if isinstance(data, dict) else None
+            except urllib.error.HTTPError as exc:
+                if exc.code != 404:
+                    raise
+                if generation != self.generation:
+                    return None, "cancelled", 0.0
+                data = self._request("search", {"track_name": key[0], "artist_name": key[1]})
+                record = None
+                if isinstance(data, list):
+                    record = select_match(data, *key)
+            if record is not None and not isinstance(record, dict):
+                record = None
+            return record, "ok" if record else "missing", 0.0
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 503):
+                try:
+                    delay = max(1, int(exc.headers.get("Retry-After", "60")))
+                except (TypeError, ValueError):
+                    delay = 60
+                logger.warning("LRCLIB returned HTTP %s; retry in %s seconds", exc.code, delay)
+                return None, "error", time.monotonic() + delay
+            logger.warning("LRCLIB request failed: HTTP %s", exc.code)
+            return None, "error", 0.0
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            logger.warning("LRCLIB request failed: %s", exc)
+            return None, "error", 0.0
+
+    def _run(self):
+        while True:
+            with self._lock:
+                job, self._pending = self._pending, None
+                if job is None:
+                    self._worker = None
+                    return
+            params, key, generation = job
+            if time.monotonic() < self.retry_after:
+                record, status, retry_after = None, "error", self.retry_after
+            else:
+                try:
+                    record, status, retry_after = self._lookup(params, key, generation)
+                except Exception:
+                    logger.exception("Unexpected LRCLIB lookup error")
+                    record, status, retry_after = None, "error", 0.0
+            self.retry_after = max(self.retry_after, retry_after)
+            try:
+                self._result.emit(generation, key, record, status, retry_after)
+            except RuntimeError:
+                return
+
+    def _deliver(self, generation, key, record, status, retry_after):
+        self.retry_after = max(self.retry_after, retry_after)
+        if generation != self.generation:
             return
         if record is not None:
             if len(self.cache) >= 100:
                 self.cache.pop(next(iter(self.cache)))
             self.cache[key] = record
-        self.finished.emit(record, "ok" if record else "missing")
-
-    def _fallback(self, params, key, generation):
-        if generation == self.generation:
-            self._request("search", params, key, generation)
+        self.finished.emit(record, status)

@@ -36,8 +36,8 @@ PALETTE: Dict[str, str] = {
     "scrollbar_handle": "rgba(236, 24, 108, 0.48)",
     "scrollbar_handle_hover": "#ec186c",
     "scrollbar_handle_pressed": "#ff2a85",
-    "lyrics_background": "rgba(18, 20, 32, 0.76)",
-    "lyrics_border": "rgba(255, 255, 255, 0.12)",
+    "lyrics_background": "transparent",
+    "lyrics_border": "transparent",
     # Status Colors
     "status_online": "#00e676",  # Connected / audio playing
     "status_warning": "#ffab00",  # Buffering / reconnecting
