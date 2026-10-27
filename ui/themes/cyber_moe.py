@@ -362,7 +362,6 @@ def get_cyber_moe_stylesheet(accent: str = PALETTE["accent"]) -> str:
         background-color: #1a1d2e;
         color: {text_primary};
         border: 1px solid {border_card};
-        border-radius: 6px;
         padding: 4px 8px;
         font-size: 11px;
     }}

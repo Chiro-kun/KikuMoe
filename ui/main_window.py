@@ -3775,10 +3775,11 @@ class ListenMoePlayer(QWidget):
                     txt = f"{ver}"
             except Exception:
                 txt = None
-            if not ok:
-                self.vlc_status.setText(self.i18n.t("vlc_not_found"))  # type: ignore[attr-defined]
-            else:
-                self.vlc_status.setText(txt or "Audio backend OK")  # type: ignore[attr-defined]
+            if hasattr(self, "vlc_status"):
+                if not ok:
+                    self.vlc_status.setText(self.i18n.t("vlc_not_found"))
+                else:
+                    self.vlc_status.setText(txt or "Audio backend OK")
             if hasattr(self, "status_footer"):
                 backend_name = "Audio"
                 if hasattr(self, "player") and self.player is not None:

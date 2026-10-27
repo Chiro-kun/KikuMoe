@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.config import STATIONS, get_station_config, get_station_stream_url
 from network.providers.anison_provider import AnisonProvider
 from network.providers.gensokyo_provider import GensokyoProvider
@@ -435,6 +437,26 @@ def test_station_popover_animations():
     assert pill.get_chevron_angle() <= 5.0
 
     pill.deleteLater()
+
+
+@pytest.mark.parametrize("linux", [False, True])
+def test_station_selection_emitted_before_popup_animation_finishes(monkeypatch, linux):
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets import station_pill
+
+    app = QApplication.instance() or QApplication(["pytest"])
+    monkeypatch.setattr(station_pill, "_IS_LINUX", linux)
+    popup = station_pill.StationGlassPopover("listenmoe", "J-POP")
+    popup.show_at(150, 60)
+    selected = []
+    popup.station_selected.connect(lambda station, channel: selected.append((station, channel)))
+    popup._on_select("gensokyo", "J-POP")
+    assert selected == [("gensokyo", "J-POP")]
+    popup._on_select("anison", "J-POP")
+    assert selected == [("gensokyo", "J-POP")]
+    popup.close()
+    app.processEvents()
 
 
 def test_station_providers_deduplicate_now_playing_events():

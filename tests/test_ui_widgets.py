@@ -85,6 +85,29 @@ def test_status_footer(qapp):
     assert footer.session_label.text() == "01:23:45"
 
 
+def test_backend_footer_updates_without_legacy_widgets(qapp):
+    from types import SimpleNamespace
+
+    from ui.main_window import ListenMoePlayer
+
+    class PlayerFFmpeg:
+        def is_ready(self):
+            return True
+
+        def get_version(self):
+            return "ffmpeg"
+
+    footer = StatusFooter()
+    host = SimpleNamespace(
+        player=PlayerFFmpeg(),
+        status_footer=footer,
+        settings=SimpleNamespace(value=lambda key, default: default),
+    )
+    ListenMoePlayer.update_vlc_status_label(host)
+    assert footer.backend_label.text() == "FFMPEG"
+    assert "#00e676" in footer.backend_dot.styleSheet()
+
+
 def test_ambient_cover(qapp):
     from ui.widgets.ambient_cover import AnimatedTrackLabel, FullBleedCanvas
 
@@ -428,6 +451,38 @@ def test_settings_dialog_four_tabs(qapp):
     assert dlg.category_bar._selected == 3
     assert dlg.pages.currentIndex() == 3
     dlg.close()
+
+
+def test_embedded_back_snapshots_visible_settings(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QWidget
+
+    from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+
+    host = QWidget()
+    host.resize(405, 600)
+    stack = SlidingStackedWidget(host)
+    stack.resize(405, 600)
+    stack.addWidget(QWidget())
+    dialog = SettingsDialog(host, embedded=True)
+    stack.addWidget(dialog)
+    host.show()
+    stack.setCurrentIndex(1)
+    qapp.processEvents()
+    visibility = []
+    render = stack._render_snapshot
+
+    def record_snapshot(widget):
+        visibility.append(widget.isVisible())
+        return render(widget)
+
+    monkeypatch.setattr(stack, "_render_snapshot", record_snapshot)
+    dialog.rejected.connect(lambda: stack.slide_to_index(0, direction=-1))
+    dialog.btn_back.click()
+    assert visibility[0] is True
+    assert stack._pm_from is not None and stack._pm_to is not None
+    stack.finish_active_slide()
+    assert stack.currentIndex() == 0
+    host.close()
 
 
 def test_settings_pages_scroll_in_compact_window(qapp):

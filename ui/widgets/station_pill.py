@@ -9,6 +9,7 @@ without repeating station entries or truncating text.
 from __future__ import annotations
 
 import os
+import sys
 import time
 from typing import Callable
 
@@ -28,6 +29,7 @@ from PyQt6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QGuiApplication,
     QPainter,
     QPainterPath,
     QPaintEvent,
@@ -50,6 +52,8 @@ from core.constants import (
     STATION_LISTENMOE,
 )
 from ui.themes.cyber_moe import PALETTE
+
+_IS_LINUX = sys.platform.startswith("linux")
 
 
 class ChannelChip(QPushButton):
@@ -390,14 +394,27 @@ class StationGlassPopover(QWidget):
         return fallback
 
     def _on_select(self, station_id: str, channel: str) -> None:
-        self.animate_close(callback=lambda: self.station_selected.emit(station_id, channel))
+        if self._is_closing:
+            return
+        self.animate_close()
+        self.station_selected.emit(station_id, channel)
 
     def show_at(self, center_x: int, y: int) -> None:
         """Position and show popover centered at center_x with drop-in and fade animation."""
         self.adjustSize()
         w = self.width()
-        target_x = max(8, center_x - (w // 2))
+        target_x = center_x - (w // 2)
         target_y = y
+        screen = QGuiApplication.screenAt(QPoint(center_x, y)) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            bounds = screen.availableGeometry()
+            target_x = max(bounds.left(), min(target_x, bounds.right() - w + 1))
+            target_y = max(bounds.top(), min(target_y, bounds.bottom() - self.height() + 1))
+        if _IS_LINUX:
+            self.move(target_x, target_y)
+            self.setWindowOpacity(1.0)
+            self.show()
+            return
         start_y = target_y - 10
 
         self.move(target_x, start_y)
@@ -428,6 +445,12 @@ class StationGlassPopover(QWidget):
         if self._is_closing:
             return
         self._is_closing = True
+
+        if _IS_LINUX:
+            self.close()
+            if callback:
+                callback()
+            return
 
         if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
             self._anim_group.stop()
@@ -738,10 +761,14 @@ class StationPillButton(QWidget):
         self.update()
 
         popover.station_selected.connect(self._on_popover_station_selected)
-        popover.closed.connect(self._on_popover_closed)
+        popover.closed.connect(lambda: self._on_popover_closed(popover))
         popover.show_at(center_x=center_x, y=target_y)
 
-    def _on_popover_closed(self) -> None:
+    def _on_popover_closed(self, popover: StationGlassPopover) -> None:
+        if self._popover is not popover:
+            return
+        self._popover = None
+        popover.deleteLater()
         self._menu_open = False
         self._last_close_time = time.monotonic()
         self._animate_chevron(0.0)

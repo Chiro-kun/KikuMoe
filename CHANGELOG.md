@@ -55,6 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **Station Selector and Settings Transitions**: Deliver station selections immediately, avoid popup motion on Linux, and preserve the settings panel during return animations.
+- **Audio Status Badge**: Show the active audio backend instead of the misleading initial AUTO label, and update its readiness indicator even when legacy widgets are absent.
+- **Tooltip Corners**: Match the tooltip border to its rectangular native background.
 - **Mini Player on Linux**: Keep the compact window at its intended size and reject maximize/full-screen requests.
 - **FFmpeg Rapid Pause**: Avoid stopping the audio output while another thread is writing, preventing host errors during rapid pause and resume.
 - **Mini Player Artwork**: Clip album covers to rounded corners, including on high-DPI displays.

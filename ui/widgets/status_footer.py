@@ -43,8 +43,8 @@ class StatusFooter(QFrame):
         eng_layout.setSpacing(6)
 
         self.backend_dot = QLabel("●")
-        self.backend_dot.setStyleSheet(f"color: {PALETTE['status_online']}; font-size: 10px;")
-        self.backend_label = QLabel("AUTO")
+        self.backend_dot.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 10px;")
+        self.backend_label = QLabel("AUDIO")
         self.backend_label.setStyleSheet(label_font_style)
         eng_layout.addWidget(self.backend_dot)
         eng_layout.addWidget(self.backend_label)

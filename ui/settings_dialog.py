@@ -1652,6 +1652,18 @@ class SettingsDialog(QDialog):
         self._save_settings()
         self.accept()
 
+    def accept(self) -> None:
+        if self._embedded:
+            self.accepted.emit()
+        else:
+            super().accept()
+
+    def reject(self) -> None:
+        if self._embedded:
+            self.rejected.emit()
+        else:
+            super().reject()
+
     def _on_open_console(self):
         try:
             self._save_settings()
