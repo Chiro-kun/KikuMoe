@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
+    QSizeGrip,
     QSizePolicy,
     QStyle,
     QVBoxLayout,
@@ -70,6 +71,8 @@ from core.constants import (
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
+    KEY_MINI_ALWAYS_ON_TOP,
+    KEY_MINI_GEOMETRY,
     KEY_MUTE,
     KEY_NETWORK_CACHING,
     KEY_SESSION_TIMER_ENABLED,
@@ -120,6 +123,7 @@ from ui.widgets.ambient_cover import (
     TrackHoverGroup,
 )
 from ui.widgets.history_button import HistoryIconButton
+from ui.widgets.mini_hud import MiniHud, MiniIconButton
 from ui.widgets.playback_controls import PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
@@ -452,6 +456,7 @@ class ListenMoePlayer(QWidget):
         self._init_discord_presence()
         self._init_websocket()
         self._init_tray()
+        self._init_mini_hud()
         self._init_extra_logic()
 
     # ------------------- Initialization Helpers -------------------
@@ -1197,6 +1202,112 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _init_mini_hud(self):
+        self._mini_mode = False
+        self._normal_geometry = None
+        self._normal_always_on_top = False
+        self._mini_cover_key = object()
+        self.mini_hud = MiniHud(self)
+        self._root_layout.addWidget(self.mini_hud)
+        self.mini_hud.hide()
+        self.mini_hud.restore_requested.connect(self.toggle_mini_hud)
+        self.mini_hud.play_requested.connect(self._tray_toggle_play_pause)
+        self.mini_hud.pin_changed.connect(self._set_mini_always_on_top)
+        self.mini_hud.volume.setValue(self.volume_slider.value())
+        self.mini_hud.volume.valueChanged.connect(self.volume_slider.setValue)
+        self.volume_slider.valueChanged.connect(self.mini_hud.volume.setValue)
+        self.mini_hud.pin_button.blockSignals(True)
+        self.mini_hud.pin_button.setChecked(self._get_bool(KEY_MINI_ALWAYS_ON_TOP, False))
+        self.mini_hud.pin_button.blockSignals(False)
+        self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
+        self.mini_hud.pin_button.setToolTip(self.t("mini_pin"))
+        self.mini_hud.volume.setToolTip(self.t("mini_volume"))
+        self.mini_hud.close_button.setToolTip(self.t("tray_quit"))
+        self._mini_timer = QTimer(self)
+        self._mini_timer.setInterval(500)
+        self._mini_timer.timeout.connect(self._sync_mini_hud)
+        self._mini_shortcut = QShortcut(QKeySequence("F9"), self)
+        self._mini_shortcut.activated.connect(self.toggle_mini_hud)
+
+        self.mini_button = MiniIconButton("mini", self._title_bar)
+        self.mini_button.setFixedSize(28, 28)
+        self.mini_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mini_button.setToolTip(self.t("mini_mode"))
+        title_layout = self._title_bar.layout()
+        title_layout.insertWidget(title_layout.count() - 3, self.mini_button)
+        self.mini_button.clicked.connect(self.toggle_mini_hud)
+
+    def _set_window_on_top(self, enabled: bool) -> None:
+        visible = self.isVisible()
+        geometry = self.geometry()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+        if visible:
+            self.show()
+            self.setGeometry(geometry)
+
+    def _set_mini_always_on_top(self, enabled: bool) -> None:
+        self.settings.setValue(KEY_MINI_ALWAYS_ON_TOP, "true" if enabled else "false")
+        if self._mini_mode:
+            self._set_window_on_top(enabled)
+
+    def _sync_mini_hud(self) -> None:
+        if not self._mini_mode:
+            return
+        self.mini_hud.title.set_text(self._current_title or "–")
+        self.mini_hud.artist.set_text(self._current_artist or "")
+        try:
+            playing = bool(self.player and self.player.is_playing() and not self._ui_paused)
+        except Exception:
+            playing = False
+        self.mini_hud.play_button.kind = "pause" if playing else "play"
+        self.mini_hud.play_button.setToolTip(self.t("tt_pause") if playing else self.t("tt_play"))
+        self.mini_hud.play_button.update()
+        cover = getattr(self.ambient_cover, "_cover_pixmap", None)
+        key = cover.cacheKey() if cover is not None and not cover.isNull() else None
+        if key != self._mini_cover_key:
+            self._mini_cover_key = key
+            if cover is not None and not cover.isNull():
+                self.mini_hud.set_cover(cover)
+            else:
+                self.mini_hud.set_cover(self._icon_app.pixmap(58, 58))
+
+    def toggle_mini_hud(self) -> None:
+        if not self._mini_mode:
+            self._normal_geometry = self.saveGeometry()
+            self.settings.setValue(KEY_WINDOW_GEOMETRY, self._normal_geometry)
+            self._normal_always_on_top = bool(
+                self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+            )
+            self._mini_mode = True
+            self._content_widget.hide()
+            grip = self.findChild(QSizeGrip)
+            if grip is not None:
+                grip.hide()
+            self.setMinimumSize(320, 88)
+            self.setMaximumSize(16777215, 100)
+            self.mini_hud.show()
+            self.resize(360, 88)
+            geometry = self.settings.value(KEY_MINI_GEOMETRY)
+            if geometry:
+                self.restoreGeometry(geometry)
+            self._set_window_on_top(self.mini_hud.pin_button.isChecked())
+            self._sync_mini_hud()
+            self._mini_timer.start()
+        else:
+            self.settings.setValue(KEY_MINI_GEOMETRY, self.saveGeometry())
+            self._mini_timer.stop()
+            self._mini_mode = False
+            self.mini_hud.hide()
+            self.setMaximumSize(16777215, 16777215)
+            self.setMinimumSize(380, _MIN_WINDOW_HEIGHT)
+            self._content_widget.show()
+            grip = self.findChild(QSizeGrip)
+            if grip is not None:
+                grip.show()
+            self._set_window_on_top(self._normal_always_on_top)
+            if self._normal_geometry:
+                self.restoreGeometry(self._normal_geometry)
+
     def _init_extra_logic(self):
         """Final UI polish and logic hooks (Theme, Autoplay, Global Shortcuts)."""
         try:
@@ -1271,7 +1382,8 @@ class ListenMoePlayer(QWidget):
         event = a0
         """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
         try:
-            self.settings.setValue(KEY_WINDOW_GEOMETRY, self.saveGeometry())
+            geometry_key = KEY_MINI_GEOMETRY if self._mini_mode else KEY_WINDOW_GEOMETRY
+            self.settings.setValue(geometry_key, self.saveGeometry())
         except Exception:
             pass
 
@@ -1910,6 +2022,7 @@ class ListenMoePlayer(QWidget):
             is_paused = (
                 bool(getattr(self.player, "is_paused", lambda: False)()) if has_player else False
             )
+            is_paused = is_paused or bool(getattr(self, "_ui_paused", False))
 
             if has_player and (is_playing or is_paused):
                 self.pause_resume()
@@ -1966,6 +2079,12 @@ class ListenMoePlayer(QWidget):
             pass
 
     def apply_translations(self):
+        if hasattr(self, "mini_hud"):
+            self.mini_button.setToolTip(self.t("mini_mode"))
+            self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
+            self.mini_hud.pin_button.setToolTip(self.t("mini_pin"))
+            self.mini_hud.volume.setToolTip(self.t("mini_volume"))
+            self.mini_hud.close_button.setToolTip(self.t("tray_quit"))
         # Mantieni o aggiorna titolo finestra in base al Now Playing
         try:
             title = getattr(self, "_current_title", "") or ""

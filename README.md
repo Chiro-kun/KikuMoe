@@ -11,6 +11,7 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Installazione](#installazione)
 - [Avvio](#avvio)
 - [Interfaccia](#interfaccia)
+- [Mini player](#mini-player)
 - [Funzionalità](#funzionalità)
 - [Impostazioni](#impostazioni)
 - [Discord Rich Presence](#discord-rich-presence)
@@ -22,6 +23,15 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Build](#build)
 
 ---
+
+## Mini player
+
+Premi **F9** oppure il pulsante nella barra del titolo per passare al Mini HUD.
+Il pannello compatto mostra copertina, titolo e artista e permette di controllare
+riproduzione e volume. Usa il pulsante di ripristino o premi di nuovo F9 per
+tornare alla finestra completa. Il pulsante con la puntina attiva la modalità
+sempre in primo piano; posizione e dimensioni delle due viste vengono salvate
+separatamente.
 
 ## Discord Rich Presence
 

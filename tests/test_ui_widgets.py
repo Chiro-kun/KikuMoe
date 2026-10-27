@@ -611,3 +611,100 @@ def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
     title_top = player.now_playing_title.mapTo(player, QPoint(0, 0)).y()
     assert title_top >= cover_bottom
     player.deleteLater()
+
+
+def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSettings, Qt
+
+    from core.constants import KEY_MINI_ALWAYS_ON_TOP, KEY_MINI_GEOMETRY, KEY_WINDOW_GEOMETRY
+    from ui import main_window
+
+    cls = main_window.ListenMoePlayer
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+    calls = []
+    monkeypatch.setattr(cls, "_tray_toggle_play_pause", lambda self: calls.append("play"))
+    window = cls()
+    window.player = SimpleNamespace(is_playing=lambda: True)
+    window._current_title = "A long song title"
+    window._current_artist = "Artist"
+    window.show()
+    qapp.processEvents()
+    window.resize(405, 720)
+    window.toggle_mini_hud()
+    qapp.processEvents()
+    assert window._mini_mode and window.mini_hud.isVisible()
+    assert window.height() <= 100
+    assert window.mini_hud.title._text == "A long song title"
+    assert window.mini_hud.artist._text == "Artist"
+    assert window.mini_hud.play_button.kind == "pause"
+    window.mini_hud.volume.setValue(37)
+    assert window.volume_slider.value() == 37
+    window.volume_slider.setValue(55)
+    assert window.mini_hud.volume.value() == 55
+    window.mini_hud.play_button.click()
+    assert calls == ["play"]
+    window.mini_hud.pin_button.setChecked(True)
+    assert bool(window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+    assert settings.value(KEY_MINI_ALWAYS_ON_TOP) == "true"
+    window.move(80, 90)
+    window.toggle_mini_hud()
+    qapp.processEvents()
+    assert not window._mini_mode and window.height() >= 700
+    assert not window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+    assert settings.value(KEY_WINDOW_GEOMETRY) is not None
+    assert settings.value(KEY_MINI_GEOMETRY) is not None
+    window.toggle_mini_hud()
+    qapp.processEvents()
+    assert window.x() == 80 and window.y() == 90
+    assert window.mini_hud.pin_button.isChecked()
+    from PyQt6.QtGui import QCloseEvent
+
+    normal_geometry = settings.value(KEY_WINDOW_GEOMETRY)
+    monkeypatch.setattr(window, "_get_bool", lambda key, default: False)
+    monkeypatch.setattr(window, "_cleanup_before_close", lambda: None)
+    close_event = QCloseEvent()
+    window.closeEvent(close_event)
+    assert close_event.isAccepted()
+    assert settings.value(KEY_WINDOW_GEOMETRY) == normal_geometry
+    window.toggle_mini_hud()
+    window.hide()
+    window.deleteLater()
+
+
+def test_mini_hud_marquee_and_paused_playback(qapp):
+    from types import SimpleNamespace
+
+    from ui.main_window import ListenMoePlayer
+    from ui.widgets.mini_hud import MarqueeLabel
+
+    label = MarqueeLabel("#ffffff")
+    label.resize(70, 18)
+    label.set_text("A long title that must scroll in the mini player")
+    label.show()
+    qapp.processEvents()
+    label._pause = 0
+    label._tick()
+    assert label._offset > 0
+    label.set_text("Short")
+    label._tick()
+    assert label._offset == 0
+    assert not label._timer.isActive()
+    label.close()
+
+    actions = []
+    window = SimpleNamespace(
+        player=SimpleNamespace(is_playing=lambda: False),
+        _ui_paused=True,
+        pause_resume=lambda: actions.append("resume"),
+        play_stream=lambda: actions.append("play"),
+    )
+    ListenMoePlayer._tray_toggle_play_pause(window)
+    assert actions == ["resume"]

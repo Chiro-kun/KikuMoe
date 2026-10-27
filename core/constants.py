@@ -120,6 +120,8 @@ KEY_TRAY_NOTIFICATIONS = "tray_notifications"
 KEY_TRAY_HIDE_ON_MINIMIZE = "tray_hide_on_minimize"
 KEY_LIBVLC_PATH = "libvlc_path"
 KEY_WINDOW_GEOMETRY = "window_geometry"
+KEY_MINI_GEOMETRY = "mini_geometry"
+KEY_MINI_ALWAYS_ON_TOP = "mini_always_on_top"
 KEY_NETWORK_CACHING = "network_caching"
 # New settings keys
 KEY_SLEEP_MINUTES = "sleep_minutes"
