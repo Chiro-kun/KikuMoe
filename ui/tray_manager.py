@@ -1110,7 +1110,8 @@ class TrayManager(QObject):
                 QMenu::item:disabled {{
                     color: {text_mut};
                     background-color: transparent;
-                    padding: 8px 12px 3px 12px;
+                    margin-left: -13px;
+                    padding: 8px 12px 3px 0px;
                     font-size: 10px;
                 }}
                 QMenu::separator {{

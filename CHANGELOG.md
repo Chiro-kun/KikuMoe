@@ -103,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
 
 ### Fixed
+- **System Tray Section Header Alignment**: Corrected the horizontal alignment of disabled section headers (*FINESTRA*, *PREFERENZE*) in `ui/tray_manager.py` by applying `margin-left: -13px; padding-left: 0px;` on `QMenu::item:disabled`, bringing section titles into perfect optical alignment with the icon column.
 - **System Tray Icon Left Padding**: Added explicit `padding-left: 10px;` and `padding-right: 6px;` to `QMenu::icon` in `ui/tray_manager.py`, preventing action icons from touching the left menu border when full-width hover is active.
 - **Color Picker UI & SpinBox Truncation**: Replaced Qt's unlocalized, fixed-width non-native `QColorDialog` with the bespoke `AccentColorPickerDialog`, resolving cut-off spinbox digits (`3:`, `2!`), native window titlebar clash, and archaic Windows 95 layout.
 - **History Popover Cover Art Cache**: Added a shared, thread-safe in-memory LRU cover art cache (`network/image_cache.py`) so `SongHistoryPopover` renders album art thumbnails across LISTEN.moe and partner web radio stations.
