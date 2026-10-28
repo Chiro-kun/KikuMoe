@@ -79,6 +79,8 @@ I18N: Dict[str, Dict[str, str]] = {
         "tray_channel": "Canale",
         "tray_format": "Formato (codec)",
         "tray_quit": "Esci",
+        "tray_open_app": "Apri KikuMoe ↗",
+        "tray_no_track": "Nessun brano in riproduzione",
         # Intestazioni di sezione per il menu Tray
         "tray_section_playback": "Riproduzione",
         "tray_section_window": "Finestra",
@@ -318,6 +320,8 @@ I18N: Dict[str, Dict[str, str]] = {
         "tray_channel": "Channel",
         "tray_format": "Format/Codec",
         "tray_quit": "Quit",
+        "tray_open_app": "Open KikuMoe ↗",
+        "tray_no_track": "No track playing",
         # Section headers for Tray menu
         "tray_section_playback": "Playback",
         "tray_section_window": "Window",

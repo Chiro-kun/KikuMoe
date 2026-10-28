@@ -1403,6 +1403,16 @@ class ListenMoePlayer(QWidget):
             self._discord_live_key = None
         rpc.set_activity(activity)
 
+    def _show_window_from_tray(self) -> None:
+        """Restores, raises, and activates the main window when summoned from the tray."""
+        try:
+            if not self.isVisible() or self.isMinimized():
+                self.showNormal()
+            self.raise_()
+            self.activateWindow()
+        except Exception:
+            pass
+
     def _init_tray(self):
         """Initialize system tray manager."""
         try:
@@ -1410,7 +1420,7 @@ class ListenMoePlayer(QWidget):
             self.tray_mgr = TrayManager(
                 self,
                 self.i18n,
-                on_show_window=self.showNormal,
+                on_show_window=self._show_window_from_tray,
                 on_open_settings=self.open_settings,
                 on_change_station=self.set_radio_provider,
                 on_change_channel=self._tray_change_channel,
@@ -2973,6 +2983,8 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, "ambient_cover"):
                 self.ambient_cover.set_cover(pixmap)
+            if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
+                self.tray_mgr.set_cover_pixmap(pixmap)
             if hasattr(self, "_content_widget") and isinstance(
                 self._content_widget, FullBleedCanvas
             ):
@@ -4105,8 +4117,9 @@ class ListenMoePlayer(QWidget):
                     self.tray_mgr = TrayManager(
                         self,
                         self.i18n,
-                        on_show_window=self.showNormal,
+                        on_show_window=self._show_window_from_tray,
                         on_open_settings=self.open_settings,
+                        on_change_station=self.set_radio_provider,
                         on_change_channel=self._tray_change_channel,
                         on_change_format=self._tray_change_format,
                         on_toggle_play_pause=self._tray_toggle_play_pause,

@@ -162,3 +162,131 @@ def test_tray_manager_settings_and_about_actions(qapp):
 
     tray_mgr._act_about.trigger()
     assert about_cb.call_count == 1
+
+
+def test_tray_manager_now_playing_card_integration(qapp):
+    from PyQt6.QtGui import QColor, QPixmap
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    play_cb = MagicMock()
+    stop_cb = MagicMock()
+    mute_cb = MagicMock()
+    history_cb = MagicMock()
+    show_cb = MagicMock()
+
+    parent.toggle_history_popover = history_cb
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_show_window=show_cb,
+        on_toggle_play_pause=play_cb,
+        on_stop_stream=stop_cb,
+        on_toggle_mute=mute_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    # 1. Card should be initialized and added
+    assert tray_mgr._card is not None
+    assert tray_mgr._card_action is not None
+    assert tray_mgr._card_action.defaultWidget() == tray_mgr._card
+
+    # 2. Update tooltip and check metadata extraction
+    tooltip_text = "LISTEN.moe (J-POP • Vorbis)\nPoison — Alice Cooper\nSessione: 05:20"
+    tray_mgr.update_tooltip(tooltip_text)
+
+    assert "Poison" in tray_mgr._card._lbl_title.text()
+    assert "Alice Cooper" in tray_mgr._card._lbl_artist.text()
+    assert "05:20" in tray_mgr._card._lbl_session.text()
+
+    # 3. Update cover pixmap
+    pm = QPixmap(100, 100)
+    pm.fill(QColor("magenta"))
+    tray_mgr.set_cover_pixmap(pm)
+    assert tray_mgr._card._cover_lbl.pixmap() is not None
+    assert not tray_mgr._card._cover_lbl.pixmap().isNull()
+
+    # Reset cover pixmap to None (fallback)
+    tray_mgr.set_cover_pixmap(None)
+    assert tray_mgr._card._cover_lbl.pixmap() is not None
+
+    # 4. Update controls state
+    tray_mgr.update_controls_state(is_playing=True, is_paused=False, is_muted=True)
+    assert tray_mgr._card._is_playing is True
+    assert tray_mgr._card._is_muted is True
+    assert tray_mgr._act_play_pause.text() == "pause"
+    assert tray_mgr._act_mute.text() == "tray_unmute"
+
+    tray_mgr.update_controls_state(is_playing=False, is_paused=False, is_muted=False)
+    assert tray_mgr._act_play_pause.text() == "play"
+    assert tray_mgr._act_mute.text() == "tray_mute"
+
+
+def test_tray_manager_card_inline_buttons(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    play_cb = MagicMock()
+    stop_cb = MagicMock()
+    mute_cb = MagicMock()
+    history_cb = MagicMock()
+
+    parent.toggle_history_popover = history_cb
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_toggle_play_pause=play_cb,
+        on_stop_stream=stop_cb,
+        on_toggle_mute=mute_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    card = tray_mgr._card
+    assert card is not None
+
+    # Trigger inline buttons
+    card._btn_play.click()
+    assert play_cb.call_count == 1
+
+    card._btn_stop.click()
+    assert stop_cb.call_count == 1
+
+    card._btn_mute.click()
+    assert mute_cb.call_count == 1
+
+    card._btn_history.click()
+    assert history_cb.call_count == 1
+
+
+def test_tray_manager_vector_icons_and_theme_refresh(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Verify all action vector icons are set and non-null
+    assert not tray_mgr._act_play_pause.icon().isNull()
+    assert not tray_mgr._act_stop.icon().isNull()
+    assert not tray_mgr._act_mute.icon().isNull()
+    assert not tray_mgr._act_history.icon().isNull()
+    assert not tray_mgr._act_show.icon().isNull()
+    assert not tray_mgr._act_settings.icon().isNull()
+    assert not tray_mgr._act_about.icon().isNull()
+    assert not tray_mgr._act_st.icon().isNull()
+    assert not tray_mgr._act_ch.icon().isNull()
+    assert not tray_mgr._act_fmt.icon().isNull()
+    assert not tray_mgr._act_quit.icon().isNull()
+
+    # Trigger theme refresh
+    tray_mgr.refresh_theme()
+
+    # Ensure icons remain valid after theme refresh
+    assert not tray_mgr._act_settings.icon().isNull()
+    assert not tray_mgr._act_quit.icon().isNull()

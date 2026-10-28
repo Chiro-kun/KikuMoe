@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Cyber-Glass System Tray Header Card (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
+  - Replaced the two plain disabled text lines with a rich, interactive cyber-glass card embedded at the top of the tray menu via `QWidgetAction`.
+  - Displays high-resolution rounded album cover art (or fallback KikuMoe brand logo) with anti-aliased corner clipping.
+  - Features real-time track metadata (auto-elided title, artist, station branding pill, and live session timer).
+  - Integrates 4 quick inline glass action buttons directly in the card: `[Play/Pause]`, `[Stop]`, `[Mute]`, and `[Cronologia brani...]`.
+  - Clicking anywhere on the card body immediately raises and brings KikuMoe to the foreground.
+- **Complete Vector Icon Suite Expansion (`ui/vector_icons.py`)**:
+  - Implemented anti-aliased SVG vector icons for all system tray and window actions:
+    - Play triangle (`get_play_icon`) and Pause dual bars (`get_pause_icon`).
+    - Stop rounded square (`get_stop_icon`).
+    - Speaker with audio waves and muted slash (`get_volume_icon`).
+    - Window layout emblem (`get_window_icon`).
+    - High-visibility bright gear (`get_settings_icon`), replacing the dark/invisible PNG.
+    - Information circle badge (`get_info_icon`).
+    - Radio broadcast tower with electromagnetic waves (`get_station_icon`).
+    - Dual musical notes (`get_channel_icon`).
+    - Audio waveform (`get_codec_icon`).
+    - Standby power emblem in glowing crimson/rose (`get_power_quit_icon`).
 - **Bespoke Cyber-Moe Color Picker Dialog (`ui/color_picker_dialog.py`)**:
   - Designed a high-DPI frameless modal color picker replacing Qt's legacy `QColorDialog`, complete with `CustomTitleBar`, KikuMoe branding, and 60 FPS drop-in/fade animations.
   - Interactive 2D Saturation/Value gradient canvas with high-contrast dual-ring cursor and full-spectrum vertical Hue rainbow slider.
@@ -68,8 +86,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Modernized `CloseConfirmDialog` with custom Cyber-Glass title bar (`CustomTitleBar`), dialog title "Chiudere l'app?", and clean non-redundant description body.
   - Replaced asymmetric dialog icon with a perfectly balanced standby power emblem badge (`DialogIconBadge`).
   - Added smooth drop-in and fade entrance/exit animations with `WindowStaysOnTopHint`.
-- **System Tray Context Menu**:
-  - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
+- **System Tray Context Menu Overhaul (`ui/tray_manager.py`)**:
+  - Replaced all legacy low-res PNGs and bitmap icons with crisp, resolution-independent vector icons that automatically re-tint with the active theme and custom accent color.
+  - Modernized section headers (`RIPRODUZIONE`, `FINESTRA`, `PREFERENZE`) with bold, uppercase, tracked typography and polished item spacing.
+  - Deep glassmorphism background (`#141624`), subtle borders (`PALETTE["border_card"]`), and smooth accent hover highlights (`PALETTE["accent_menu_hover"]`).
+  - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
 
 ### Fixed
 - **Color Picker UI & SpinBox Truncation**: Replaced Qt's unlocalized, fixed-width non-native `QColorDialog` with the bespoke `AccentColorPickerDialog`, resolving cut-off spinbox digits (`3:`, `2!`), native window titlebar clash, and archaic Windows 95 layout.

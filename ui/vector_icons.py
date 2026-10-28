@@ -222,3 +222,211 @@ def get_check_pixmap(size: int = 16, stroke_color: str = "#00E676") -> QPixmap:
 
 def get_check_icon(size: int = 16, stroke_color: str = "#00E676") -> QIcon:
     return QIcon(get_check_pixmap(size, stroke_color))
+
+
+def get_play_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate crisp vector play triangle icon."""
+    resolved = color or PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        f'<polygon points="6 4 20 12 6 20 6 4" fill="{resolved}"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_play_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_play_pixmap(size, color))
+
+
+def get_pause_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate crisp vector pause dual bar icon."""
+    resolved = color or PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        f'<rect x="6" y="4" width="4" height="16" rx="1.5" fill="{resolved}"/>'
+        f'<rect x="14" y="4" width="4" height="16" rx="1.5" fill="{resolved}"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_pause_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_pause_pixmap(size, color))
+
+
+def get_stop_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate crisp vector stop square icon."""
+    resolved = color or PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        f'<rect x="5" y="5" width="14" height="14" rx="2.5" fill="{resolved}"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_stop_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_stop_pixmap(size, color))
+
+
+def get_volume_pixmap(size: int = 16, color: str | None = None, muted: bool = False) -> QPixmap:
+    """Generate crisp vector speaker cone icon with active sound waves or muted slash."""
+    resolved = color or "#CBD5E1"
+    if muted:
+        svg = QByteArray(
+            f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved}" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'xmlns="http://www.w3.org/2000/svg">'
+            f'<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="{resolved}"/>'
+            '<line x1="23" y1="9" x2="17" y2="15"/>'
+            '<line x1="17" y1="9" x2="23" y2="15"/>'
+            "</svg>".encode()
+        )
+    else:
+        svg = QByteArray(
+            f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved}" '
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+            'xmlns="http://www.w3.org/2000/svg">'
+            f'<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="{resolved}"/>'
+            '<path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>'
+            '<path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+            "</svg>".encode()
+        )
+    return _render_svg(svg, size)
+
+
+def get_volume_icon(size: int = 16, color: str | None = None, muted: bool = False) -> QIcon:
+    return QIcon(get_volume_pixmap(size, color, muted=muted))
+
+
+def get_window_pixmap(size: int = 16, color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp desktop window layout icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="2" y="3" width="20" height="18" rx="2.5"/>'
+        '<line x1="2" y1="8" x2="22" y2="8"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_window_icon(size: int = 16, color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_window_pixmap(size, color))
+
+
+def get_settings_pixmap(size: int = 16, color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp vector gear icon in bright accent/slate (never an invisible dark circle)."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<circle cx="12" cy="12" r="3"/>'
+        '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06'
+        "a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09"
+        "A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06"
+        "a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09"
+        "A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06"
+        "a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09"
+        "a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06"
+        "a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09"
+        'a1.65 1.65 0 0 0-1.51 1z"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_settings_icon(size: int = 16, color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_settings_pixmap(size, color))
+
+
+def get_info_pixmap(size: int = 16, color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp circular information icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<circle cx="12" cy="12" r="10"/>'
+        '<line x1="12" y1="16" x2="12" y2="12"/>'
+        f'<circle cx="12" cy="8" r="1" fill="{color}"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_info_icon(size: int = 16, color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_info_pixmap(size, color))
+
+
+def get_station_pixmap(size: int = 16, color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp radio tower / broadcasting waves icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<path d="M4.93 19.07a10 10 0 0 1 0-14.14"/>'
+        '<path d="M7.76 16.24a6 6 0 0 1 0-8.48"/>'
+        '<path d="M16.24 7.76a6 6 0 0 1 0 8.48"/>'
+        '<path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+        f'<circle cx="12" cy="12" r="1.5" fill="{color}"/>'
+        '<path d="M12 14v7"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_station_icon(size: int = 16, color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_station_pixmap(size, color))
+
+
+def get_channel_pixmap(size: int = 16, color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp musical notes channel icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<path d="M9 18V5l12-2v13"/>'
+        '<circle cx="6" cy="18" r="3"/>'
+        '<circle cx="18" cy="16" r="3"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_channel_icon(size: int = 16, color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_channel_pixmap(size, color))
+
+
+def get_codec_pixmap(size: int = 16, color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp sound waveform codec icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_codec_icon(size: int = 16, color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_codec_pixmap(size, color))
+
+
+def get_power_quit_pixmap(size: int = 16, color: str = "#FF4B6E") -> QPixmap:
+    """Generate crisp standby power emblem quit icon in rose/crimson."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{color}" '
+        'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>'
+        '<line x1="12" y1="2" x2="12" y2="12"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_power_quit_icon(size: int = 16, color: str = "#FF4B6E") -> QIcon:
+    return QIcon(get_power_quit_pixmap(size, color))

@@ -88,6 +88,7 @@ from ui.vector_icons import (
 )
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
+
 def _extract_hsv_f(col: QColor) -> tuple[float, float, float]:
     """Extract (h, s, v) as non-optional floats in 0.0..1.0 from QColor."""
     raw_h, raw_s, raw_v, _ = col.getHsvF()
