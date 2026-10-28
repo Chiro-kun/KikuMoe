@@ -131,7 +131,7 @@ class PlayerMPV:
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
         except Exception:
-            self._user_agent = "KikuMoe/1.11.0"
+            self._user_agent = "KikuMoe/1.11.1"
         self._init_mpv()
 
     def _get_stored_device_name(self) -> str | None:

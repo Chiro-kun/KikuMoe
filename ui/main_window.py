@@ -1816,7 +1816,7 @@ class ListenMoePlayer(QWidget):
                 return
             if parts.port not in (None, 443):
                 return
-            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.11.0"})
+            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.11.1"})
             ssl_ctx = None
             try:
                 ssl_ctx = get_ssl_context()

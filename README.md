@@ -1,4 +1,4 @@
-# KikuMoe v1.11.0
+# KikuMoe v1.11.1
 
 Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt6.  
 Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).
@@ -295,12 +295,6 @@ bash packaging/linux/build-appimage.sh   # Opzionale: pacchettizza in AppImage
 ```
 
 Produce `dist/KikuMoe-<versione>`. VLC non viene incluso nel binario; deve essere installato a livello di sistema (`sudo pacman -S vlc`, `sudo apt install vlc`, ecc.) e verrà trovato automaticamente da `python-vlc`.
-
-> [!NOTE]
-> **Compatibilità glibc (AppImage precompilata):**  
-> A partire dalla versione 1.11.0, l'AppImage precompilata rilasciata su GitHub viene generata su Ubuntu 26.04 LTS (glibc >= 2.41). Se utilizzi una distribuzione con una versione di glibc inferiore (ad esempio Ubuntu 22.04 LTS, Debian 12 o precedenti), l'AppImage precompilata potrebbe non avviarsi a causa della versione di glibc richiesta dal sistema.  
-> In questo caso, per continuare a usare KikuMoe è sufficiente compilare il pacchetto direttamente sulla propria distribuzione clonando il repository ed eseguendo `./build.sh` (e opzionalmente `bash packaging/linux/build-appimage.sh`): il binario o AppImage generato utilizzerà nativamente la versione di glibc della propria macchina.
-
 ---
 
 ## Crediti
