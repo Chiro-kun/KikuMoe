@@ -1089,14 +1089,15 @@ class TrayManager(QObject):
                     spacing: 0px;
                 }}
                 QMenu::item {{
-                    padding: 7px 28px 7px 14px;
+                    padding: 7px 24px 7px 6px;
                     margin: 0px;
                     border: none;
                     color: {text_pri};
                     font-size: 13px;
                 }}
                 QMenu::icon {{
-                    padding-right: 4px;
+                    padding-left: 10px;
+                    padding-right: 6px;
                 }}
                 QMenu::item:enabled:selected {{
                     background-color: {hover_rgba};
@@ -1109,7 +1110,7 @@ class TrayManager(QObject):
                 QMenu::item:disabled {{
                     color: {text_mut};
                     background-color: transparent;
-                    padding: 8px 14px 3px 14px;
+                    padding: 8px 12px 3px 12px;
                     font-size: 10px;
                 }}
                 QMenu::separator {{

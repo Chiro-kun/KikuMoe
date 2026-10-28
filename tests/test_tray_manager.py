@@ -390,6 +390,8 @@ def test_tray_menu_hover_cyber_glass_styling(qapp):
     # Must occupy full box width (margin: 0px) and full height (padding: 0px)
     assert "margin: 0px;" in ss
     assert "padding: 0px;" in ss
+    # Icon must have left padding to avoid touching menu border
+    assert "padding-left: 10px;" in ss
     # Must use theme accent menu hover
     assert PALETTE["accent_menu_hover"] in ss
     # Card controls hover style check
