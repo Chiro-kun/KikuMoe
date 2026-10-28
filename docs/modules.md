@@ -39,7 +39,7 @@ KEY_AUDIO_BACKEND         = "audio_backend"   # 'auto' | 'ffmpeg' | 'mpv' | 'vlc
 Version is resolved in order from:
 1. `version.yml` (key `version:`) at the repo root or inside `_MEIPASS` (onefile)
 2. `packaging/windows/version_info.txt` (`FileVersion` field or `filevers` tuple)
-3. Hardcoded fallback `"1.11.0"`
+3. Hardcoded fallback `"1.11.1"`
 
 ---
 

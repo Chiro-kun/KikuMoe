@@ -1,4 +1,4 @@
-# KikuMoe v1.11.0
+# KikuMoe v1.11.1
 
 Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt6.  
 Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).
@@ -291,10 +291,10 @@ $env:VLC_DIR = "C:\Percorso\A\VLC"
 
 ```bash
 ./build.sh
+bash packaging/linux/build-appimage.sh   # Opzionale: pacchettizza in AppImage
 ```
 
 Produce `dist/KikuMoe-<versione>`. VLC non viene incluso nel binario; deve essere installato a livello di sistema (`sudo pacman -S vlc`, `sudo apt install vlc`, ecc.) e verrà trovato automaticamente da `python-vlc`.
-
 ---
 
 ## Crediti

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "kikumoe"
-version = "1.11.0"
+version = "1.11.1"
 description = "LISTEN.moe desktop radio player"
 authors = ["Chiro", "alsog"]
 homepage = "https://git.alsogamer.com/chiro/KikuMoe"
@@ -16,6 +16,7 @@ websocket-client = ">=1.6.0"
 python-vlc = ">=3.0.0"
 python-mpv = ">=1.0.0"
 pyaudio = ">=0.2.11"
+certifi = "^2026.10.19"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"

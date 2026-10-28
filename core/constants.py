@@ -71,7 +71,7 @@ def _read_version_from_files() -> str:
                     data = f.read()
                 break
         if data:
-            # Prefer StringStruct 'FileVersion', e.g. 1.11.0.0
+            # Prefer StringStruct 'FileVersion', e.g. 1.11.1.0
             m = re.search(r"FileVersion\'\s*,\s*u?\'([^\']+)\'", data)
             if m:
                 return m.group(1).strip()
@@ -83,7 +83,7 @@ def _read_version_from_files() -> str:
         pass
 
     # 3) Fallback to default
-    return "1.11.0"
+    return "1.11.1"
 
 
 APP_VERSION = _read_version_from_files()

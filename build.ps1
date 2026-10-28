@@ -56,7 +56,7 @@ $specPath = Join-Path $projectRoot 'kikumoe.spec'
 Write-Host "Running: poetry run python -m PyInstaller --noconfirm --clean $specPath" -ForegroundColor Green
 poetry run python -m PyInstaller --noconfirm --clean $specPath
 
-$appVersion = "1.11.0"
+$appVersion = "1.11.1"
 $versionYml = Join-Path $projectRoot "version.yml"
 if (Test-Path $versionYml) {
     $vMatch = Select-String -Path $versionYml -Pattern 'version:\s*(.+)'
