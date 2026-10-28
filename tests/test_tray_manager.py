@@ -290,3 +290,33 @@ def test_tray_manager_vector_icons_and_theme_refresh(qapp):
     # Ensure icons remain valid after theme refresh
     assert not tray_mgr._act_settings.icon().isNull()
     assert not tray_mgr._act_quit.icon().isNull()
+
+
+def test_tray_menu_clean_layout(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._tray is not None
+    menu = tray_mgr._tray.contextMenu()
+    assert menu is not None
+    actions = menu.actions()
+
+    # The card must be the first action in the menu
+    assert actions[0] == tray_mgr._card_action
+
+    # Redundant actions must NOT be present in the visible menu actions
+    assert tray_mgr._act_play_pause not in actions
+    assert tray_mgr._act_stop not in actions
+    assert tray_mgr._act_mute not in actions
+    assert tray_mgr._act_history not in actions
+    assert tray_mgr._act_hdr_playback not in actions
+
+    # Window, settings, prefs, and quit actions MUST be in the menu
+    assert tray_mgr._act_show in actions
+    assert tray_mgr._act_settings in actions
+    assert tray_mgr._act_about in actions
+    assert tray_mgr._act_quit in actions

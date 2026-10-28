@@ -88,7 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added smooth drop-in and fade entrance/exit animations with `WindowStaysOnTopHint`.
 - **System Tray Context Menu Overhaul (`ui/tray_manager.py`)**:
   - Replaced all legacy low-res PNGs and bitmap icons with crisp, resolution-independent vector icons that automatically re-tint with the active theme and custom accent color.
-  - Modernized section headers (`RIPRODUZIONE`, `FINESTRA`, `PREFERENZE`) with bold, uppercase, tracked typography and polished item spacing.
+  - Streamlined the context menu by removing redundant duplicate playback items (*Riproduci*, *Stop*, *Muto*, *Cronologia brani*), which are now integrated directly inside the interactive Cyber-Glass Now Playing header card.
+  - Modernized section headers (`FINESTRA`, `PREFERENZE`) with bold, uppercase, tracked typography and polished item spacing.
   - Deep glassmorphism background (`#141624`), subtle borders (`PALETTE["border_card"]`), and smooth accent hover highlights (`PALETTE["accent_menu_hover"]`).
   - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PyQt6.QtCore import QObject, Qt, QTimer
+from PyQt6.QtCore import QObject, QSize, Qt, QTimer
 from PyQt6.QtGui import (
     QAction,
     QActionGroup,
@@ -196,7 +196,8 @@ class TrayNowPlayingCard(QFrame):
 
         # Play / Pause button
         self._btn_play = QToolButton(self)
-        self._btn_play.setFixedSize(30, 26)
+        self._btn_play.setFixedSize(32, 28)
+        self._btn_play.setIconSize(QSize(15, 15))
         self._btn_play.setIcon(get_play_icon(14, accent))
         self._btn_play.setToolTip(self._t("play", "Riproduci"))
         if self._on_toggle_play_pause:
@@ -206,7 +207,8 @@ class TrayNowPlayingCard(QFrame):
 
         # Stop button
         self._btn_stop = QToolButton(self)
-        self._btn_stop.setFixedSize(30, 26)
+        self._btn_stop.setFixedSize(32, 28)
+        self._btn_stop.setIconSize(QSize(14, 14))
         self._btn_stop.setIcon(get_stop_icon(13, accent))
         self._btn_stop.setToolTip(self._t("stop", "Stop"))
         if self._on_stop_stream:
@@ -216,7 +218,8 @@ class TrayNowPlayingCard(QFrame):
 
         # Mute button
         self._btn_mute = QToolButton(self)
-        self._btn_mute.setFixedSize(30, 26)
+        self._btn_mute.setFixedSize(32, 28)
+        self._btn_mute.setIconSize(QSize(15, 15))
         self._btn_mute.setIcon(get_volume_icon(14, "#CBD5E1", muted=False))
         self._btn_mute.setToolTip(self._t("mute", "Muto"))
         if self._on_toggle_mute:
@@ -226,7 +229,8 @@ class TrayNowPlayingCard(QFrame):
 
         # History button
         self._btn_history = QToolButton(self)
-        self._btn_history.setFixedSize(30, 26)
+        self._btn_history.setFixedSize(32, 28)
+        self._btn_history.setIconSize(QSize(15, 15))
         self._btn_history.setIcon(get_history_icon(14, "#CBD5E1"))
         self._btn_history.setToolTip(self._t("history_button", "Cronologia brani..."))
         if self._on_history:
@@ -567,56 +571,42 @@ class TrayManager(QObject):
 
                     menu.addSeparator()
 
-                    # 2. Sezione: RIPRODUZIONE
-                    txt_hdr_play = self._t("tray_section_playback", "Riproduzione").upper()
-                    self._act_hdr_playback = QAction(txt_hdr_play, self._parent)
-                    self._act_hdr_playback.setEnabled(False)
-                    self._act_hdr_playback.setFont(header_font)
-                    menu.addAction(self._act_hdr_playback)
-
                     accent = PALETTE.get("accent", "#EC186C")
                     text_sec = PALETTE.get("text_secondary", "#CBD5E1")
 
-                    # Play / Pause
-                    txt_play_pause = self._t("tray_play_pause", "Play/Pausa")
-                    act_play_pause = QAction(txt_play_pause, self._parent)
-                    act_play_pause.setIcon(get_play_icon(16, accent))
+                    # Backward-compatible playback actions (handled by the Now Playing Card widget)
+                    self._act_hdr_playback = QAction("", self._parent)
+                    self._act_hdr_playback.setVisible(False)
+                    txt_pp = self._t("tray_play_pause", "Play/Pausa")
+                    self._act_play_pause = QAction(txt_pp, self._parent)
+                    self._act_play_pause.setIcon(get_play_icon(16, accent))
+                    self._act_play_pause.setVisible(False)
                     if self._on_toggle_play_pause:
                         cb_play = self._on_toggle_play_pause
-                        act_play_pause.triggered.connect(lambda: cb_play())
-                    menu.addAction(act_play_pause)
-                    self._act_play_pause = act_play_pause
+                        self._act_play_pause.triggered.connect(lambda: cb_play())
 
-                    # Stop
-                    txt_stop = self._t("tray_stop", "Stop")
-                    act_stop = QAction(txt_stop, self._parent)
-                    act_stop.setIcon(get_stop_icon(16, accent))
+                    self._act_stop = QAction(self._t("tray_stop", "Stop"), self._parent)
+                    self._act_stop.setIcon(get_stop_icon(16, accent))
+                    self._act_stop.setVisible(False)
                     if self._on_stop_stream:
-                        act_stop.triggered.connect(self._on_stop_stream)
-                    menu.addAction(act_stop)
-                    self._act_stop = act_stop
+                        self._act_stop.triggered.connect(self._on_stop_stream)
 
-                    # Muto
-                    txt_mute = self._t("tray_mute", "Muto")
-                    act_mute = QAction(txt_mute, self._parent)
-                    act_mute.setIcon(get_volume_icon(16, text_sec))
+                    self._act_mute = QAction(self._t("tray_mute", "Muto"), self._parent)
+                    self._act_mute.setIcon(get_volume_icon(16, text_sec))
+                    self._act_mute.setVisible(False)
                     if self._on_toggle_mute:
-                        act_mute.triggered.connect(self._on_toggle_mute)
-                    menu.addAction(act_mute)
-                    self._act_mute = act_mute
+                        self._act_mute.triggered.connect(self._on_toggle_mute)
 
-                    # Cronologia brani
-                    txt_history = self._t("history_button", "Cronologia brani")
-                    act_history = QAction(f"{txt_history}...", self._parent)
-                    act_history.setIcon(get_history_icon(16, text_sec))
+                    txt_hist = self._t("history_button", "Cronologia brani")
+                    self._act_history = QAction(txt_hist, self._parent)
+                    self._act_history.setIcon(get_history_icon(16, text_sec))
+                    self._act_history.setVisible(False)
                     if hasattr(self._parent, "toggle_history_popover"):
-                        act_history.triggered.connect(self._parent.toggle_history_popover)
-                    menu.addAction(act_history)
-                    self._act_history = act_history
+                        self._act_history.triggered.connect(self._parent.toggle_history_popover)
 
-                    self._sep_playback_end = menu.addSeparator()
+                    self._sep_playback_end = None
 
-                    # 3. Sezione: FINESTRA
+                    # 2. Sezione: FINESTRA
                     txt_hdr_window = self._t("tray_section_window", "Finestra").upper()
                     self._act_hdr_window = QAction(txt_hdr_window, self._parent)
                     self._act_hdr_window.setEnabled(False)
