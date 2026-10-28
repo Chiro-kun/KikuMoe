@@ -27,6 +27,7 @@ from PyQt6.QtCore import (
     pyqtSignal,
 )
 from PyQt6.QtGui import (
+    QCloseEvent,
     QColor,
     QFont,
     QFontMetrics,
@@ -36,6 +37,8 @@ from PyQt6.QtGui import (
     QPen,
     QPixmap,
     QRegion,
+    QResizeEvent,
+    QShowEvent,
 )
 from PyQt6.QtWidgets import (
     QAbstractSpinBox,
@@ -2063,8 +2066,8 @@ class SettingsDialog(QDialog):
         if self._toast_effect.opacity() <= 0.0:
             self._apply_toast.hide()
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
+    def resizeEvent(self, a0: Optional[QResizeEvent]) -> None:
+        super().resizeEvent(a0)
         if hasattr(self, "_apply_toast"):
             self._position_apply_toast()
 
@@ -2089,7 +2092,7 @@ class SettingsDialog(QDialog):
         else:
             super().reject()
 
-    def closeEvent(self, a0) -> None:
+    def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         self._is_closed = True
         self._device_enum_timer.stop()
         if not getattr(self, "_accepted_close", False):
@@ -2173,7 +2176,7 @@ class SettingsDialog(QDialog):
         self._preview_current_theme()
         self._theme_preview_dirty = False
 
-    def showEvent(self, a0):
+    def showEvent(self, a0: Optional[QShowEvent]) -> None:
         self._is_closed = False
         try:
             super().showEvent(a0)

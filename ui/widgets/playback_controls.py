@@ -53,10 +53,10 @@ class AnimatedVectorButton(QPushButton):
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_click_anim)
 
-    def enterEvent(self, a0) -> None:
+    def enterEvent(self, event) -> None:
         self._hover = True
         self.update()
-        super().enterEvent(a0)
+        super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False

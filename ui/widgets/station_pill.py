@@ -83,10 +83,10 @@ class ChannelChip(QPushButton):
         self._update_style()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:
+    def leaveEvent(self, a0) -> None:
         self._hovered = False
         self._update_style()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
     def _update_style(self) -> None:
         act = PALETTE["accent"]
@@ -217,7 +217,7 @@ class StationCheckmark(QWidget):
         self.setFixedSize(16, 16)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-    def paintEvent(self, event: QPaintEvent | None) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(
@@ -292,10 +292,10 @@ class SimpleStationRow(QPushButton):
         self._update_style()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:
+    def leaveEvent(self, a0) -> None:
         self._hovered = False
         self._update_style()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
     def _update_style(self) -> None:
         if self._hovered and self.is_selected:
@@ -525,13 +525,13 @@ class StationGlassPopover(QWidget):
             self._closed_emitted = True
             self.closed.emit()
 
-    def hideEvent(self, event) -> None:
+    def hideEvent(self, a0) -> None:
         self._emit_closed()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, a0) -> None:
         self._emit_closed()
-        super().closeEvent(event)
+        super().closeEvent(a0)
 
     def _capture_backdrop(self, global_x: int, global_y: int) -> None:
         """Blur the underlying app content before showing the popup."""
@@ -572,7 +572,7 @@ class StationGlassPopover(QWidget):
         blurred.setDevicePixelRatio(ratio)
         self._blurred_backdrop = blurred
 
-    def paintEvent(self, event: QPaintEvent | None) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -721,26 +721,26 @@ class StationPillButton(QWidget):
         self.update()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:
+    def leaveEvent(self, a0) -> None:
         self._hovered = False
         self._pressed = False
         self.update()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, a0) -> None:
+        if a0.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
             self.update()
             self._show_station_menu()
             self._pressed = False
             self.update()
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
-    def mouseReleaseEvent(self, event) -> None:
+    def mouseReleaseEvent(self, a0) -> None:
         if self._pressed:
             self._pressed = False
             self.update()
-        super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(a0)
 
     def refresh_theme(self) -> None:
         self._accent = QColor(PALETTE.get("accent", "#EC186C"))

@@ -91,10 +91,10 @@ class SegmentedSwitch(QWidget):
         self._accent = QColor(PALETTE["accent"])
         self.update()
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and len(self._items) > 0:
+    def mousePressEvent(self, a0) -> None:
+        if a0.button() == Qt.MouseButton.LeftButton and len(self._items) > 0:
             item_width = self.width() / len(self._items)
-            clicked_idx = int(event.position().x() // item_width)
+            clicked_idx = int(a0.position().x() // item_width)
             if 0 <= clicked_idx < len(self._items) and clicked_idx != self._current_index:
                 self._current_index = clicked_idx
                 self._anim_start_pos = self._anim_pos
@@ -102,16 +102,16 @@ class SegmentedSwitch(QWidget):
                 self._slide_timer.start()
                 self.update()
                 self.selection_changed.emit(self._items[clicked_idx])
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event) -> None:
+    def mouseMoveEvent(self, a0) -> None:
         if len(self._items) > 0:
             item_width = self.width() / len(self._items)
-            hover_idx = int(event.position().x() // item_width)
+            hover_idx = int(a0.position().x() // item_width)
             if hover_idx != self._hover_index:
                 self._hover_index = hover_idx
                 self.update()
-        super().mouseMoveEvent(event)
+        super().mouseMoveEvent(a0)
 
     def leaveEvent(self, a0) -> None:
         self._hover_index = -1

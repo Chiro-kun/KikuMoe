@@ -9,7 +9,7 @@ Features:
 
 import builtins
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from PyQt6.QtCore import QObject, QRectF, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import (
@@ -309,11 +309,11 @@ class DevConsole(QObject):
         self._level_combo: Optional[GlassComboBox] = None
         self._autoscroll_enabled = True
         self._paused = False
-        self._pause_buffer: list[str] = []
+        self._pause_buffer: List[str] = []
         self._log_handler: Optional[_DevConsoleHandler] = None
-        self._attached_loggers: list[logging.Logger] = []
+        self._attached_loggers: List[logging.Logger] = []
         self._logging_active = False
-        self._preopen_buffer: list[str] = []
+        self._preopen_buffer: List[str] = []
         self._show_dev = False
         self._selected_level_text = "DEBUG"
 

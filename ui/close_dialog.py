@@ -6,6 +6,7 @@ from typing import Callable
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QEvent,
     QParallelAnimationGroup,
     QPoint,
     QPointF,
@@ -18,6 +19,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QCloseEvent,
     QColor,
+    QEnterEvent,
     QFont,
     QFontMetrics,
     QIcon,
@@ -25,6 +27,7 @@ from PyQt6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPaintEvent,
     QPen,
     QShowEvent,
 )
@@ -52,7 +55,7 @@ class DialogIconBadge(QWidget):
         super().__init__(parent)
         self.setFixedSize(36, 36)
 
-    def paintEvent(self, a0: object) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -111,17 +114,17 @@ class RememberCheckBox(QCheckBox):
         self._animation.setEndValue(1.0 if checked else 0.0)
         self._animation.start()
 
-    def enterEvent(self, event) -> None:
+    def enterEvent(self, event: QEnterEvent | None) -> None:
         self._hovered = True
         self.update()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:
+    def leaveEvent(self, a0: QEvent | None) -> None:
         self._hovered = False
         self.update()
-        super().leaveEvent(event)
+        super().leaveEvent(a0)
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
@@ -292,7 +295,7 @@ class CloseConfirmDialog(QDialog):
         super().showEvent(a0)
         self._animate_entrance()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)

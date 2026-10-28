@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from difflib import SequenceMatcher
+from typing import Dict, Union
 from urllib.parse import urlencode
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -94,7 +95,7 @@ class LyricsProvider(QObject):
         if time.monotonic() < self.retry_after:
             self.finished.emit(None, "error")
             return
-        params = {"track_name": title, "artist_name": artist}
+        params: Dict[str, Union[str, int]] = {"track_name": title, "artist_name": artist}
         if 0 < (duration or 0) <= 3600:
             params["duration"] = int(duration)
         with self._lock:

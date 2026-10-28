@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import Dict, Optional, Set
+from typing import TYPE_CHECKING, Dict, Optional, Set, Union
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -55,6 +55,10 @@ from PyQt6.QtWidgets import (
 from audio.player_ffmpeg import PlayerFFmpeg
 from audio.player_mpv import PlayerMPV
 from audio.player_vlc import PlayerVLC
+
+if TYPE_CHECKING:
+    from core.mpris import MprisBridge
+    from core.windows_media import WindowsMediaBridge
 from core.config import STATIONS, STREAMS, get_station_config, get_station_stream_url
 from core.constants import (
     APP_SETTINGS,
@@ -108,6 +112,12 @@ from core.quick_search import (
 )
 from core.song_history import SongHistoryManager
 from core.ssl_compat import get_ssl_context
+from network.image_cache import (
+    ALLOWED_COVER_HOSTS,
+    get_cached_pixmap,
+    normalize_cover_url,
+    store_cached_pixmap,
+)
 from network.station_manager import StationManager
 from network.ws_client import NowPlayingWS
 from ui.about_dialog import AboutDialog
@@ -1171,6 +1181,7 @@ class ListenMoePlayer(QWidget):
         except Exception:
             network_caching = 1000
 
+        player: Union[PlayerFFmpeg, PlayerMPV, PlayerVLC]
         if backend == "ffmpeg":
             self.log.info("[BACKEND] Using FFmpeg (user setting).")
             player = PlayerFFmpeg(on_event=on_event)
@@ -1300,6 +1311,7 @@ class ListenMoePlayer(QWidget):
             pass
 
         # Dev Console
+        self.dev_console: Optional[DevConsole] = None
         try:
             self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
             if self._get_bool(KEY_DEV_CONSOLE_ENABLED, False):
@@ -1444,7 +1456,8 @@ class ListenMoePlayer(QWidget):
         self.mini_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mini_button.setToolTip(self.t("mini_mode"))
         title_layout = self._title_bar.layout()
-        title_layout.insertWidget(title_layout.count() - 3, self.mini_button)
+        if isinstance(title_layout, QHBoxLayout):
+            title_layout.insertWidget(title_layout.count() - 3, self.mini_button)
         self.mini_button.clicked.connect(self.toggle_mini_hud)
 
     def _set_window_on_top(self, enabled: bool) -> None:
@@ -1544,19 +1557,20 @@ class ListenMoePlayer(QWidget):
             self.toggle_mini_hud()
         self.open_settings()
 
-    def _init_system_media(self):
-        self.system_media = None
+    def _init_system_media(self) -> None:
+        self.system_media: Optional[Union[MprisBridge, WindowsMediaBridge]] = None
         self._media_last_state = MediaState()
         try:
             if _IS_LINUX:
-                from core.mpris import MprisBridge
+                from core.mpris import MprisBridge as _MprisBridge
 
-                self.system_media = MprisBridge(self.log, self)
-                self.system_media.volume.connect(self._set_system_media_volume)
+                mpris = _MprisBridge(self.log, self)
+                mpris.volume.connect(self._set_system_media_volume)
+                self.system_media = mpris
             elif _IS_WIN32:
-                from core.windows_media import WindowsMediaBridge
+                from core.windows_media import WindowsMediaBridge as _WindowsMediaBridge
 
-                self.system_media = WindowsMediaBridge(self.log, self)
+                self.system_media = _WindowsMediaBridge(self.log, self)
             if self.system_media is not None:
                 bridge = self.system_media
                 self.destroyed.connect(lambda *_: bridge.stop())
@@ -1575,7 +1589,9 @@ class ListenMoePlayer(QWidget):
             return
         try:
             if _IS_WIN32:
-                bridge.bind(int(self.winId()))
+                bind_fn = getattr(bridge, "bind", None)
+                if callable(bind_fn):
+                    bind_fn(int(self.winId()))
             player = getattr(self, "player", None)
             playing = bool(player and player.is_playing())
             paused = bool(
@@ -1740,8 +1756,10 @@ class ListenMoePlayer(QWidget):
 
     # 1. Qt Window & Lifecycle Events
     def closeEvent(self, a0) -> None:
-        event = a0
         """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
+        if a0 is None:
+            return
+        event = a0
         try:
             geometry_key = KEY_MINI_GEOMETRY if self._mini_mode else KEY_WINDOW_GEOMETRY
             self.settings.setValue(geometry_key, self.saveGeometry())
@@ -1814,8 +1832,9 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, "lyrics_provider"):
                 self.lyrics_provider.cancel()
-            if getattr(self, "system_media", None) is not None:
+            if self._media_timer is not None:
                 self._media_timer.stop()
+            if self.system_media is not None:
                 self.system_media.stop()
             if hasattr(self, "discord_presence"):
                 self.discord_presence.stop()
@@ -1863,6 +1882,8 @@ class ListenMoePlayer(QWidget):
             pass
 
     def changeEvent(self, a0) -> None:
+        if a0 is None:
+            return
         event = a0
         try:
             if event.type() == QEvent.Type.WindowStateChange:
@@ -2659,10 +2680,12 @@ class ListenMoePlayer(QWidget):
                 if getattr(self, "_icon_app_tray", None) is None or self._icon_app_tray.isNull():
                     self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
 
-                if hasattr(self, "channel_icon_label"):
-                    self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
-                if hasattr(self, "format_icon_label"):
-                    self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
+                channel_lbl = getattr(self, "channel_icon_label", None)
+                if channel_lbl is not None:
+                    channel_lbl.setPixmap(self._icon_channel.pixmap(16, 16))
+                format_lbl = getattr(self, "format_icon_label", None)
+                if format_lbl is not None:
+                    format_lbl.setPixmap(self._icon_codec.pixmap(16, 16))
 
                 if not getattr(self, "_window_icon_applied", False):
                     try:
@@ -2789,62 +2812,10 @@ class ListenMoePlayer(QWidget):
         except Exception:
             return icon
 
-    _ALLOWED_COVER_HOSTS = frozenset(
-        {
-            "cdn.listen.moe",
-            "listen.moe",
-            "cdn.gensokyoradio.net",
-            "gensokyoradio.net",
-            "anison.fm",
-            "pool.anison.fm",
-            "radio.twinskaraoke.com",
-            "twinskaraoke.com",
-            "truckers.fm",
-            "cdn.truckers.fm",
-            "i.scdn.co",
-            "scdn.co",
-        }
-    )
+    _ALLOWED_COVER_HOSTS = ALLOWED_COVER_HOSTS
 
     def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
-        try:
-            if not isinstance(cover_ref, str):
-                return None
-            value = cover_ref.strip()
-            if not value:
-                return None
-
-            low = value.lower()
-            if low.startswith("http://"):
-                # Rifiuta esplicitamente endpoint HTTP in chiaro
-                return None
-
-            if low.startswith("https://"):
-                raw_url = value
-            else:
-                clean_val = value.lstrip("/")
-                if clean_val.lower().startswith("covers/"):
-                    clean_val = clean_val[7:]
-                raw_url = f"https://cdn.listen.moe/covers/{clean_val}"
-
-            parts = urllib.parse.urlsplit(raw_url)
-            if parts.scheme.lower() != "https" or not parts.netloc:
-                return None
-
-            host = (parts.hostname or "").lower()
-            if not host or host not in ListenMoePlayer._ALLOWED_COVER_HOSTS:
-                return None
-
-            if parts.port not in (None, 443):
-                return None
-
-            # Encode non-ASCII and unsafe chars in path (preserve '/' and already-encoded '%xx')
-            safe_path = urllib.parse.quote(parts.path, safe="/%")
-            return urllib.parse.urlunsplit(
-                ("https", parts.netloc, safe_path, parts.query, parts.fragment)
-            )
-        except Exception:
-            return None
+        return normalize_cover_url(cover_ref)
 
     def _request_album_cover(self, cover_ref: Optional[str]) -> None:
         try:
@@ -2857,8 +2828,9 @@ class ListenMoePlayer(QWidget):
                 self._set_album_cover_pixmap(None)
                 return
 
-            cached = self._cover_cache.get(cover_url)
+            cached = self._cover_cache.get(cover_url) or get_cached_pixmap(cover_url)
             if cached is not None and not cached.isNull():
+                self._cover_cache[cover_url] = cached
                 self._set_album_cover_pixmap(cached)
                 return
 
@@ -2922,6 +2894,7 @@ class ListenMoePlayer(QWidget):
                 return
 
             self._cover_cache[cover_url] = pixmap
+            store_cached_pixmap(cover_url, pixmap)
             if len(self._cover_cache) > 64:
                 oldest_key = next(iter(self._cover_cache))
                 if oldest_key != cover_url:
@@ -2929,6 +2902,12 @@ class ListenMoePlayer(QWidget):
 
             if cover_url and cover_url == self._current_cover_url:
                 self._set_album_cover_pixmap(pixmap)
+            if (
+                hasattr(self, "_history_popover")
+                and self._history_popover is not None
+                and self._history_popover.isVisible()
+            ):
+                self._history_popover._refresh_list()
         except Exception:
             pass
 
@@ -3231,8 +3210,9 @@ class ListenMoePlayer(QWidget):
                 self.format_value.setText(fmt)
             if hasattr(self, "status_footer"):
                 self.status_footer.set_format(str(fmt))
-            if hasattr(self, "channel_switch"):
-                self.channel_switch.set_selected(str(channel))
+            channel_sw = getattr(self, "channel_switch", None)
+            if channel_sw is not None:
+                channel_sw.set_selected(str(channel))
             # Mantieni o aggiorna titolo finestra in base al Now Playing
             try:
                 title = getattr(self, "_current_title", "") or ""
@@ -3920,12 +3900,13 @@ class ListenMoePlayer(QWidget):
         try:
             if getattr(self, "_current_duration_seconds", None) == 0:
                 time_text = self.t("live_mode")
-                if getattr(self, "_current_start_epoch", None) is not None:
+                start_epoch = self._current_start_epoch
+                if start_epoch is not None:
                     try:
                         import time
 
                         now = time.time() + getattr(self, "_clock_sync_offset", 0)
-                        elapsed = max(0.0, now - self._current_start_epoch)
+                        elapsed = max(0.0, now - start_epoch)
                         if hasattr(self, "song_elapsed_label"):
                             self.song_elapsed_label.setText(self._format_mmss(int(elapsed)))
                     except Exception:
@@ -3957,7 +3938,7 @@ class ListenMoePlayer(QWidget):
                         remaining = dur - max(0, elapsed)
                         if remaining < 0:
                             remaining = 0
-                        mmss = self._format_mmss(remaining)
+                        mmss = self._format_mmss(int(remaining))
                         if hasattr(self, "song_elapsed_label"):
                             self.song_elapsed_label.setText(
                                 self._format_mmss(int(max(0, min(elapsed, dur))))
@@ -4234,11 +4215,13 @@ class ListenMoePlayer(QWidget):
             ok = bool(self.player and self.player.is_ready())
             # Aggiorna pallino colore
             try:
-                self.vlc_status_icon.setStyleSheet(  # type: ignore[attr-defined]
-                    "background-color: #2e7d32; border-radius: 5px;"
-                    if ok
-                    else "background-color: #c62828; border-radius: 5px;"
-                )
+                vlc_icon = getattr(self, "vlc_status_icon", None)
+                if vlc_icon is not None:
+                    vlc_icon.setStyleSheet(
+                        "background-color: #2e7d32; border-radius: 5px;"
+                        if ok
+                        else "background-color: #c62828; border-radius: 5px;"
+                    )
             except Exception:
                 pass
             # Testo: se disponibile versione, mostralo
@@ -4249,11 +4232,12 @@ class ListenMoePlayer(QWidget):
                     txt = f"{ver}"
             except Exception:
                 txt = None
-            if hasattr(self, "vlc_status"):
+            vlc_lbl = getattr(self, "vlc_status", None)
+            if vlc_lbl is not None:
                 if not ok:
-                    self.vlc_status.setText(self.i18n.t("vlc_not_found"))
+                    vlc_lbl.setText(self.i18n.t("vlc_not_found"))
                 else:
-                    self.vlc_status.setText(txt or "Audio backend OK")
+                    vlc_lbl.setText(txt or "Audio backend OK")
             if hasattr(self, "status_footer"):
                 backend_name = "Audio"
                 if hasattr(self, "player") and self.player is not None:
@@ -4406,9 +4390,9 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
                 # Aggiorna subito lo stato UI di pausa e la tray (pre-toggle)
+                new_paused = not bool(getattr(self, "_ui_paused", False))
+                self._ui_paused = new_paused
                 try:
-                    new_paused = not bool(getattr(self, "_ui_paused", False))
-                    self._ui_paused = new_paused
                     is_muted = bool(getattr(self.player, "get_mute", lambda: False)())
                     if hasattr(self, "tray_mgr") and self.tray_mgr:
                         self.log.debug(

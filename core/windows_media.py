@@ -2,6 +2,7 @@
 
 import ctypes
 import ctypes.wintypes
+from typing import Any, Optional, Tuple
 
 from PyQt6.QtCore import QAbstractNativeEventFilter, QObject, pyqtSignal
 from PyQt6.QtWidgets import QApplication
@@ -14,8 +15,8 @@ class MediaKeyFilter(QAbstractNativeEventFilter):
         super().__init__()
         self.bridge = bridge
 
-    def nativeEventFilter(self, event_type, message):
-        if self.bridge.controls is not None or event_type not in (
+    def nativeEventFilter(self, eventType: Any, message: Any) -> Tuple[bool, Any]:
+        if self.bridge.controls is not None or eventType not in (
             b"windows_generic_MSG",
             b"windows_dispatcher_MSG",
         ):
@@ -48,11 +49,11 @@ class WindowsMediaBridge(QObject):
     def __init__(self, logger, parent=None):
         super().__init__(parent)
         self.log = logger
-        self.controls = None
-        self._handle = None
-        self._token = None
-        self._last_state = None
-        self._modules = None
+        self.controls: Any = None
+        self._handle: Any = None
+        self._token: Any = None
+        self._last_state: Optional[MediaState] = None
+        self._modules: Optional[Tuple[Any, Any, Any, Any]] = None
         self._filter = MediaKeyFilter(self)
         app = QApplication.instance()
         if app is not None:

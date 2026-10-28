@@ -444,3 +444,35 @@ def test_song_history_popover_buttons_use_vector_icons(qapp):
 
     assert not row.btn_copy.icon().isNull()
     assert row.btn_copy.text() == ""
+
+
+def test_song_history_thumbnail_resolves_cached_cover_pixmap(qapp):
+    """Verify history thumbnails resolve cached QPixmaps for both URLs and relative refs."""
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from network.image_cache import (
+        clear_cached_pixmaps,
+        get_cached_pixmap,
+        store_cached_pixmap,
+    )
+    from ui.history_popover import SongHistoryRowWidget
+
+    clear_cached_pixmaps()
+    pm = QPixmap(64, 64)
+    pm.fill(QColor("#EC186C"))
+
+    store_cached_pixmap("https://cdn.listen.moe/covers/sample_cover.jpg", pm)
+    assert get_cached_pixmap("sample_cover.jpg") is not None
+
+    entry = SongHistoryEntry(
+        title="Idol",
+        artist="YOASOBI",
+        station_id="listenmoe",
+        station_name="LISTEN.moe",
+        timestamp=time.time(),
+        art_url="sample_cover.jpg",
+    )
+    row = SongHistoryRowWidget(entry, i18n=I18n("it"))
+    assert row.thumb._pixmap is not None
+    assert not row.thumb._pixmap.isNull()
+    clear_cached_pixmaps()

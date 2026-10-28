@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **History Popover Cover Art Cache**: Added a shared, thread-safe in-memory LRU cover art cache (`network/image_cache.py`) so `SongHistoryPopover` renders album art thumbnails across LISTEN.moe and partner web radio stations.
+- **PortAudio Thread Safety & Device Enumeration**: Serialized concurrent `Pa_Initialize`/`Pa_Terminate` and `silence_stderr()` calls via `PORTAUDIO_LOCK` across audio backends and Settings to prevent Linux PortAudio segfaults, and cancelled pending device-refresh timers when closing Settings.
+- **PyQt6 Type Annotations & Method Overrides**: Aligned widget override signatures and optional type narrowing across `ui/`, `core/`, and `network/` with PyQt6 type stubs and Pylance/mypy checks.
 - **Settings Panel & Backdrop Rendering Performance**:
   - Cached steady-state HiDPI composited backdrop frames in `FullBleedCanvas` to eliminate per-frame CPU pixmap scaling and multi-gradient recomputation during Settings scrolling, widget hovers, and 60 FPS tab/panel slides.
   - Moved PyAudio output device enumeration (`Pa_Initialize`) off the Qt main thread into a background worker, deduplicated global QSS rules on embedded `SettingsDialog`, cached tinted icons and theme application state in `ListenMoePlayer.apply_theme`, and eliminated redundant theme re-polishing on Cancel/Apply/OK.

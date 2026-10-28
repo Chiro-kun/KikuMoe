@@ -482,8 +482,8 @@ class AnimatedTrackLabel(QLabel):
             if self._hover_group is not None:
                 self._hover_group.set_hovered(hovered)
 
-    def enterEvent(self, a0: object) -> None:
-        super().enterEvent(a0)  # type: ignore[arg-type]
+    def enterEvent(self, event: object) -> None:
+        super().enterEvent(event)  # type: ignore[arg-type]
 
     def leaveEvent(self, a0: object) -> None:
         if self._interactive:
@@ -497,31 +497,31 @@ class AnimatedTrackLabel(QLabel):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().leaveEvent(a0)  # type: ignore[arg-type]
 
-    def mouseMoveEvent(self, a0: object) -> None:
-        if self._interactive and isinstance(a0, QMouseEvent):
+    def mouseMoveEvent(self, ev: object) -> None:
+        if self._interactive and isinstance(ev, QMouseEvent):
             rect = self.get_capsule_rect()
-            if rect is not None and rect.contains(a0.position()):
+            if rect is not None and rect.contains(ev.position()):
                 self.set_hovered(True)
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
             else:
                 if not self._menu_active:
                     self.set_hovered(False)
                 self.setCursor(Qt.CursorShape.ArrowCursor)
-        super().mouseMoveEvent(a0)  # type: ignore[arg-type]
+        super().mouseMoveEvent(ev)  # type: ignore[arg-type]
 
-    def mousePressEvent(self, a0: object) -> None:
+    def mousePressEvent(self, ev: object) -> None:
         if (
             self._interactive
-            and isinstance(a0, QMouseEvent)
-            and a0.button() == Qt.MouseButton.LeftButton
+            and isinstance(ev, QMouseEvent)
+            and ev.button() == Qt.MouseButton.LeftButton
         ):
             rect = self.get_capsule_rect()
-            if rect is not None and rect.contains(a0.position()):
+            if rect is not None and rect.contains(ev.position()):
                 if self._hover_group is not None:
                     self._hover_group.animate_click()
                 self.clicked.emit()
                 return
-        super().mousePressEvent(a0)  # type: ignore[arg-type]
+        super().mousePressEvent(ev)  # type: ignore[arg-type]
 
     def setText(self, a0: Optional[str]) -> None:
         new_txt = a0 or ""
@@ -760,16 +760,16 @@ class TrackHoverGroup(QWidget):
     def refresh_pointer(self) -> None:
         self.set_hovered(self._shape().contains(QPointF(self.mapFromGlobal(QCursor.pos()))))
 
-    def mouseMoveEvent(self, event: Optional[QMouseEvent]) -> None:
-        if event is not None:
-            self.set_hovered(self._shape().contains(event.position()))
-        super().mouseMoveEvent(event)
+    def mouseMoveEvent(self, a0: Optional[QMouseEvent]) -> None:
+        if a0 is not None:
+            self.set_hovered(self._shape().contains(a0.position()))
+        super().mouseMoveEvent(a0)
 
-    def leaveEvent(self, event: object) -> None:
+    def leaveEvent(self, a0: object) -> None:
         QTimer.singleShot(0, self.refresh_pointer)
-        super().leaveEvent(event)  # type: ignore[arg-type]
+        super().leaveEvent(a0)  # type: ignore[arg-type]
 
-    def paintEvent(self, event: object) -> None:
+    def paintEvent(self, a0: object) -> None:
         if self._opacity <= 0.0:
             return
         painter = QPainter(self)

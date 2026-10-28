@@ -170,7 +170,9 @@ class NowPlayingWS:
 
         def send_hb():
             try:
-                self.ws_app.send(json.dumps({"op": 9}))
+                ws = self.ws_app
+                if ws is not None:
+                    ws.send(json.dumps({"op": 9}))
             except Exception:
                 pass
             self._schedule_heartbeat()

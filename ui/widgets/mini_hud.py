@@ -74,17 +74,17 @@ class MarqueeLabel(QWidget):
                 self._pause = 40
         self.update()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
+    def showEvent(self, a0) -> None:
+        super().showEvent(a0)
         self._timer.start()
 
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
         self._offset = 0
         self._pause = 40
         self._timer.start()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.setFont(self.font())
@@ -111,7 +111,7 @@ class MiniIconButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setCheckable(kind == "pin")
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, a0) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         active = self.isChecked() or self.isDown() or self.underMouse()
@@ -165,7 +165,7 @@ class MiniIconButton(QPushButton):
 class MiniTrackProgress(QProgressBar):
     """A smooth track with rounded ends, including the filled portion."""
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -382,11 +382,11 @@ class MiniHud(QWidget):
         if self._volume_opacity.opacity() <= 0.0:
             self.volume_popup.hide()
 
-    def hideEvent(self, event) -> None:
+    def hideEvent(self, a0) -> None:
         self._volume_timer.stop()
         self._volume_animation.stop()
         self.volume_popup.hide()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
     def set_cover(self, pixmap: Optional[QPixmap]) -> None:
         if pixmap is None or pixmap.isNull():
@@ -409,21 +409,19 @@ class MiniHud(QWidget):
         painter.end()
         self.cover.setPixmap(rounded)
 
-    def mousePressEvent(self, event: Optional[QMouseEvent]) -> None:
-        if event is not None and event.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, a0: Optional[QMouseEvent]) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             window = self.window()
             if window is not None:
                 handle = window.windowHandle()
                 if handle is not None and handle.startSystemMove():
                     return
-                self._drag_offset = (
-                    event.globalPosition().toPoint() - window.frameGeometry().topLeft()
-                )
-        super().mousePressEvent(event)
+                self._drag_offset = a0.globalPosition().toPoint() - window.frameGeometry().topLeft()
+        super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event: Optional[QMouseEvent]) -> None:
-        if event is not None and event.buttons() & Qt.MouseButton.LeftButton and self._drag_offset:
+    def mouseMoveEvent(self, a0: Optional[QMouseEvent]) -> None:
+        if a0 is not None and a0.buttons() & Qt.MouseButton.LeftButton and self._drag_offset:
             window = self.window()
             if window is not None:
-                window.move(event.globalPosition().toPoint() - self._drag_offset)
-        super().mouseMoveEvent(event)
+                window.move(a0.globalPosition().toPoint() - self._drag_offset)
+        super().mouseMoveEvent(a0)

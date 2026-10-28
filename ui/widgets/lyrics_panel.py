@@ -63,15 +63,15 @@ class LyricsSkeleton(QWidget):
         self._phase = (self._phase + 0.025) % 1.0
         self.update()
 
-    def showEvent(self, event):
-        super().showEvent(event)
+    def showEvent(self, a0):
+        super().showEvent(a0)
         self.timer.start()
 
-    def hideEvent(self, event):
+    def hideEvent(self, a0):
         self.timer.stop()
-        super().hideEvent(event)
+        super().hideEvent(a0)
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -96,14 +96,16 @@ class LyricsSkeleton(QWidget):
 
 
 class LyricsPanel(QWidget):
+    scroll: QScrollArea  # type: ignore[assignment]
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("lyricsPanel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(190)
         self.setFixedHeight(222)
-        self.lines = []
-        self.labels = []
+        self.lines: list = []
+        self.labels: list = []
         self.active = -1
         self._accent = PALETTE["accent"]
         layout = QVBoxLayout(self)
@@ -114,7 +116,9 @@ class LyricsPanel(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.viewport().installEventFilter(self)
+        vp = self.scroll.viewport()
+        if vp is not None:
+            vp.installEventFilter(self)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(0, 0, 4, 0)
@@ -126,13 +130,15 @@ class LyricsPanel(QWidget):
         self.stack.addWidget(self.scroll)
         self.stack.addWidget(self.skeleton)
         layout.addWidget(self.stack, 1)
-        self.animation = QPropertyAnimation(self.scroll.verticalScrollBar(), b"value", self)
+        vbar = self.scroll.verticalScrollBar()
+        self.animation = QPropertyAnimation(vbar, b"value", self)
         self.animation.setDuration(350)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._recenter_timer = QTimer(self)
         self._recenter_timer.setSingleShot(True)
         self._recenter_timer.timeout.connect(self._recenter_active)
-        self.scroll.verticalScrollBar().rangeChanged.connect(self._schedule_recenter)
+        if vbar is not None:
+            vbar.rangeChanged.connect(self._schedule_recenter)
 
     def set_accent(self, accent):
         self._accent = accent
@@ -149,8 +155,10 @@ class LyricsPanel(QWidget):
         self.lines, self.labels, self.active = [], [], -1
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
 
     def _add_line(self, text):
         label = LyricLine(text)
@@ -164,7 +172,9 @@ class LyricsPanel(QWidget):
         self._add_line(text)
         self.content_layout.addStretch()
         self._update_styles()
-        self.scroll.verticalScrollBar().setValue(0)
+        vbar = self.scroll.verticalScrollBar()
+        if vbar is not None:
+            vbar.setValue(0)
 
     def show_record(self, record, plain_note, timing_note=""):
         self.stack.setCurrentWidget(self.scroll)
@@ -182,7 +192,9 @@ class LyricsPanel(QWidget):
             self._add_line(text)
             self.content_layout.addStretch()
         self._update_styles()
-        self.scroll.verticalScrollBar().setValue(0)
+        vbar = self.scroll.verticalScrollBar()
+        if vbar is not None:
+            vbar.setValue(0)
 
     def show_loading(self, text):
         self._clear()
@@ -196,14 +208,20 @@ class LyricsPanel(QWidget):
             label.set_active(index == self.active, self._accent, animate)
 
     def _update_padding(self):
-        padding = max(0, self.scroll.viewport().height() // 2)
+        vp = self.scroll.viewport()
+        padding = max(0, (vp.height() if vp is not None else 0) // 2)
         self.content_layout.setContentsMargins(0, padding, 4, padding)
 
-    def eventFilter(self, watched, event):
-        if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize and self.lines:
+    def eventFilter(self, a0, a1):
+        if (
+            a1 is not None
+            and a0 is self.scroll.viewport()
+            and a1.type() == QEvent.Type.Resize
+            and self.lines
+        ):
             self._update_padding()
             self._schedule_recenter()
-        return super().eventFilter(watched, event)
+        return super().eventFilter(a0, a1)
 
     def _schedule_recenter(self, *args):
         if self.active >= 0:
@@ -215,7 +233,10 @@ class LyricsPanel(QWidget):
         self.content_layout.activate()
         label = self.labels[self.active]
         bar = self.scroll.verticalScrollBar()
-        target = label.y() + label.height() // 2 - self.scroll.viewport().height() // 2
+        vp = self.scroll.viewport()
+        if bar is None or vp is None:
+            return
+        target = label.y() + label.height() // 2 - vp.height() // 2
         self.animation.stop()
         self.animation.setStartValue(bar.value())
         self.animation.setEndValue(max(0, min(bar.maximum(), target)))

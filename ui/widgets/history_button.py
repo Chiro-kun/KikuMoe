@@ -44,13 +44,13 @@ class HistoryIconButton(QPushButton):
         self.update()
         super().leaveEvent(a0)  # type: ignore[arg-type]
 
-    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
-        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+    def mousePressEvent(self, e: QMouseEvent | None) -> None:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._anim_step = 1
             self._scale = 0.84
             self._anim_timer.start()
             self.update()
-        super().mousePressEvent(a0)
+        super().mousePressEvent(e)
 
     def _tick_anim(self) -> None:
         scales = [0.86, 0.90, 0.95, 1.01, 1.04, 1.03, 1.01, 1.00]

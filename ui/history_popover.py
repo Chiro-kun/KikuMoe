@@ -6,6 +6,7 @@ from typing import Callable
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QEvent,
     QParallelAnimationGroup,
     QPoint,
     QPointF,
@@ -17,8 +18,12 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QColor,
+    QEnterEvent,
+    QHideEvent,
     QKeyEvent,
     QPainter,
+    QPainterPath,
+    QPaintEvent,
     QPen,
     QPixmap,
 )
@@ -37,6 +42,7 @@ from PyQt6.QtWidgets import (
 from core.i18n import I18n
 from core.quick_search import copy_to_clipboard, search_spotify, search_youtube
 from core.song_history import SongHistoryEntry, SongHistoryManager
+from network.image_cache import get_cached_pixmap
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 from ui.vector_icons import get_copy_icon, get_spotify_icon, get_youtube_icon
 
@@ -50,12 +56,12 @@ class _ElidedLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)
 
-    def setText(self, text: str | None) -> None:
-        self._full_text = text or ""
-        super().setText(text or "")
+    def setText(self, a0: str | None) -> None:
+        self._full_text = a0 or ""
+        super().setText(a0 or "")
         self.update()
 
-    def paintEvent(self, a0: object) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         fm = self.fontMetrics()
         elided = fm.elidedText(self._full_text, Qt.TextElideMode.ElideRight, self.width())
@@ -78,19 +84,12 @@ class _TrackThumbnail(QLabel):
             self._load_art(art_url)
 
     def _load_art(self, art_url: str) -> None:
-        # Check if local file or image cached
-        try:
-            from network.image_cache import get_cached_pixmap
+        cached = get_cached_pixmap(art_url)
+        if cached is not None and not cached.isNull():
+            self._pixmap = cached
+            self.update()
 
-            cached = get_cached_pixmap(art_url)
-            if cached and not cached.isNull():
-                self._pixmap = cached
-                self.update()
-                return
-        except Exception:
-            pass
-
-    def paintEvent(self, a0: object) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -115,8 +114,6 @@ class _TrackThumbnail(QLabel):
 
             # Paint with clip path
             painter.save()
-            from PyQt6.QtGui import QPainterPath
-
             path = QPainterPath()
             path.addRoundedRect(rect, 6.0, 6.0)
             painter.setClipPath(path)
@@ -261,17 +258,17 @@ class SongHistoryRowWidget(QWidget):
             self.btn_copy,
         )
 
-    def enterEvent(self, event: object) -> None:
+    def enterEvent(self, event: QEnterEvent | None) -> None:
         self._hovered = True
         self.update()
-        super().enterEvent(event)  # type: ignore[arg-type]
+        super().enterEvent(event)
 
-    def leaveEvent(self, a0: object) -> None:
+    def leaveEvent(self, a0: QEvent | None) -> None:
         self._hovered = False
         self.update()
-        super().leaveEvent(a0)  # type: ignore[arg-type]
+        super().leaveEvent(a0)
 
-    def paintEvent(self, a0: object) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -504,11 +501,11 @@ class SongHistoryPopover(QWidget):
         self._anim_group = group
         group.start()
 
-    def hideEvent(self, a0: object) -> None:
+    def hideEvent(self, a0: QHideEvent | None) -> None:
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit()
-        super().hideEvent(a0)  # type: ignore[arg-type]
+        super().hideEvent(a0)
 
     def keyPressEvent(self, a0: QKeyEvent | None) -> None:
         if a0 is not None and a0.key() == Qt.Key.Key_Escape:
@@ -516,7 +513,7 @@ class SongHistoryPopover(QWidget):
             return
         super().keyPressEvent(a0)
 
-    def paintEvent(self, a0: object) -> None:
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
         """Draw sleek Cyber-Moe glass surface with antialiasing."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)

@@ -74,8 +74,8 @@ class _AnimatedSleepBtn(QPushButton):
             self._anim_timer.stop()
         self.update()
 
-    def paintEvent(self, e) -> None:
-        super().paintEvent(e)
+    def paintEvent(self, a0) -> None:
+        super().paintEvent(a0)
         if self._ripple < 1.0:
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -128,7 +128,7 @@ class _AnimatedCountdownBadge(QLabel):
             self._timer.stop()
         self.update()
 
-    def paintEvent(self, e) -> None:
+    def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w = float(self.width())
@@ -331,7 +331,7 @@ class SleepTimerWidget(QFrame):
             self._card_anim_timer.stop()
         self.update()
 
-    def paintEvent(self, e) -> None:
+    def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 

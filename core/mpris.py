@@ -294,7 +294,9 @@ class MprisBridge(QObject):
                 self.log.info("[MPRIS] Media controls connected")
                 while bus.connected and not self._stopping.is_set():
                     try:
-                        await asyncio.wait_for(self._async_stop.wait(), timeout=0.5)
+                        stop_event = self._async_stop
+                        if stop_event is not None:
+                            await asyncio.wait_for(stop_event.wait(), timeout=0.5)
                     except asyncio.TimeoutError:
                         pass
             except Exception as exc:
@@ -306,7 +308,9 @@ class MprisBridge(QObject):
                     bus.disconnect()
             if not self._stopping.is_set():
                 try:
-                    await asyncio.wait_for(self._async_stop.wait(), timeout=5)
+                    stop_event = self._async_stop
+                    if stop_event is not None:
+                        await asyncio.wait_for(stop_event.wait(), timeout=5)
                 except asyncio.TimeoutError:
                     pass
 

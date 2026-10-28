@@ -6,6 +6,7 @@ import struct
 import sys
 import tempfile
 import uuid
+from typing import Any, Dict
 
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtNetwork import QLocalSocket
@@ -34,7 +35,10 @@ def activity_payload(
 ):
     if not title or title in ("–", "-"):
         return None
-    activity = {"details": title[:128], "state": (artist or station or "Radio")[:128]}
+    activity: Dict[str, Any] = {
+        "details": title[:128],
+        "state": (artist or station or "Radio")[:128],
+    }
     activity["buttons"] = [{"label": button_label, "url": URL_FORGEJO}]
     if cover and cover.startswith(("https://", "http://")) and len(cover) <= 300:
         activity["assets"] = {"large_image": cover, "large_text": (station or "KikuMoe")[:128]}
@@ -118,7 +122,7 @@ class DiscordPresence(QObject):
         self._send(0, {"v": 1, "client_id": self.client_id})
 
     def _read(self):
-        self.buffer += bytes(self.socket.readAll())
+        self.buffer += self.socket.readAll().data()
         while len(self.buffer) >= 8:
             opcode, length = struct.unpack("<II", self.buffer[:8])
             if length > 1024 * 1024:
