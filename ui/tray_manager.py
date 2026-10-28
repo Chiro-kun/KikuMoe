@@ -446,6 +446,7 @@ class TrayNowPlayingCard(QFrame):
     def refresh_theme(self) -> None:
         """Synchronizes colors and borders with the active Cyber-Moe palette."""
         accent = PALETTE.get("accent", "#EC186C")
+        hover_border = PALETTE.get("accent_glow", "rgba(236, 24, 108, 0.35)")
 
         self.setStyleSheet(
             "TrayNowPlayingCard { "
@@ -472,9 +473,9 @@ class TrayNowPlayingCard(QFrame):
         btn_style = (
             "QToolButton { background-color: rgba(255, 255, 255, 0.06); "
             "border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; } "
-            "QToolButton:hover { background-color: rgba(255, 255, 255, 0.14); "
-            "border: 1px solid rgba(255, 255, 255, 0.20); } "
-            "QToolButton:pressed { background-color: rgba(255, 255, 255, 0.22); }"
+            f"QToolButton:hover {{ background-color: rgba(255, 255, 255, 0.13); "
+            f"border: 1px solid {hover_border}; }} "
+            "QToolButton:pressed { background-color: rgba(255, 255, 255, 0.20); }"
         )
         for b in [self._btn_play, self._btn_stop, self._btn_mute, self._btn_history]:
             b.setStyleSheet(btn_style)
@@ -1077,7 +1078,7 @@ class TrayManager(QObject):
             bg_pop = PALETTE.get("bg_popover", "#141624")
             text_pri = PALETTE.get("text_primary", "#ffffff")
             text_mut = PALETTE.get("text_muted", "#8E95A5")
-            padding_val = "4px 0px" if is_submenu else "0px 0px 4px 0px"
+            padding_val = "2px 0px" if is_submenu else "0px"
             menu.setStyleSheet(
                 f"""
                 QMenu {{
@@ -1085,12 +1086,12 @@ class TrayManager(QObject):
                     border: 1px solid {sep_rgba};
                     border-radius: 10px;
                     padding: {padding_val};
-                    spacing: 2px;
+                    spacing: 0px;
                 }}
                 QMenu::item {{
-                    padding: 6px 28px 6px 10px;
-                    border-radius: 6px;
-                    margin: 1px 6px;
+                    padding: 7px 28px 7px 14px;
+                    margin: 0px;
+                    border: none;
                     color: {text_pri};
                     font-size: 13px;
                 }}
@@ -1101,16 +1102,20 @@ class TrayManager(QObject):
                     background-color: {hover_rgba};
                     color: #ffffff;
                 }}
+                QMenu::item:enabled:pressed {{
+                    background-color: {hover_rgba};
+                    color: #ffffff;
+                }}
                 QMenu::item:disabled {{
                     color: {text_mut};
                     background-color: transparent;
-                    padding: 8px 12px 3px 12px;
+                    padding: 8px 14px 3px 14px;
                     font-size: 10px;
                 }}
                 QMenu::separator {{
                     height: 1px;
                     background-color: {sep_rgba};
-                    margin: 6px 12px;
+                    margin: 4px 0px;
                 }}
                 """
             )

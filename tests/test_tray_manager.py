@@ -370,3 +370,38 @@ def test_tray_card_ambient_glow_and_theme_sync(qapp):
     # Revert back to default theme
     apply_theme_palette("cyber_moe")
     tray_mgr.refresh_theme()
+
+
+def test_tray_menu_hover_cyber_glass_styling(qapp):
+    from ui.themes.engine import PALETTE, apply_theme_palette
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._tray is not None
+    menu = tray_mgr._tray.contextMenu()
+    assert menu is not None
+    ss = menu.styleSheet()
+
+    # Must occupy full box width (margin: 0px) and full height (padding: 0px)
+    assert "margin: 0px;" in ss
+    assert "padding: 0px;" in ss
+    # Must use theme accent menu hover
+    assert PALETTE["accent_menu_hover"] in ss
+    # Card controls hover style check
+    assert tray_mgr._card is not None
+    btn_ss = tray_mgr._card._btn_play.styleSheet()
+    assert "QToolButton:hover" in btn_ss
+
+    # Verify theme refresh propagates new theme colors
+    apply_theme_palette("ocean_breeze")
+    tray_mgr.refresh_theme()
+    ss_ocean = menu.styleSheet()
+    assert PALETTE["accent_menu_hover"] in ss_ocean
+
+    apply_theme_palette("cyber_moe")
+    tray_mgr.refresh_theme()

@@ -99,6 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Streamlined the context menu by removing redundant duplicate playback items (*Riproduci*, *Stop*, *Muto*, *Cronologia brani*), which are now integrated directly inside the interactive Cyber-Glass Now Playing header card.
   - Modernized section headers (`FINESTRA`, `PREFERENZE`) with bold, uppercase, tracked typography and polished item spacing.
   - Deep glassmorphism background (`#141624`), subtle borders (`PALETTE["border_card"]`), and smooth accent hover highlights (`PALETTE["accent_menu_hover"]`).
+  - Full-box edge-to-edge menu item hover state (`margin: 0px`, `padding: 0px` on menu): removed inset horizontal margins and bottom padding so hover states fill the entire width and reach the bottom of the tray menu seamlessly.
   - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
 
 ### Fixed
