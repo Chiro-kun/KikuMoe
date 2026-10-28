@@ -11,9 +11,11 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QIcon,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPixmap,
+    QRadialGradient,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -21,6 +23,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QSizePolicy,
     QSystemTrayIcon,
     QToolButton,
     QVBoxLayout,
@@ -124,7 +127,8 @@ class TrayNowPlayingCard(QFrame):
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedWidth(276)
+        self.setMinimumWidth(260)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         self._setup_ui()
         self.refresh_theme()
@@ -260,6 +264,71 @@ class TrayNowPlayingCard(QFrame):
                 self._menu.close()
         super().mouseReleaseEvent(a0)
 
+    def _update_elided_text(self) -> None:
+        """Recalculates elided title and artist strings based on current widget width."""
+        available_width = max(160, self.width() - 84)
+        fm_title = QFontMetrics(self._lbl_title.font())
+        display_title = (
+            fm_title.elidedText(self._raw_title, Qt.TextElideMode.ElideRight, available_width)
+            if self._raw_title
+            else "KikuMoe"
+        )
+        self._lbl_title.setText(display_title)
+        self._lbl_title.setToolTip(self._raw_title if self._raw_title else "KikuMoe")
+
+        fm_artist = QFontMetrics(self._lbl_artist.font())
+        display_artist = (
+            fm_artist.elidedText(self._raw_artist, Qt.TextElideMode.ElideRight, available_width)
+            if self._raw_artist
+            else self._t("tray_no_track", "Nessun brano in riproduzione")
+        )
+        self._lbl_artist.setText(display_artist)
+        self._lbl_artist.setToolTip(self._raw_artist if self._raw_artist else "")
+
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._update_elided_text()
+
+    def paintEvent(self, a0) -> None:
+        super().paintEvent(a0)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        accent = QColor(PALETTE.get("accent", "#EC186C"))
+        w = float(self.width())
+        h = float(self.height())
+
+        # Clip top corners matching menu border radius (10px)
+        clip = QPainterPath()
+        clip.addRoundedRect(0.0, 0.0, w, h, 10.0, 10.0)
+        painter.setClipPath(clip)
+
+        # 1. Radial ambient glow centered behind the album cover art
+        # Cover thumbnail (58x58) is placed at left=12, top=10, center at (41, 39)
+        rad = QRadialGradient(41.0, 39.0, 130.0)
+        c1 = QColor(accent)
+        c1.setAlpha(60)
+        c2 = QColor(accent)
+        c2.setAlpha(20)
+        c3 = QColor(accent)
+        c3.setAlpha(0)
+        rad.setColorAt(0.0, c1)
+        rad.setColorAt(0.50, c2)
+        rad.setColorAt(1.0, c3)
+        painter.fillRect(0, 0, int(w), int(h), rad)
+
+        # 2. Soft horizontal/top-down ambient wash
+        lin = QLinearGradient(0.0, 0.0, 0.0, h)
+        l1 = QColor(accent)
+        l1.setAlpha(22)
+        l2 = QColor(accent)
+        l2.setAlpha(0)
+        lin.setColorAt(0.0, l1)
+        lin.setColorAt(0.90, l2)
+        painter.fillRect(0, 0, int(w), int(h), lin)
+
+        painter.end()
+
     def set_track_info(
         self,
         title: str = "",
@@ -286,25 +355,8 @@ class TrayNowPlayingCard(QFrame):
         self._lbl_session.setText(sess_clean or "00:00")
         self._lbl_session.setVisible(bool(sess_clean))
 
-        # Title & Artist with auto-elide
-        available_width = 170
-        fm_title = QFontMetrics(self._lbl_title.font())
-        display_title = (
-            fm_title.elidedText(self._raw_title, Qt.TextElideMode.ElideRight, available_width)
-            if self._raw_title
-            else "KikuMoe"
-        )
-        self._lbl_title.setText(display_title)
-        self._lbl_title.setToolTip(self._raw_title if self._raw_title else "KikuMoe")
-
-        fm_artist = QFontMetrics(self._lbl_artist.font())
-        display_artist = (
-            fm_artist.elidedText(self._raw_artist, Qt.TextElideMode.ElideRight, available_width)
-            if self._raw_artist
-            else self._t("tray_no_track", "Nessun brano in riproduzione")
-        )
-        self._lbl_artist.setText(display_artist)
-        self._lbl_artist.setToolTip(self._raw_artist if self._raw_artist else "")
+        # Title & Artist with dynamic width-aware elision
+        self._update_elided_text()
 
     def set_cover_pixmap(self, pixmap: QPixmap | None) -> None:
         """Sets smooth rounded artwork or falls back to KikuMoe brand icon."""
@@ -410,6 +462,7 @@ class TrayNowPlayingCard(QFrame):
         # Refresh button icons
         self.update_controls_state(self._is_playing, self._is_paused, self._is_muted)
         self._btn_history.setIcon(get_history_icon(14, "#CBD5E1"))
+        self.update()
 
 
 class TrayManager(QObject):

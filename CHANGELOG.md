@@ -80,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Seamless System Tray Header & Enlarged Artwork (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
   - Removed detached card container borders and background box, seamlessly integrating the Now Playing widget as the native top header of the system tray context menu.
+  - Implemented dynamic Cyber ambient glow in the tray header background (`TrayNowPlayingCard.paintEvent`): renders an anti-aliased radial aura behind the album cover art and a soft top-down ambient light wash that dynamically morphs with the active theme preset and custom accent color.
   - Increased album cover art thumbnail size from 46×46 px to 58×58 px with smooth anti-aliased 8px rounded corners.
   - Removed cramped hint text and centered quick media buttons (`[Play/Pause]`, `[Stop]`, `[Mute]`, `[Cronologia brani...]`) with comfortable 36×28 px touch targets.
   - Added real-time playback control state synchronization whenever the tray menu is opened (`menu.aboutToShow.connect(self._sync_controls_from_parent)`), ensuring the Play/Pause icon immediately reflects current playback state.

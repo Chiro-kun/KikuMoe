@@ -332,3 +332,41 @@ def test_tray_menu_clean_layout(qapp):
     assert tray_mgr._act_settings in actions
     assert tray_mgr._act_about in actions
     assert tray_mgr._act_quit in actions
+
+
+def test_tray_card_ambient_glow_and_theme_sync(qapp):
+    from PyQt6.QtCore import QRect
+    from PyQt6.QtGui import QPaintEvent
+
+    from ui.themes.engine import apply_theme_palette
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+    card = tray_mgr._card
+    assert card is not None
+
+    card.resize(280, 116)
+    card.set_track_info(
+        "Song With A Very Long Title That Should Elide Smoothly",
+        "Famous Artist",
+        "LISTEN.moe",
+        "01:23",
+    )
+    assert card._lbl_title.text() != ""
+
+    # Paint event should render ambient glow without error
+    pe = QPaintEvent(QRect(0, 0, 280, 116))
+    card.paintEvent(pe)
+
+    # Change theme to Neon Matrix and refresh
+    apply_theme_palette("neon_matrix")
+    tray_mgr.refresh_theme()
+    card.paintEvent(pe)
+
+    # Revert back to default theme
+    apply_theme_palette("cyber_moe")
+    tray_mgr.refresh_theme()
