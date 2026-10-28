@@ -11,6 +11,7 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QIcon,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -295,38 +296,57 @@ class TrayNowPlayingCard(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         accent = QColor(PALETTE.get("accent", "#EC186C"))
-        w = float(self.width())
-        h = float(self.height())
+        w = self.width()
+        h = self.height()
+        if w <= 0 or h <= 0:
+            painter.end()
+            return
 
-        # Clip top corners matching menu border radius (10px) without rounding bottom
-        clip = QPainterPath()
-        clip.addRoundedRect(0.0, 0.0, w, h + 10.0, 10.0, 10.0)
-        painter.setClipPath(clip)
+        # Render ambient glow onto an offscreen surface with smooth vertical falloff
+        glow_img = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+        glow_img.fill(Qt.GlobalColor.transparent)
 
-        # 1. Radial ambient glow centered behind the album cover art
-        # Cover thumbnail (58x58) is placed at left=12, top=10, center at (41, 39)
-        rad = QRadialGradient(41.0, 39.0, 130.0)
+        gp = QPainter(glow_img)
+        gp.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 1. Radial ambient glow centered behind cover art (41, 39)
+        rad = QRadialGradient(41.0, 39.0, 110.0)
         c1 = QColor(accent)
-        c1.setAlpha(60)
+        c1.setAlpha(65)
         c2 = QColor(accent)
         c2.setAlpha(20)
         c3 = QColor(accent)
         c3.setAlpha(0)
         rad.setColorAt(0.0, c1)
-        rad.setColorAt(0.50, c2)
+        rad.setColorAt(0.55, c2)
         rad.setColorAt(1.0, c3)
-        painter.fillRect(0, 0, int(w), int(h), rad)
+        gp.fillRect(0, 0, w, h, rad)
 
-        # 2. Soft horizontal/top-down ambient wash
-        lin = QLinearGradient(0.0, 0.0, 0.0, h)
+        # 2. Soft horizontal/top-down wash
+        lin = QLinearGradient(0.0, 0.0, 0.0, float(h))
         l1 = QColor(accent)
         l1.setAlpha(22)
         l2 = QColor(accent)
         l2.setAlpha(0)
         lin.setColorAt(0.0, l1)
-        lin.setColorAt(0.90, l2)
-        painter.fillRect(0, 0, int(w), int(h), lin)
+        lin.setColorAt(0.80, l2)
+        gp.fillRect(0, 0, w, h, lin)
 
+        # 3. Soft vertical falloff mask to ensure glow dissolves completely before card bottom
+        gp.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        fade_mask = QLinearGradient(0.0, 0.0, 0.0, float(h))
+        fade_mask.setColorAt(0.0, QColor(0, 0, 0, 255))
+        fade_mask.setColorAt(0.68, QColor(0, 0, 0, 255))
+        fade_mask.setColorAt(0.92, QColor(0, 0, 0, 0))
+        fade_mask.setColorAt(1.0, QColor(0, 0, 0, 0))
+        gp.fillRect(0, 0, w, h, fade_mask)
+        gp.end()
+
+        # Clip top corners matching menu border radius (10px) without rounding bottom
+        clip = QPainterPath()
+        clip.addRoundedRect(0.0, 0.0, float(w), float(h + 10.0), 10.0, 10.0)
+        painter.setClipPath(clip)
+        painter.drawImage(0, 0, glow_img)
         painter.end()
 
     def set_track_info(
