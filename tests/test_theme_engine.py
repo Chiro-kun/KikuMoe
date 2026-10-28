@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 import pytest
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QColor, QPixmap
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QDialog, QWidget
 
 import ui.settings_dialog as settings_module
 from core.constants import (
@@ -536,3 +536,75 @@ def test_portaudio_device_enumeration_thread_safety_and_close_cancellation(
     cached = settings_module.SettingsDialog._collect_pyaudio_devices(force_refresh=False)
     assert len(cached) == 1
     assert init_calls == prev_inits
+
+
+def test_accent_color_picker_dialog_full_flow(qapp, tmp_path, monkeypatch):
+    from core.constants import KEY_CUSTOM_ACCENT_PALETTE
+    from ui.color_picker_dialog import (
+        QUICK_PALETTE_COLORS,
+        AccentColorPickerDialog,
+    )
+
+    ini_path = str(tmp_path / "picker_test.ini")
+    settings = QSettings(ini_path, QSettings.Format.IniFormat)
+    monkeypatch.setattr("ui.color_picker_dialog.QSettings", lambda *args: settings)
+
+    dlg = AccentColorPickerDialog(initial_color="#ec186c")
+    dlg.resize(440, 560)
+    dlg.show()
+    qapp.processEvents()
+
+    assert dlg.selected_color() == "#ec186c"
+    assert dlg.txt_hex.text() == "#EC186C"
+    assert len(dlg._quick_swatch_buttons) == len(QUICK_PALETTE_COLORS)
+    assert len(dlg._saved_swatch_buttons) == 8
+
+    # 1. Edit HEX directly -> updates internal state, spinboxes, and comparison swatch
+    dlg._on_hex_text_edited("#00E676")
+    assert dlg.selected_color() == "#00e676"
+    assert dlg.spin_r.value() == 0
+    assert dlg.spin_g.value() == 230
+    assert dlg.spin_b.value() == 118
+    assert dlg.compare_swatch._current == "#00e676"
+
+    # 2. Select a quick preset swatch -> Ocean Cyan
+    dlg._select_swatch("#00d2ff")
+    assert dlg.selected_color() == "#00d2ff"
+    assert dlg.txt_hex.text() == "#00D2FF"
+
+    # 3. Restore initial color via compare swatch
+    dlg._restore_initial()
+    assert dlg.selected_color() == "#ec186c"
+    assert dlg.txt_hex.text() == "#EC186C"
+
+    # 4. Save current color to custom slots -> slot 0 is filled and persisted
+    dlg._save_current_to_custom_palette()
+    assert dlg._saved_swatch_buttons[0].color() == "#ec186c"
+    assert settings.value(KEY_CUSTOM_ACCENT_PALETTE) == "#ec186c"
+
+    # 5. Save another color (#38bdf8) -> slot 1 is filled
+    dlg._select_swatch("#38bdf8")
+    dlg._save_current_to_custom_palette()
+    assert dlg._saved_swatch_buttons[1].color() == "#38bdf8"
+    assert settings.value(KEY_CUSTOM_ACCENT_PALETTE) == "#ec186c,#38bdf8"
+
+    # 6. Remove slot 0 -> slot 0 becomes empty
+    dlg._remove_saved_color_slot(0)
+    assert dlg._saved_swatch_buttons[0].color() is None
+
+    # 7. Render offscreen pixmap to ensure zero paintEvent exceptions
+    pm = QPixmap(dlg.size())
+    pm.fill(Qt.GlobalColor.transparent)
+    dlg.render(pm)
+    assert not pm.isNull()
+
+    # 8. Accept / get_color static flow
+    monkeypatch.setattr(AccentColorPickerDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    chosen = AccentColorPickerDialog.get_color(initial_color="#ff8800")
+    assert chosen == "#ff8800"
+
+    monkeypatch.setattr(AccentColorPickerDialog, "exec", lambda self: QDialog.DialogCode.Rejected)
+    rejected = AccentColorPickerDialog.get_color(initial_color="#ff8800")
+    assert rejected is None
+
+    dlg.close()

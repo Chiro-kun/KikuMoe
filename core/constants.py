@@ -150,6 +150,7 @@ DEFAULT_STATION = STATION_LISTENMOE
 KEY_THEME = "theme"
 KEY_CUSTOM_ACCENT_ENABLED = "custom_accent_enabled"
 KEY_CUSTOM_ACCENT = "custom_accent"
+KEY_CUSTOM_ACCENT_PALETTE = "custom_accent_palette"
 THEME_CYBER_MOE = "cyber_moe"
 THEME_MIDNIGHT_AMOLED = "midnight_amoled"
 THEME_SAKURA_BLOOM = "sakura_bloom"

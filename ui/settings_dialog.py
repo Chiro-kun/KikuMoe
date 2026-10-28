@@ -44,7 +44,6 @@ from PyQt6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -101,6 +100,7 @@ from core.constants import (
 from core.i18n import I18n
 from core.logger import PORTAUDIO_LOCK, silence_stderr
 from ui.about_dialog import AboutWidget
+from ui.color_picker_dialog import AccentColorPickerDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.themes.cyber_moe import (
     PALETTE,
@@ -868,11 +868,13 @@ class AccentColorSwatchButton(QPushButton):
         self,
         initial_color: str = DEFAULT_ACCENT_COLOR,
         dialog_title: str = "Select Accent Color",
+        i18n: Optional[I18n] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._color = normalize_hex_color(initial_color)
         self._dialog_title = dialog_title
+        self._i18n = i18n
         self._hover = False
         self._pressed = False
         self.setFixedSize(112, 30)
@@ -894,9 +896,18 @@ class AccentColorSwatchButton(QPushButton):
         self._dialog_title = title
 
     def _open_picker(self) -> None:
-        chosen = QColorDialog.getColor(QColor(self._color), self, self._dialog_title)
-        if chosen.isValid():
-            self.set_color(chosen.name(), emit_signal=True)
+        host = self.window()
+        i18n = self._i18n or getattr(host, "i18n", None)
+        icon = getattr(host, "_icon_app", None) or (host.windowIcon() if host else None)
+        chosen = AccentColorPickerDialog.get_color(
+            initial_color=self._color,
+            parent=host,
+            title=self._dialog_title,
+            i18n=i18n,
+            icon=icon,
+        )
+        if chosen:
+            self.set_color(chosen, emit_signal=True)
 
     def enterEvent(self, event) -> None:
         self._hover = True
@@ -1155,6 +1166,7 @@ class SettingsDialog(QDialog):
         self.btn_accent_swatch = AccentColorSwatchButton(
             initial_color=initial_swatch_hex,
             dialog_title=self.i18n.t("settings_custom_accent_dialog_title"),
+            i18n=self.i18n,
             parent=self.custom_accent_row,
         )
         self.btn_accent_swatch.setToolTip(self.i18n.t("settings_custom_accent_pick"))
@@ -1909,11 +1921,21 @@ class SettingsDialog(QDialog):
             border: none;
             padding-left: 2px;
         }}
-        QLineEdit, QSpinBox {{
+        QLineEdit {{
             background-color: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 8px;
             padding: 4px 10px;
+            color: {PALETTE["text_primary"]};
+            font-size: 13px;
+            font-weight: 600;
+            min-height: 22px;
+        }}
+        QSpinBox {{
+            background-color: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 2px 4px;
             color: {PALETTE["text_primary"]};
             font-size: 13px;
             font-weight: 600;

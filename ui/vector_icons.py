@@ -187,3 +187,38 @@ def get_chevron_down_pixmap(size: int = 16, color: str = "#94a3b8") -> QPixmap:
 
 def get_chevron_down_icon(size: int = 16, color: str = "#94a3b8") -> QIcon:
     return QIcon(get_chevron_down_pixmap(size, color))
+
+
+def get_eyedropper_pixmap(size: int = 16, stroke_color: str = "#E2E8F0") -> QPixmap:
+    """Generate crisp vector pipette / eyedropper icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{stroke_color}" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<path d="m2 22 1-1h3l9-9"/>'
+        '<path d="M3 21v-3l9-9"/>'
+        '<path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8'
+        'a2.1 2.1 0 1 1 3-3l.4.4Z"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_eyedropper_icon(size: int = 16, stroke_color: str = "#E2E8F0") -> QIcon:
+    return QIcon(get_eyedropper_pixmap(size, stroke_color))
+
+
+def get_check_pixmap(size: int = 16, stroke_color: str = "#00E676") -> QPixmap:
+    """Generate crisp vector checkmark icon."""
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{stroke_color}" '
+        'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polyline points="20 6 9 17 4 12"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_check_icon(size: int = 16, stroke_color: str = "#00E676") -> QIcon:
+    return QIcon(get_check_pixmap(size, stroke_color))

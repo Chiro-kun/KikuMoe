@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Bespoke Cyber-Moe Color Picker Dialog (`ui/color_picker_dialog.py`)**:
+  - Designed a high-DPI frameless modal color picker replacing Qt's legacy `QColorDialog`, complete with `CustomTitleBar`, KikuMoe branding, and 60 FPS drop-in/fade animations.
+  - Interactive 2D Saturation/Value gradient canvas with high-contrast dual-ring cursor and full-spectrum vertical Hue rainbow slider.
+  - Split Before/After color comparison swatch with one-click restore.
+  - Monospace HEX input with automatic normalization and one-click copy feedback.
+  - Un-truncated, spacious RGB (0..255) and HSV (H°, S%, V%) numeric spinboxes with mouse-wheel support.
+  - Built-in desktop Screen Eyedropper (`Pipetta`) with a live 9×9 magnified pixel grid loupe and real-time color sampling.
+  - 16 curated Cyber-Moe and vibrant neon quick-palette swatches with selection checkmarks.
+  - 8 user-customizable saved color slots persisted in `QSettings` (`custom_accent_palette`).
+  - Real-time accent preview on the dialog's primary OK button with contrast-aware foreground styling.
 - **Theme & Custom Accent Engine**:
   - Added 5 curated Cyber-Moe visual presets in Settings (*Generali → Aspetto e Tema*), organized in dedicated modular theme files under `ui/themes/` (`cyber_moe.py`, `midnight_amoled.py`, `sakura_bloom.py`, `neon_matrix.py`, `ocean_cyan.py`, and shared `engine.py`): **Cyber Moe** (default dark violet & neon pink), **Midnight AMOLED** (pure `#000000` black surfaces), **Sakura Bloom** (soft rose & cherry glow), **Neon Matrix** (deep slate & acid green), and **Ocean Cyan** (navy deep & cyan glow).
   - Added an interactive **Custom Accent Color** toggle, glowing color swatch picker, and one-click preset reset (`AccentColorSwatchButton`) that dynamically derives hover, pressed, shimmer, contrast-aware foreground (`on_accent`), glass border, scrollbar, and glow RGBA tokens across the entire UI.
@@ -62,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **Color Picker UI & SpinBox Truncation**: Replaced Qt's unlocalized, fixed-width non-native `QColorDialog` with the bespoke `AccentColorPickerDialog`, resolving cut-off spinbox digits (`3:`, `2!`), native window titlebar clash, and archaic Windows 95 layout.
 - **History Popover Cover Art Cache**: Added a shared, thread-safe in-memory LRU cover art cache (`network/image_cache.py`) so `SongHistoryPopover` renders album art thumbnails across LISTEN.moe and partner web radio stations.
 - **PortAudio Thread Safety & Device Enumeration**: Serialized concurrent `Pa_Initialize`/`Pa_Terminate` and `silence_stderr()` calls via `PORTAUDIO_LOCK` across audio backends and Settings to prevent Linux PortAudio segfaults, and cancelled pending device-refresh timers when closing Settings.
 - **PyQt6 Type Annotations & Method Overrides**: Aligned widget override signatures and optional type narrowing across `ui/`, `core/`, and `network/` with PyQt6 type stubs and Pylance/mypy checks.

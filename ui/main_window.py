@@ -514,8 +514,13 @@ class ListenMoePlayer(QWidget):
             saved_theme,
             custom_accent=saved_accent if (custom_on and saved_accent) else None,
         )
-        saved_lang = self.settings.value(KEY_LANG, "it")
-        self.i18n = I18n(saved_lang if saved_lang in ("it", "en") else "it")
+        saved_lang = self.settings.value(KEY_LANG, None)
+        if saved_lang not in ("it", "en"):
+            from PyQt6.QtCore import QLocale
+
+            sys_lang = QLocale.system().name().lower()
+            saved_lang = "it" if sys_lang.startswith("it") else "en"
+        self.i18n = I18n(saved_lang)
         self._lang_map = {"Italiano": "it", "English": "en"}
         self.log = get_logger("KikuMoe")
         self._sync_clock_with_server()
