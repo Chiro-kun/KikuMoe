@@ -298,9 +298,9 @@ class TrayNowPlayingCard(QFrame):
         w = float(self.width())
         h = float(self.height())
 
-        # Clip top corners matching menu border radius (10px)
+        # Clip top corners matching menu border radius (10px) without rounding bottom
         clip = QPainterPath()
-        clip.addRoundedRect(0.0, 0.0, w, h, 10.0, 10.0)
+        clip.addRoundedRect(0.0, 0.0, w, h + 10.0, 10.0, 10.0)
         painter.setClipPath(clip)
 
         # 1. Radial ambient glow centered behind the album cover art
@@ -697,7 +697,7 @@ class TrayManager(QObject):
                     # Sottomenu Stazione
                     txt_station = self._t("tray_station", "Stazione")
                     sub_station = QMenu(txt_station, self._parent)
-                    self._apply_menu_stylesheet(sub_station)
+                    self._apply_menu_stylesheet(sub_station, is_submenu=True)
                     grp_station = QActionGroup(self._parent)
                     grp_station.setExclusive(True)
                     self._grp_station = grp_station
@@ -742,7 +742,7 @@ class TrayManager(QObject):
                     # Sottomenu Canale
                     txt_channel = self._t("tray_channel", "Canale")
                     sub_channel = QMenu(txt_channel, self._parent)
-                    self._apply_menu_stylesheet(sub_channel)
+                    self._apply_menu_stylesheet(sub_channel, is_submenu=True)
                     grp_channel = QActionGroup(self._parent)
                     grp_channel.setExclusive(True)
                     self._grp_channel = grp_channel
@@ -778,7 +778,7 @@ class TrayManager(QObject):
                     # Sottomenu Formato
                     txt_format = self._t("tray_format", "Formato (codec)")
                     sub_format = QMenu(txt_format, self._parent)
-                    self._apply_menu_stylesheet(sub_format)
+                    self._apply_menu_stylesheet(sub_format, is_submenu=True)
                     grp_format = QActionGroup(self._parent)
                     grp_format.setExclusive(True)
                     self._grp_format = grp_format
@@ -1050,20 +1050,21 @@ class TrayManager(QObject):
         except Exception:
             pass
 
-    def _apply_menu_stylesheet(self, menu: QMenu) -> None:
+    def _apply_menu_stylesheet(self, menu: QMenu, is_submenu: bool = False) -> None:
         try:
             sep_rgba = PALETTE.get("border_card", "rgba(255, 255, 255, 0.12)")
             hover_rgba = PALETTE.get("accent_menu_hover", "rgba(236, 24, 108, 0.25)")
             bg_pop = PALETTE.get("bg_popover", "#141624")
             text_pri = PALETTE.get("text_primary", "#ffffff")
             text_mut = PALETTE.get("text_muted", "#8E95A5")
+            padding_val = "4px 0px" if is_submenu else "0px 0px 4px 0px"
             menu.setStyleSheet(
                 f"""
                 QMenu {{
                     background-color: {bg_pop};
                     border: 1px solid {sep_rgba};
                     border-radius: 10px;
-                    padding: 4px 0px;
+                    padding: {padding_val};
                     spacing: 2px;
                 }}
                 QMenu::item {{
@@ -1105,9 +1106,9 @@ class TrayManager(QObject):
             if self._tray is not None:
                 menu = self._tray.contextMenu()
                 if menu is not None:
-                    self._apply_menu_stylesheet(menu)
+                    self._apply_menu_stylesheet(menu, is_submenu=False)
                     for sub in menu.findChildren(QMenu):
-                        self._apply_menu_stylesheet(sub)
+                        self._apply_menu_stylesheet(sub, is_submenu=True)
 
             if self._card is not None:
                 self._card.refresh_theme()
