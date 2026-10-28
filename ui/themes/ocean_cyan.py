@@ -44,4 +44,3 @@ OCEAN_CYAN_PRESET: Dict[str, str] = {
     "status_warning": "#ffab00",
     "status_error": "#ff5252",
 }
-
