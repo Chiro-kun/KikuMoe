@@ -78,6 +78,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rendered across the Now Playing context menu, history popover action buttons, and system tray.
 
 ### Changed
+- **Seamless System Tray Header & Enlarged Artwork (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
+  - Removed detached card container borders and background box, seamlessly integrating the Now Playing widget as the native top header of the system tray context menu.
+  - Increased album cover art thumbnail size from 46×46 px to 58×58 px with smooth anti-aliased 8px rounded corners.
+  - Removed cramped hint text and centered quick media buttons (`[Play/Pause]`, `[Stop]`, `[Mute]`, `[Cronologia brani...]`) with comfortable 36×28 px touch targets.
+  - Added real-time playback control state synchronization whenever the tray menu is opened (`menu.aboutToShow.connect(self._sync_controls_from_parent)`), ensuring the Play/Pause icon immediately reflects current playback state.
+  - Polished section header typography and spacing (`FINESTRA`, `PREFERENZE`).
 - **Mini Player Layout**: Increased its compact window size and cover art to give track information, progress, and volume more room.
 - **Scrollbars**: Apply Cyber-Moe track and accent colors to vertical and horizontal scrollbars, with hover and pressed states defined in the theme palette.
 - **Track Metadata Hover**: Connected title and artist highlights follow each text width, fade smoothly, and open the track actions from either row.

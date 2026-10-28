@@ -55,7 +55,7 @@ from ui.vector_icons import (
 )
 
 
-def _make_rounded_pixmap(source: QPixmap, size: int = 46, radius: int = 8) -> QPixmap:
+def _make_rounded_pixmap(source: QPixmap, size: int = 58, radius: int = 8) -> QPixmap:
     """Renders a smooth, anti-aliased square pixmap with rounded corners."""
     target = QPixmap(size, size)
     target.fill(Qt.GlobalColor.transparent)
@@ -141,17 +141,17 @@ class TrayNowPlayingCard(QFrame):
 
     def _setup_ui(self) -> None:
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(12, 10, 12, 8)
+        main_layout.setSpacing(10)
 
         # Top row: Artwork + Metadata column
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(10)
 
-        # Cover thumbnail (46x46 px)
+        # Cover thumbnail (58x58 px)
         self._cover_lbl = QLabel(self)
-        self._cover_lbl.setFixedSize(46, 46)
+        self._cover_lbl.setFixedSize(58, 58)
         self._cover_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top_row.addWidget(self._cover_lbl)
 
@@ -187,16 +187,17 @@ class TrayNowPlayingCard(QFrame):
         top_row.addLayout(meta_col)
         main_layout.addLayout(top_row)
 
-        # Quick inline action buttons row
+        # Quick inline action buttons row (centered)
         btn_row = QHBoxLayout()
         btn_row.setContentsMargins(0, 2, 0, 0)
         btn_row.setSpacing(6)
+        btn_row.addStretch(1)
 
         accent = PALETTE.get("accent", "#EC186C")
 
         # Play / Pause button
         self._btn_play = QToolButton(self)
-        self._btn_play.setFixedSize(32, 28)
+        self._btn_play.setFixedSize(36, 28)
         self._btn_play.setIconSize(QSize(15, 15))
         self._btn_play.setIcon(get_play_icon(14, accent))
         self._btn_play.setToolTip(self._t("play", "Riproduci"))
@@ -207,7 +208,7 @@ class TrayNowPlayingCard(QFrame):
 
         # Stop button
         self._btn_stop = QToolButton(self)
-        self._btn_stop.setFixedSize(32, 28)
+        self._btn_stop.setFixedSize(36, 28)
         self._btn_stop.setIconSize(QSize(14, 14))
         self._btn_stop.setIcon(get_stop_icon(13, accent))
         self._btn_stop.setToolTip(self._t("stop", "Stop"))
@@ -218,7 +219,7 @@ class TrayNowPlayingCard(QFrame):
 
         # Mute button
         self._btn_mute = QToolButton(self)
-        self._btn_mute.setFixedSize(32, 28)
+        self._btn_mute.setFixedSize(36, 28)
         self._btn_mute.setIconSize(QSize(15, 15))
         self._btn_mute.setIcon(get_volume_icon(14, "#CBD5E1", muted=False))
         self._btn_mute.setToolTip(self._t("mute", "Muto"))
@@ -229,7 +230,7 @@ class TrayNowPlayingCard(QFrame):
 
         # History button
         self._btn_history = QToolButton(self)
-        self._btn_history.setFixedSize(32, 28)
+        self._btn_history.setFixedSize(36, 28)
         self._btn_history.setIconSize(QSize(15, 15))
         self._btn_history.setIcon(get_history_icon(14, "#CBD5E1"))
         self._btn_history.setToolTip(self._t("history_button", "Cronologia brani..."))
@@ -238,14 +239,7 @@ class TrayNowPlayingCard(QFrame):
             self._btn_history.clicked.connect(lambda: self._trigger_history(cb_hist))
         btn_row.addWidget(self._btn_history)
 
-        btn_row.addStretch()
-
-        # Hint label
-        hint_text = self._t("tray_open_app", "Apri KikuMoe ↗")
-        self._lbl_hint = QLabel(hint_text, self)
-        self._lbl_hint.setStyleSheet("color: #64748B; font-size: 10px; font-weight: 500;")
-        btn_row.addWidget(self._lbl_hint)
-
+        btn_row.addStretch(1)
         main_layout.addLayout(btn_row)
 
         # Set initial default fallback thumbnail
@@ -293,7 +287,7 @@ class TrayNowPlayingCard(QFrame):
         self._lbl_session.setVisible(bool(sess_clean))
 
         # Title & Artist with auto-elide
-        available_width = 176
+        available_width = 170
         fm_title = QFontMetrics(self._lbl_title.font())
         display_title = (
             fm_title.elidedText(self._raw_title, Qt.TextElideMode.ElideRight, available_width)
@@ -315,7 +309,7 @@ class TrayNowPlayingCard(QFrame):
     def set_cover_pixmap(self, pixmap: QPixmap | None) -> None:
         """Sets smooth rounded artwork or falls back to KikuMoe brand icon."""
         self._cover_pixmap = pixmap
-        size = 46
+        size = 58
         radius = 8
 
         if pixmap is not None and not pixmap.isNull():
@@ -380,24 +374,21 @@ class TrayNowPlayingCard(QFrame):
     def refresh_theme(self) -> None:
         """Synchronizes colors and borders with the active Cyber-Moe palette."""
         accent = PALETTE.get("accent", "#EC186C")
-        border = PALETTE.get("border_card", "rgba(255, 255, 255, 0.12)")
 
         self.setStyleSheet(
-            f"TrayNowPlayingCard {{ "
-            f"  background-color: rgba(255, 255, 255, 0.04); "
-            f"  border: 1px solid {border}; "
-            f"  border-radius: 10px; "
-            f"  margin: 4px; "
-            f"}} "
-            f"TrayNowPlayingCard:hover {{ "
-            f"  background-color: rgba(255, 255, 255, 0.07); "
-            f"  border: 1px solid rgba(255, 255, 255, 0.18); "
-            f"}}"
+            "TrayNowPlayingCard { "
+            "  background-color: transparent; "
+            "  border: none; "
+            "  margin: 0px; "
+            "} "
+            "TrayNowPlayingCard:hover { "
+            "  background-color: transparent; "
+            "}"
         )
 
         self._cover_lbl.setStyleSheet(
-            "border-radius: 8px; background-color: rgba(255, 255, 255, 0.06); "
-            "border: 1px solid rgba(255, 255, 255, 0.1);"
+            "border-radius: 8px; background-color: rgba(255, 255, 255, 0.05); "
+            "border: 1px solid rgba(255, 255, 255, 0.08);"
         )
 
         self._badge_station.setStyleSheet(
@@ -409,9 +400,9 @@ class TrayNowPlayingCard(QFrame):
         btn_style = (
             "QToolButton { background-color: rgba(255, 255, 255, 0.06); "
             "border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; } "
-            "QToolButton:hover { background-color: rgba(255, 255, 255, 0.15); "
-            "border: 1px solid rgba(255, 255, 255, 0.22); } "
-            "QToolButton:pressed { background-color: rgba(255, 255, 255, 0.25); }"
+            "QToolButton:hover { background-color: rgba(255, 255, 255, 0.14); "
+            "border: 1px solid rgba(255, 255, 255, 0.20); } "
+            "QToolButton:pressed { background-color: rgba(255, 255, 255, 0.22); }"
         )
         for b in [self._btn_play, self._btn_stop, self._btn_mute, self._btn_history]:
             b.setStyleSheet(btn_style)
@@ -780,9 +771,14 @@ class TrayManager(QObject):
                         menu.aboutToShow.connect(self.sync_stream_settings)
                     except Exception:
                         pass
+                    try:
+                        menu.aboutToShow.connect(self._sync_controls_from_parent)
+                    except Exception:
+                        pass
                     if tooltip:
                         self.update_tooltip(tooltip)
                     self.sync_stream_settings()
+                    self._sync_controls_from_parent()
                     self._tray.setVisible(True)
                 else:
                     self._tray.setVisible(True)
@@ -791,12 +787,29 @@ class TrayManager(QObject):
                     if tooltip is not None:
                         self.update_tooltip(tooltip)
                     self.sync_stream_settings()
+                    self._sync_controls_from_parent()
             else:
                 if self._tray is not None:
                     try:
                         self._tray.setVisible(False)
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+    def _sync_controls_from_parent(self) -> None:
+        """Synchronizes play/pause, stop, and mute state from parent player."""
+        try:
+            player = getattr(self._parent, "player", None)
+            is_playing = (
+                bool(player.is_playing()) if player and hasattr(player, "is_playing") else False
+            )
+            is_paused = (
+                bool(player.is_paused()) if player and hasattr(player, "is_paused") else False
+            )
+            ui_paused = bool(getattr(self._parent, "_ui_paused", False))
+            is_muted = bool(player.is_muted()) if player and hasattr(player, "is_muted") else False
+            self.update_controls_state(is_playing, is_paused or ui_paused, is_muted)
         except Exception:
             pass
 
@@ -1017,6 +1030,8 @@ class TrayManager(QObject):
                 QMenu::item:disabled {{
                     color: {text_mut};
                     background-color: transparent;
+                    padding: 8px 12px 3px 12px;
+                    font-size: 10px;
                 }}
                 QMenu::separator {{
                     height: 1px;

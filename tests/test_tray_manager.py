@@ -202,12 +202,14 @@ def test_tray_manager_now_playing_card_integration(qapp):
     assert "Alice Cooper" in tray_mgr._card._lbl_artist.text()
     assert "05:20" in tray_mgr._card._lbl_session.text()
 
-    # 3. Update cover pixmap
+    # 3. Update cover pixmap (58x58 px)
     pm = QPixmap(100, 100)
     pm.fill(QColor("magenta"))
     tray_mgr.set_cover_pixmap(pm)
     assert tray_mgr._card._cover_lbl.pixmap() is not None
     assert not tray_mgr._card._cover_lbl.pixmap().isNull()
+    assert tray_mgr._card._cover_lbl.width() == 58
+    assert tray_mgr._card._cover_lbl.height() == 58
 
     # Reset cover pixmap to None (fallback)
     tray_mgr.set_cover_pixmap(None)
@@ -223,6 +225,16 @@ def test_tray_manager_now_playing_card_integration(qapp):
     tray_mgr.update_controls_state(is_playing=False, is_paused=False, is_muted=False)
     assert tray_mgr._act_play_pause.text() == "play"
     assert tray_mgr._act_mute.text() == "tray_mute"
+
+    # 5. Sync controls from parent player
+    mock_player = MagicMock()
+    mock_player.is_playing.return_value = True
+    mock_player.is_paused.return_value = False
+    mock_player.is_muted.return_value = False
+    parent.player = mock_player
+    tray_mgr._sync_controls_from_parent()
+    assert tray_mgr._card._is_playing is True
+    assert tray_mgr._card._is_paused is False
 
 
 def test_tray_manager_card_inline_buttons(qapp):
