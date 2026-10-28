@@ -15,7 +15,7 @@ from core.constants import (
     ORG_NAME,
     _get_project_root,
 )
-from core.logger import get_logger
+from core.logger import PORTAUDIO_LOCK, get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -269,12 +269,13 @@ class PlayerMPV:
                 return None
             import pyaudio
 
-            pa = pyaudio.PyAudio()
-            try:
-                info = pa.get_device_info_by_index(int(val))
-                return str(info.get("name", "")) if isinstance(info, dict) else None
-            finally:
-                pa.terminate()
+            with PORTAUDIO_LOCK, silence_stderr():
+                pa = pyaudio.PyAudio()
+                try:
+                    info = pa.get_device_info_by_index(int(val))
+                    return str(info.get("name", "")) if isinstance(info, dict) else None
+                finally:
+                    pa.terminate()
         except Exception:
             return None
 

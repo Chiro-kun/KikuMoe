@@ -14,7 +14,7 @@ from typing import Any, Callable
 from PyQt6.QtCore import QSettings
 
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
-from core.logger import get_logger, silence_stderr
+from core.logger import PORTAUDIO_LOCK, get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -120,7 +120,7 @@ class PlayerFFmpeg:
             self.log.warning("[BACKEND] PlayerFFmpeg: %s", self._init_error)
             return
         try:
-            with silence_stderr():
+            with PORTAUDIO_LOCK, silence_stderr():
                 self._pyaudio_instance = pyaudio.PyAudio()
             self._ready = True
             if not _IS_WIN32:

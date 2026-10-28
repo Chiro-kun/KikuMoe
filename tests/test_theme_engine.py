@@ -451,3 +451,88 @@ def test_modular_per_theme_files_and_canvas_cache_and_qss_dedup(qapp, tmp_path, 
     dlg.reject()
     assert spy_host.apply_calls == 0
     dlg.close()
+
+
+def test_portaudio_device_enumeration_thread_safety_and_close_cancellation(
+    qapp, tmp_path, monkeypatch
+):
+    import sys
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    ini_path = str(tmp_path / "pa_safety.ini")
+    settings = QSettings(ini_path, QSettings.Format.IniFormat)
+    monkeypatch.setattr(settings_module, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(settings_module, "_CACHED_AUDIO_DEVICES", None)
+
+    state_lock = threading.Lock()
+    active_count = 0
+    max_concurrent = 0
+    init_calls = 0
+
+    class FakePyAudioInstance:
+        def get_host_api_count(self) -> int:
+            return 1
+
+        def get_host_api_info_by_index(self, _idx: int) -> dict:
+            return {"type": 13}
+
+        def get_device_count(self) -> int:
+            time.sleep(0.015)
+            return 1
+
+        def get_device_info_by_index(self, _idx: int) -> dict:
+            return {"name": "Test DAC", "maxOutputChannels": 2, "hostApi": 0}
+
+        def terminate(self) -> None:
+            nonlocal active_count
+            with state_lock:
+                active_count -= 1
+
+    def make_fake_pa() -> FakePyAudioInstance:
+        nonlocal active_count, max_concurrent, init_calls
+        with state_lock:
+            init_calls += 1
+            active_count += 1
+            if active_count > max_concurrent:
+                max_concurrent = active_count
+        return FakePyAudioInstance()
+
+    monkeypatch.setitem(sys.modules, "pyaudio", SimpleNamespace(PyAudio=make_fake_pa))
+
+    # 1. Showing and immediately closing SettingsDialog cancels _device_enum_timer
+    dlg = settings_module.SettingsDialog(embedded=True)
+    dlg.show()
+    assert dlg._device_enum_timer.isActive()
+    dlg.close()
+    assert not dlg._device_enum_timer.isActive()
+    assert dlg._is_closed is True
+    assert init_calls == 0
+
+    # 2. Four concurrent force_refresh threads strictly serialize Pa_Initialize/Pa_Terminate
+    barrier = threading.Barrier(4)
+    results: List[List[Tuple[str, int]]] = []
+
+    def _runner() -> None:
+        barrier.wait()
+        res = settings_module.SettingsDialog._collect_pyaudio_devices(force_refresh=True)
+        with state_lock:
+            results.append(res)
+
+    threads = [threading.Thread(target=_runner) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert max_concurrent == 1
+    assert active_count == 0
+    assert len(results) == 4
+    assert all(len(r) == 1 for r in results)
+
+    # 3. Subsequent non-forced lookup reuses _CACHED_AUDIO_DEVICES with zero extra Pa_Initialize
+    prev_inits = init_calls
+    cached = settings_module.SettingsDialog._collect_pyaudio_devices(force_refresh=False)
+    assert len(cached) == 1
+    assert init_calls == prev_inits

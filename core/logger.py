@@ -5,6 +5,7 @@ import contextlib
 import logging
 import os
 import sys
+import threading
 from logging.handlers import RotatingFileHandler
 
 _DEFAULT_FORMAT = "[%(levelname)s] %(message)s"
@@ -18,6 +19,13 @@ _logger_created_hooks: list = []
 
 _RECENT_LOGS_MAX = 1000
 _recent_logs: collections.deque[str] = collections.deque(maxlen=_RECENT_LOGS_MAX)
+
+# Shared re-entrant lock protecting PortAudio C API (Pa_Initialize / Pa_Terminate),
+# which is not thread-safe when invoked concurrently across multiple threads.
+PORTAUDIO_LOCK = threading.RLock()
+_STDERR_LOCK = threading.RLock()
+_silence_depth = 0
+_saved_stderr_fd: int | None = None
 
 
 class _RingBufferHandler(logging.Handler):
@@ -143,7 +151,7 @@ class _SafeTextStream:
 
 @contextlib.contextmanager
 def silence_stderr():
-    """Temporarily redirect C-level stderr (fd 2) to /dev/null.
+    """Temporarily redirect C-level stderr (fd 2) to /dev/null in a thread-safe manner.
 
     Use this around PyAudio/libVLC initialisation to suppress the flood of
     ALSA/JACK/libVLC probe messages emitted directly by the C library.  Those
@@ -157,41 +165,56 @@ def silence_stderr():
         with silence_stderr():
             pa = pyaudio.PyAudio()
     """
+    global _silence_depth, _saved_stderr_fd
     if _debug_enabled:
         yield
         return
 
-    saved_fd = None
-    devnull_fd = None
-    try:
-        devnull_fd = os.open(os.devnull, os.O_WRONLY)
-        saved_fd = os.dup(2)
-        os.dup2(devnull_fd, 2)
-    except Exception:
-        # If redirection setup fails (e.g. fd 2 not available or closed in GUI/Windows),
-        # proceed without silencing.
-        if devnull_fd is not None:
+    with _STDERR_LOCK:
+        redirected_here = False
+        if _silence_depth == 0:
+            devnull_fd = None
             try:
-                os.close(devnull_fd)
+                devnull_fd = os.open(os.devnull, os.O_WRONLY)
+                _saved_stderr_fd = os.dup(2)
+                os.dup2(devnull_fd, 2)
+                redirected_here = True
+                _silence_depth = 1
             except Exception:
-                pass
-        yield
-        return
-    else:
-        try:
-            os.close(devnull_fd)
-        except Exception:
-            pass
+                # If redirection setup fails (e.g. fd 2 not available or closed in GUI/Windows),
+                # proceed without silencing.
+                if devnull_fd is not None:
+                    try:
+                        os.close(devnull_fd)
+                    except Exception:
+                        pass
+                if _saved_stderr_fd is not None:
+                    try:
+                        os.close(_saved_stderr_fd)
+                    except Exception:
+                        pass
+                    _saved_stderr_fd = None
+            else:
+                try:
+                    os.close(devnull_fd)
+                except Exception:
+                    pass
+        else:
+            _silence_depth += 1
 
-    try:
-        yield
-    finally:
-        if saved_fd is not None:
-            try:
-                os.dup2(saved_fd, 2)
-                os.close(saved_fd)
-            except Exception:
-                pass
+        try:
+            yield
+        finally:
+            if _silence_depth > 0:
+                _silence_depth -= 1
+                if _silence_depth == 0 and redirected_here and _saved_stderr_fd is not None:
+                    try:
+                        os.dup2(_saved_stderr_fd, 2)
+                        os.close(_saved_stderr_fd)
+                    except Exception:
+                        pass
+                    finally:
+                        _saved_stderr_fd = None
 
 
 def set_debug(enabled: bool) -> None:

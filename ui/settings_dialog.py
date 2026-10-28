@@ -96,7 +96,7 @@ from core.constants import (
     STATION_TRUCKERSFM,
 )
 from core.i18n import I18n
-from core.logger import silence_stderr
+from core.logger import PORTAUDIO_LOCK, silence_stderr
 from ui.about_dialog import AboutWidget
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.themes.cyber_moe import (
@@ -115,6 +115,7 @@ from ui.themes.cyber_moe import (
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
+_CACHED_AUDIO_DEVICES: Optional[List[Tuple[str, int]]] = None
 
 
 class SlidingStackedWidget(QStackedWidget):
@@ -974,6 +975,7 @@ class SettingsDialog(QDialog):
         self._embedded = embedded
         self._devices_populated = False
         self._enumerating_devices = False
+        self._is_closed = False
         self._reloading_settings = False
         self._theme_preview_dirty = False
         self._applied_qss_key: Optional[Tuple[Optional[str], Optional[str], bool]] = None
@@ -981,6 +983,9 @@ class SettingsDialog(QDialog):
         self._loaded_station: Optional[str] = None
         self._loaded_backend_name: Optional[str] = None
         self._audio_devices_ready.connect(self._on_audio_devices_enumerated)
+        self._device_enum_timer = QTimer(self)
+        self._device_enum_timer.setSingleShot(True)
+        self._device_enum_timer.timeout.connect(self._ensure_devices_populated)
         self.setObjectName("settingsEmbeddedPanel" if embedded else "settingsDialogRoot")
 
         if embedded:
@@ -1264,7 +1269,7 @@ class SettingsDialog(QDialog):
         self.btn_audio_refresh.setObjectName("secondaryGlassBtn")
         self.btn_audio_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_audio_refresh.clicked.connect(
-            lambda: self._populate_audio_devices(async_mode=True)
+            lambda: self._populate_audio_devices(async_mode=True, force_refresh=True)
         )
         audio_dev_row.addWidget(self.btn_audio_refresh)
         eng_lay.addLayout(audio_dev_row)
@@ -1486,15 +1491,11 @@ class SettingsDialog(QDialog):
             self.cmb_station.currentIndexChanged.connect(self._on_settings_station_changed)
             self._on_settings_station_changed()
         self._applied_values = self._settings_values()
-        if embedded:
-            # When embedded, defer audio device enumeration to idle
-            # so it never interrupts transitions
-            QTimer.singleShot(350, self._ensure_devices_populated)
-        else:
-            QTimer.singleShot(140, self._ensure_devices_populated)
 
     def _ensure_devices_populated(self) -> None:
-        if self._devices_populated or self._enumerating_devices:
+        if self._is_closed or self._devices_populated or self._enumerating_devices:
+            return
+        if not self.isVisible():
             return
         # Delay enumeration while either the host view stack or internal tabs are sliding
         host_stack = getattr(self._host_window, "_view_stack", None) or getattr(
@@ -1511,7 +1512,7 @@ class SettingsDialog(QDialog):
             and self.pages._anim_timer.isActive()
         )
         if host_sliding or tabs_sliding:
-            QTimer.singleShot(120, self._ensure_devices_populated)
+            self._device_enum_timer.start(120)
             return
         self._populate_audio_devices(async_mode=True)
 
@@ -1539,8 +1540,8 @@ class SettingsDialog(QDialog):
         for cmb in self.findChildren(GlassComboBox):
             cmb.reset_visual_state()
         self.pages.slide_to_index(idx)
-        if idx == 1 and not self._devices_populated:
-            QTimer.singleShot(210, self._ensure_devices_populated)
+        if idx == 1 and not self._devices_populated and not self._enumerating_devices:
+            self._device_enum_timer.start(210)
 
     def _on_settings_station_changed(self) -> None:
         station_id = str(self.cmb_station.currentData() or DEFAULT_STATION)
@@ -1684,6 +1685,7 @@ class SettingsDialog(QDialog):
 
     def reload_from_settings(self) -> None:
         """Fast diff-based non-blocking reload of widget values from QSettings."""
+        self._is_closed = False
         self._reloading_settings = True
         self._theme_preview_dirty = False
         try:
@@ -1801,7 +1803,7 @@ class SettingsDialog(QDialog):
                 self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
             )
             if not self._devices_populated and not self._enumerating_devices:
-                QTimer.singleShot(250, self._ensure_devices_populated)
+                self._device_enum_timer.start(250)
             if (
                 hasattr(self, "about_widget")
                 and self._host_window is not None
@@ -2072,6 +2074,7 @@ class SettingsDialog(QDialog):
         self.accept()
 
     def accept(self) -> None:
+        self._device_enum_timer.stop()
         self._accepted_close = True
         if self._embedded:
             self.accepted.emit()
@@ -2079,6 +2082,7 @@ class SettingsDialog(QDialog):
             super().accept()
 
     def reject(self) -> None:
+        self._device_enum_timer.stop()
         self._restore_persisted_theme()
         if self._embedded:
             self.rejected.emit()
@@ -2086,6 +2090,8 @@ class SettingsDialog(QDialog):
             super().reject()
 
     def closeEvent(self, a0) -> None:
+        self._is_closed = True
+        self._device_enum_timer.stop()
         if not getattr(self, "_accepted_close", False):
             self._restore_persisted_theme()
         self._accepted_close = False
@@ -2168,6 +2174,7 @@ class SettingsDialog(QDialog):
         self._theme_preview_dirty = False
 
     def showEvent(self, a0):
+        self._is_closed = False
         try:
             super().showEvent(a0)
         except Exception:
@@ -2177,8 +2184,8 @@ class SettingsDialog(QDialog):
                 self._apply_windows_titlebar_dark_mode(True)
             except Exception:
                 pass
-            if not self._devices_populated and not self._enumerating_devices:
-                QTimer.singleShot(80, self._ensure_devices_populated)
+        if not self._devices_populated and not self._enumerating_devices:
+            self._device_enum_timer.start(240 if self._embedded else 80)
 
     def _apply_windows_titlebar_dark_mode(self, enable: bool) -> None:
         try:
@@ -2196,58 +2203,64 @@ class SettingsDialog(QDialog):
     }
 
     @classmethod
-    def _collect_pyaudio_devices(cls) -> List[Tuple[str, int]]:
-        """Enumerate output audio devices safely off the Qt GUI thread."""
-        try:
-            import pyaudio
-        except Exception:
-            return []
-        devices: List[Tuple[str, int]] = []
-        pa = None
-        try:
-            with silence_stderr():
-                pa = pyaudio.PyAudio()
-            api_type_map: dict = {}
+    def _collect_pyaudio_devices(cls, force_refresh: bool = False) -> List[Tuple[str, int]]:
+        """Enumerate output audio devices thread-safely under PORTAUDIO_LOCK with caching."""
+        global _CACHED_AUDIO_DEVICES
+        with PORTAUDIO_LOCK:
+            if not force_refresh and _CACHED_AUDIO_DEVICES is not None:
+                return list(_CACHED_AUDIO_DEVICES)
             try:
-                for api_idx in range(pa.get_host_api_count()):
-                    ai = pa.get_host_api_info_by_index(api_idx)
-                    if isinstance(ai, dict):
-                        api_type_map[api_idx] = ai.get("type", -1)
+                import pyaudio
             except Exception:
-                pass
-
-            device_count = pa.get_device_count() if hasattr(pa, "get_device_count") else 0
-            for i in range(device_count):
+                return []
+            devices: List[Tuple[str, int]] = []
+            pa = None
+            try:
+                with silence_stderr():
+                    pa = pyaudio.PyAudio()
+                api_type_map: dict = {}
                 try:
-                    info = pa.get_device_info_by_index(i)
+                    for api_idx in range(pa.get_host_api_count()):
+                        ai = pa.get_host_api_info_by_index(api_idx)
+                        if isinstance(ai, dict):
+                            api_type_map[api_idx] = ai.get("type", -1)
                 except Exception:
-                    info = None
-                if not isinstance(info, dict):
-                    continue
-                max_output = int(info.get("maxOutputChannels", 0))
-                name = str(info.get("name", f"Device {i}"))
-                if max_output > 0:
-                    if not _IS_WIN32:
-                        api_idx = info.get("hostApi", -1)
-                        api_type = api_type_map.get(api_idx, -1)
-                        tag = cls._PA_API_TAGS.get(api_type, "")
-                        label = f"[{tag}] {name} (#{i})" if tag else f"{name} (#{i})"
-                    else:
-                        label = f"{name} (#{i})"
-                    devices.append((label, i))
-        except Exception:
-            pass
-        finally:
-            try:
-                if pa is not None and hasattr(pa, "terminate"):
-                    pa.terminate()
+                    pass
+
+                device_count = pa.get_device_count() if hasattr(pa, "get_device_count") else 0
+                for i in range(device_count):
+                    try:
+                        info = pa.get_device_info_by_index(i)
+                    except Exception:
+                        info = None
+                    if not isinstance(info, dict):
+                        continue
+                    max_output = int(info.get("maxOutputChannels", 0))
+                    name = str(info.get("name", f"Device {i}"))
+                    if max_output > 0:
+                        if not _IS_WIN32:
+                            api_idx = info.get("hostApi", -1)
+                            api_type = api_type_map.get(api_idx, -1)
+                            tag = cls._PA_API_TAGS.get(api_type, "")
+                            label = f"[{tag}] {name} (#{i})" if tag else f"{name} (#{i})"
+                        else:
+                            label = f"{name} (#{i})"
+                        devices.append((label, i))
             except Exception:
                 pass
-        return devices
+            finally:
+                try:
+                    if pa is not None and hasattr(pa, "terminate"):
+                        with silence_stderr():
+                            pa.terminate()
+                except Exception:
+                    pass
+            _CACHED_AUDIO_DEVICES = list(devices)
+            return devices
 
     def _on_audio_devices_enumerated(self, devices: object) -> None:
         self._enumerating_devices = False
-        if not hasattr(self, "cmb_audio_device"):
+        if self._is_closed or not hasattr(self, "cmb_audio_device"):
             return
         was_unpopulated = not self._devices_populated
         try:
@@ -2280,16 +2293,25 @@ class SettingsDialog(QDialog):
         if was_unpopulated and hasattr(self, "_applied_values"):
             self._applied_values["audio_device"] = self.cmb_audio_device.currentData()
 
-    def _populate_audio_devices(self, async_mode: bool = False) -> None:
-        if self._enumerating_devices:
+    def _populate_audio_devices(
+        self, async_mode: bool = False, force_refresh: bool = False
+    ) -> None:
+        if self._is_closed or self._enumerating_devices:
+            return
+        if not force_refresh and _CACHED_AUDIO_DEVICES is not None:
+            self._on_audio_devices_enumerated(list(_CACHED_AUDIO_DEVICES))
             return
         if not async_mode:
-            self._on_audio_devices_enumerated(self._collect_pyaudio_devices())
+            self._on_audio_devices_enumerated(
+                self._collect_pyaudio_devices(force_refresh=force_refresh)
+            )
             return
         self._enumerating_devices = True
 
         def _worker() -> None:
-            res = self._collect_pyaudio_devices()
+            res = self._collect_pyaudio_devices(force_refresh=force_refresh)
+            if getattr(self, "_is_closed", False):
+                return
             try:
                 self._audio_devices_ready.emit(res)
             except RuntimeError:

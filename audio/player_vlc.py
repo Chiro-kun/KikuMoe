@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
-from core.logger import get_logger, silence_stderr
+from core.logger import PORTAUDIO_LOCK, get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
@@ -385,12 +385,13 @@ class PlayerVLC:
                 return None
             import pyaudio
 
-            pa = pyaudio.PyAudio()
-            try:
-                info = pa.get_device_info_by_index(int(val))
-                return str(info.get("name", "")) if isinstance(info, dict) else None
-            finally:
-                pa.terminate()
+            with PORTAUDIO_LOCK, silence_stderr():
+                pa = pyaudio.PyAudio()
+                try:
+                    info = pa.get_device_info_by_index(int(val))
+                    return str(info.get("name", "")) if isinstance(info, dict) else None
+                finally:
+                    pa.terminate()
         except Exception:
             return None
 

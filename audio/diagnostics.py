@@ -78,9 +78,9 @@ def log_audio_diagnostics(log: logging.Logger) -> dict[str, str]:
     try:
         import pyaudio
 
-        from core.logger import silence_stderr
+        from core.logger import PORTAUDIO_LOCK, silence_stderr
 
-        with silence_stderr():
+        with PORTAUDIO_LOCK, silence_stderr():
             pa = pyaudio.PyAudio()
             try:
                 apis = []
