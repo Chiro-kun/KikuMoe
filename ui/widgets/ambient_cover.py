@@ -38,7 +38,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 
 
 def _lerp_color(c1: QColor, c2: QColor, t: float) -> QColor:
@@ -67,10 +67,20 @@ class FullBleedCanvas(QWidget):
         self._prev_ambient_color: QColor = QColor(PALETTE["accent"])
         self._current_key: Optional[int] = None
         self._fade_progress: float = 1.0
+        self._cached_frame: Optional[QPixmap] = None
+        self._cached_frame_key: Optional[tuple] = None
 
         self._fade_timer = QTimer(self)
         self._fade_timer.setInterval(16)
         self._fade_timer.timeout.connect(self._tick_fade)
+
+    def _invalidate_cache(self) -> None:
+        self._cached_frame = None
+        self._cached_frame_key = None
+
+    def resizeEvent(self, a0) -> None:
+        self._invalidate_cache()
+        super().resizeEvent(a0)
 
     def _make_blurred(self, pixmap: Optional[QPixmap]) -> Optional[QPixmap]:
         if pixmap is None or pixmap.isNull():
@@ -107,14 +117,19 @@ class FullBleedCanvas(QWidget):
         new_amb = QColor(ambient_color) if ambient_color is not None else QColor(PALETTE["accent"])
 
         if new_key == self._current_key and self._blurred_source is not None:
-            self._ambient_color = new_amb
+            if self._ambient_color != new_amb:
+                self._ambient_color = new_amb
+                self._invalidate_cache()
             self.update()
             return
         if new_key is None and self._current_key is None:
-            self._ambient_color = new_amb
+            if self._ambient_color != new_amb:
+                self._ambient_color = new_amb
+                self._invalidate_cache()
             self.update()
             return
 
+        self._invalidate_cache()
         # Snapshot current state for 60 FPS crossfade
         self._prev_blurred = self._blurred_source
         self._prev_ambient_color = _lerp_color(
@@ -159,42 +174,42 @@ class FullBleedCanvas(QWidget):
             painter.drawPixmap(0, 0, scaled, x_off, y_off, int(w), int(h))
 
             overlay = QLinearGradient(0, 0, 0, h)
-            overlay.setColorAt(0.0, QColor(10, 11, 18, 90))
-            overlay.setColorAt(0.22, QColor(10, 11, 18, 130))
-            overlay.setColorAt(0.55, QColor(10, 11, 18, 175))
-            overlay.setColorAt(0.80, QColor(9, 10, 17, 220))
-            overlay.setColorAt(1.0, QColor(8, 9, 15, 245))
+            overlay.setColorAt(0.0, surface_qcolor(90, "bg_canvas"))
+            overlay.setColorAt(0.22, surface_qcolor(130, "bg_canvas"))
+            overlay.setColorAt(0.55, surface_qcolor(175, "bg_canvas"))
+            overlay.setColorAt(0.80, surface_qcolor(220, "bg_canvas"))
+            overlay.setColorAt(1.0, surface_qcolor(245, "bg_canvas"))
             painter.fillRect(self.rect(), overlay)
         else:
             g1 = QRadialGradient(QPointF(w * 0.5, h * 0.28), w * 0.70)
-            g1.setColorAt(0.0, QColor(236, 24, 108, 52))
-            g1.setColorAt(0.55, QColor(130, 20, 90, 24))
+            g1.setColorAt(0.0, accent_qcolor(52))
+            g1.setColorAt(0.55, accent_qcolor(24, "accent_deep"))
             g1.setColorAt(1.0, QColor(0, 0, 0, 0))
             painter.fillRect(self.rect(), g1)
 
             g2 = QRadialGradient(QPointF(w * 0.15, h * 0.12), w * 0.55)
-            g2.setColorAt(0.0, QColor(110, 50, 220, 36))
+            g2.setColorAt(0.0, surface_qcolor(36, "nebula_secondary"))
             g2.setColorAt(1.0, QColor(0, 0, 0, 0))
             painter.fillRect(self.rect(), g2)
         painter.restore()
 
-    def paintEvent(self, a0) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    def refresh_theme(self) -> None:
+        if self._current_key is None:
+            self._ambient_color = QColor(PALETTE["accent"])
+            self._prev_ambient_color = QColor(PALETTE["accent"])
+        self._invalidate_cache()
+        self.update()
 
-        w = float(self.width())
-        h = float(self.height())
-        win = self.window()
-        is_max = bool(win and win.isMaximized())
+    def _render_canvas_contents(self, painter: QPainter, w: float, h: float, is_max: bool) -> None:
         corner_r = 0.0 if is_max else 12.0
+        target_rect = QRectF(0.0, 0.0, w, h)
 
         clip_path = QPainterPath()
         clip_path.addRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), corner_r, corner_r)
         painter.setClipPath(clip_path)
 
-        # Base dark obsidian fill
-        painter.fillRect(self.rect(), QColor("#0b0c14"))
+        # Base dark theme canvas fill
+        painter.fillRect(target_rect, QColor(PALETTE["bg_canvas"]))
 
         ease = 1.0 - ((1.0 - self._fade_progress) ** 3)
         if self._fade_progress < 1.0:
@@ -210,7 +225,7 @@ class FullBleedCanvas(QWidget):
         c_spot.setAlpha(42)
         spot.setColorAt(0.0, c_spot)
         spot.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.fillRect(self.rect(), spot)
+        painter.fillRect(target_rect, spot)
 
         # Crisp 1px rounded window border (Windows 11 style)
         if not is_max:
@@ -219,6 +234,49 @@ class FullBleedCanvas(QWidget):
             painter.setPen(QPen(QColor(255, 255, 255, 42), 1.0))
             painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), corner_r, corner_r)
 
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        w = float(self.width())
+        h = float(self.height())
+        if w <= 0.0 or h <= 0.0:
+            painter.end()
+            return
+
+        win = self.window()
+        is_max = bool(win and win.isMaximized())
+
+        if self._fade_progress < 1.0:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            self._render_canvas_contents(painter, w, h, is_max)
+            painter.end()
+            return
+
+        dpr = float(self.devicePixelRatioF()) if hasattr(self, "devicePixelRatioF") else 1.0
+        dpr = max(1.0, dpr)
+        state_key = (
+            int(w),
+            int(h),
+            round(dpr, 2),
+            is_max,
+            PALETTE.get("theme_id"),
+            PALETTE.get("accent"),
+            self._current_key,
+            self._ambient_color.rgba(),
+        )
+        if self._cached_frame is None or self._cached_frame_key != state_key:
+            frame = QPixmap(max(1, int(round(w * dpr))), max(1, int(round(h * dpr))))
+            frame.setDevicePixelRatio(dpr)
+            frame.fill(Qt.GlobalColor.transparent)
+            fp = QPainter(frame)
+            fp.setRenderHint(QPainter.RenderHint.Antialiasing)
+            fp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            self._render_canvas_contents(fp, w, h, is_max)
+            fp.end()
+            self._cached_frame = frame
+            self._cached_frame_key = state_key
+
+        painter.drawPixmap(0, 0, self._cached_frame)
         painter.end()
 
 
@@ -252,6 +310,10 @@ class LiveEqualizerBadge(QWidget):
         self._phase += 0.42
         self.update()
 
+    def refresh_theme(self) -> None:
+        self._accent = QColor(PALETTE["accent"])
+        self.update()
+
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -261,16 +323,16 @@ class LiveEqualizerBadge(QWidget):
         rect = QRectF(1.0, 1.0, w - 2.0, h - 2.0)
 
         if self._playing:
-            bg = QColor(42, 12, 30, 220)
-            border = QColor(236, 24, 108, 160)
-            bar_col = QColor("#ff3b8d")
+            bg = accent_qcolor(220, "accent_deeper")
+            border = accent_qcolor(165)
+            bar_col = QColor(PALETTE["accent_hover"])
             text_col = QColor("#ffffff")
             label = "ON AIR"
         else:
-            bg = QColor(14, 16, 26, 205)
+            bg = surface_qcolor(205, "bg_pill_idle")
             border = QColor(255, 255, 255, 38)
             bar_col = QColor("#8e95ab")
-            text_col = QColor("#c8cee0")
+            text_col = QColor(PALETTE["text_secondary"])
             label = "LIVE"
 
         painter.setBrush(bg)
@@ -348,6 +410,10 @@ class AnimatedTrackLabel(QLabel):
         self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
+
+    def set_text_color(self, color: str) -> None:
+        self._text_color = QColor(color)
+        self.update()
 
     def attach_chevron_button(self, btn: QWidget) -> None:
         """Attach a dropdown chevron button positioned at the end of the title text."""
@@ -550,7 +616,7 @@ class AnimatedTrackLabel(QLabel):
         rect = self.get_capsule_rect() if self._interactive else None
         if self._hover_group is None and (self._hovered or self._menu_active) and rect is not None:
             painter.setBrush(QColor(255, 255, 255, 14))
-            painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
+            painter.setPen(QPen(accent_qcolor(90), 1.0))
             painter.drawRoundedRect(rect, 6.0, 6.0)
 
         if self._hover_group is not None:
@@ -713,7 +779,7 @@ class TrackHoverGroup(QWidget):
         painter.scale(self.click_scale, self.click_scale)
         painter.translate(-self.width() / 2.0, -self.height() / 2.0)
         painter.setBrush(QColor(255, 255, 255, 14))
-        painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
+        painter.setPen(QPen(accent_qcolor(90), 1.0))
         painter.drawPath(self._shape())
         painter.end()
 
@@ -822,6 +888,14 @@ class AmbientCoverCard(QWidget):
             pass
         return QColor(PALETTE["accent"])
 
+    def refresh_theme(self) -> None:
+        if self._cover_pixmap is None or self._cover_pixmap.isNull():
+            self._cached_rounded_cover = None
+            self._prev_rounded_cover = None
+            self._ambient_color = QColor(PALETTE["accent"])
+            self._prev_ambient_color = QColor(PALETTE["accent"])
+        self.update()
+
     def _render_rounded_cover(self, target_size: int) -> QPixmap:
         """Renders either the rounded cover art or a sleek vinyl disc placeholder."""
         canvas = QPixmap(target_size, target_size)
@@ -880,11 +954,11 @@ class AmbientCoverCard(QWidget):
             painter.setBrush(QBrush(sheen))
             painter.drawEllipse(QPointF(cx, cy), target_size * 0.44, target_size * 0.44)
 
-            # Center Vinyl Label (Magenta Tint)
+            # Center Vinyl Label (Accent Tint)
             label_grad = QRadialGradient(QPointF(cx, cy), target_size * 0.18)
-            label_grad.setColorAt(0.0, QColor("#2a1220"))
+            label_grad.setColorAt(0.0, QColor(PALETTE["accent_deeper"]))
             label_grad.setColorAt(0.85, QColor(PALETTE["accent"]))
-            label_grad.setColorAt(1.0, QColor("#8f0c40"))
+            label_grad.setColorAt(1.0, QColor(PALETTE["accent_deep"]))
 
             painter.setBrush(QBrush(label_grad))
             painter.drawEllipse(QPointF(cx, cy), target_size * 0.16, target_size * 0.16)

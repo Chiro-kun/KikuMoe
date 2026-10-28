@@ -25,6 +25,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizeGrip, QWidget
 
 from core.constants import APP_VERSION
+from ui.themes.cyber_moe import PALETTE, accent_qcolor
 
 _TITLE_BAR_HEIGHT = 38
 _BTN_SIZE = QSize(42, _TITLE_BAR_HEIGHT)
@@ -331,14 +332,14 @@ class _VersionBadgeLabel(QLabel):
         pill_rect = QRectF(0.5, cy - pill_h / 2.0, w - 1.0, pill_h)
 
         bg_grad = QLinearGradient(pill_rect.topLeft(), pill_rect.bottomLeft())
-        bg_grad.setColorAt(0.0, QColor(236, 24, 108, 72))
-        bg_grad.setColorAt(1.0, QColor(236, 24, 108, 48))
+        bg_grad.setColorAt(0.0, accent_qcolor(72))
+        bg_grad.setColorAt(1.0, accent_qcolor(48))
         painter.setBrush(bg_grad)
-        painter.setPen(QPen(QColor(255, 71, 151, 135), 1.0))
+        painter.setPen(QPen(accent_qcolor(135, "accent_hover"), 1.0))
         painter.drawRoundedRect(pill_rect, 5.5, 5.5)
 
         painter.setFont(self._badge_font)
-        painter.setPen(QColor("#ff5ca8"))
+        painter.setPen(QColor(PALETTE["text_accent"]))
 
         fm = QFontMetricsF(self._badge_font)
         tight = fm.tightBoundingRect(self.text())
@@ -416,14 +417,19 @@ class CustomTitleBar(QFrame):
         self._btn_close.clicked.connect(window.close)
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.refresh_theme()
+
+    def refresh_theme(self) -> None:
         self.setStyleSheet(
             "QFrame#customTitleBar {"
-            " background-color: rgba(8, 9, 15, 0.54);"
+            f" background-color: {PALETTE['bg_titlebar']};"
             " border-top-left-radius: 12px;"
             " border-top-right-radius: 12px;"
             " border-bottom: 1px solid rgba(255, 255, 255, 0.13);"
             "}"
         )
+        self._ver_badge.update()
+        self.update()
 
     def set_icon(self, icon: QIcon | None) -> None:
         self._icon_label.set_icon(icon)

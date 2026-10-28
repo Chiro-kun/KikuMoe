@@ -15,6 +15,7 @@ from core.constants import (
     STATION_NEURO21,
     STATION_TRUCKERSFM,
 )
+from ui.themes.cyber_moe import PALETTE
 from ui.vector_icons import get_history_icon
 
 
@@ -77,6 +78,7 @@ class TrayManager(QObject):
         self._act_quit: Optional[QAction] = None
         self._act_settings: Optional[QAction] = None
         self._act_about: Optional[QAction] = None
+        self._act_history: Optional[QAction] = None
         self._act_ch: Optional[QAction] = None
         self._act_fmt: Optional[QAction] = None
         self._channel_actions: Dict[str, QAction] = {}
@@ -111,44 +113,7 @@ class TrayManager(QObject):
                         pass
                     # Effetto hover per evidenziare le voci selezionabili nel menu,
                     # con colore dei titoli adattato al tema
-                    try:
-                        sep_rgba = "rgba(255, 255, 255, 0.12)"
-                        hover_rgba = "rgba(194, 24, 91, 0.25)"
-                        menu.setStyleSheet(
-                            f"""
-                            QMenu {{
-                                background-color: #1a1a1a;
-                                border: 1px solid #333333;
-                                padding: 6px 0px;
-                                spacing: 4px;
-                            }}
-                            QMenu::item {{
-                                padding: 6px 32px 6px 8px;
-                                border-radius: 4px;
-                                margin: 1px 6px;
-                                color: #e0e0e0;
-                                font-size: 13px;
-                            }}
-                            QMenu::icon {{
-                                padding-right: 2px;
-                            }}
-                            QMenu::item:enabled:selected {{
-                                background-color: {hover_rgba};
-                                color: #ffffff;
-                            }}
-                            QMenu::item:disabled {{
-                                color: #666666;
-                                background-color: transparent;
-                            }}
-                            QMenu::separator {{
-                                height: 1px;
-                                background-color: {sep_rgba};
-                                margin: 8px 14px;
-                            }}
-                            """
-                        )
-                    except Exception:
-                        pass
+                    self._apply_menu_stylesheet(menu)
                     # Font per intestazioni: leggermente più grande e in grassetto
                     try:
                         base_font = menu.font()
@@ -246,6 +211,7 @@ class TrayManager(QObject):
                     if hasattr(self._parent, "toggle_history_popover"):
                         act_history.triggered.connect(self._parent.toggle_history_popover)
                     menu.addAction(act_history)
+                    self._act_history = act_history
 
                     # Separatore fine sezione Playback
                     self._sep_playback_end = menu.addSeparator()
@@ -665,6 +631,62 @@ class TrayManager(QObject):
         try:
             if self._tray is not None:
                 self._tray.showMessage(title or "", body or "")
+        except Exception:
+            pass
+
+    def _apply_menu_stylesheet(self, menu: QMenu) -> None:
+        try:
+            sep_rgba = PALETTE.get("border_card", "rgba(255, 255, 255, 0.12)")
+            hover_rgba = PALETTE.get("accent_menu_hover", "rgba(236, 24, 108, 0.25)")
+            bg_pop = PALETTE.get("bg_popover", "#141624")
+            text_pri = PALETTE.get("text_primary", "#ffffff")
+            text_mut = PALETTE.get("text_muted", "#666666")
+            menu.setStyleSheet(
+                f"""
+                QMenu {{
+                    background-color: {bg_pop};
+                    border: 1px solid {sep_rgba};
+                    padding: 6px 0px;
+                    spacing: 4px;
+                }}
+                QMenu::item {{
+                    padding: 6px 32px 6px 8px;
+                    border-radius: 4px;
+                    margin: 1px 6px;
+                    color: {text_pri};
+                    font-size: 13px;
+                }}
+                QMenu::icon {{
+                    padding-right: 2px;
+                }}
+                QMenu::item:enabled:selected {{
+                    background-color: {hover_rgba};
+                    color: #ffffff;
+                }}
+                QMenu::item:disabled {{
+                    color: {text_mut};
+                    background-color: transparent;
+                }}
+                QMenu::separator {{
+                    height: 1px;
+                    background-color: {sep_rgba};
+                    margin: 8px 14px;
+                }}
+                """
+            )
+        except Exception:
+            pass
+
+    def refresh_theme(self) -> None:
+        try:
+            if self._tray is not None:
+                menu = self._tray.contextMenu()
+                if menu is not None:
+                    self._apply_menu_stylesheet(menu)
+                    for sub in menu.findChildren(QMenu):
+                        self._apply_menu_stylesheet(sub)
+            if self._act_history is not None:
+                self._act_history.setIcon(get_history_icon(16))
         except Exception:
             pass
 

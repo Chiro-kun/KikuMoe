@@ -10,7 +10,7 @@ from PyQt6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QPushButton, QWidget
 
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 
 
 class SegmentedSwitch(QWidget):
@@ -30,6 +30,7 @@ class SegmentedSwitch(QWidget):
         self._anim_start_pos = float(self._current_index)
         self._hover_index = -1
         self._height = height
+        self._custom_accent: Optional[QColor] = None
         self._accent = QColor(PALETTE["accent"])
 
         self.setFixedHeight(self._height)
@@ -77,7 +78,17 @@ class SegmentedSwitch(QWidget):
         return ""
 
     def set_accent_color(self, color_str: str) -> None:
-        self._accent = QColor(color_str)
+        col = QColor(color_str)
+        self._accent = col
+        if color_str.strip().lower() == PALETTE["accent"].lower():
+            self._custom_accent = None
+        else:
+            self._custom_accent = col
+        self.update()
+
+    def refresh_theme(self) -> None:
+        self._custom_accent = None
+        self._accent = QColor(PALETTE["accent"])
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -123,7 +134,7 @@ class SegmentedSwitch(QWidget):
         # 1. Background Track (Dark frosted glass pill container for high contrast)
         track_path = QPainterPath()
         track_path.addRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius)
-        painter.fillPath(track_path, QColor(14, 16, 26, 205))
+        painter.fillPath(track_path, surface_qcolor(205, "bg_pill_idle"))
         painter.setPen(QColor(255, 255, 255, 34))
         painter.drawPath(track_path)
 
@@ -135,10 +146,13 @@ class SegmentedSwitch(QWidget):
             painter.fillPath(hover_path, QColor(255, 255, 255, 16))
 
         # 3. Animated Sliding Active Indicator Pill
+        active_col = (
+            self._custom_accent if self._custom_accent is not None else QColor(PALETTE["accent"])
+        )
         active_rect = QRectF(self._anim_pos * item_w + 2, 2, item_w - 4, h - 4)
         active_path = QPainterPath()
         active_path.addRoundedRect(active_rect, radius - 2, radius - 2)
-        painter.fillPath(active_path, self._accent)
+        painter.fillPath(active_path, active_col)
 
         # 4. Text Labels
         font = QFont(self.font())
@@ -149,7 +163,7 @@ class SegmentedSwitch(QWidget):
         for i, text in enumerate(self._items):
             cell_rect = QRectF(i * item_w, 0, item_w, h)
             if i == self._current_index:
-                painter.setPen(QColor("#ffffff"))
+                painter.setPen(QColor(PALETTE["on_accent"]))
             elif i == self._hover_index:
                 painter.setPen(QColor("#e2e5f0"))
             else:
@@ -227,17 +241,17 @@ class SettingsIconButton(QPushButton):
         painter.scale(self._scale, self._scale)
         painter.translate(-cx, -cy)
 
-        # Active = vibrant magenta; Inactive = neutral dark glass (lights up on hover)
+        # Active = vibrant accent; Inactive = neutral dark glass (lights up on hover)
         if self._active:
             bg = QColor(PALETTE["accent_hover"] if self._hovered else PALETTE["accent"])
             border = QColor(255, 255, 255, 110)
-            fg = QColor("#ffffff")
+            fg = QColor(PALETTE["on_accent"])
         elif self._hovered:
-            bg = QColor(236, 24, 108, 45)
+            bg = accent_qcolor(45)
             border = QColor(PALETTE["accent"])
             fg = QColor("#ffffff")
         else:
-            bg = QColor(14, 16, 26, 200)
+            bg = surface_qcolor(200, "bg_pill_idle")
             border = QColor(255, 255, 255, 34)
             fg = QColor("#c4c9dc")
         painter.setPen(QPen(border, 1.0))

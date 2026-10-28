@@ -18,6 +18,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtSvg import QSvgRenderer
 
+from ui.themes.cyber_moe import PALETTE
+
 # Official brand SVG definitions
 _SPOTIFY_SVG = QByteArray(
     b'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
@@ -111,7 +113,7 @@ def get_copy_pixmap(size: int = 16, stroke_color: str = "#CBD5E1") -> QPixmap:
     # Back document
     p.drawRoundedRect(QRectF(s * 0.32, s * 0.16, s * 0.48, s * 0.52), 2.0, 2.0)
     # Front document
-    p.setBrush(QColor("#0e111b"))
+    p.setBrush(QColor(PALETTE.get("bg_popover", "#0e111b")))
     p.drawRoundedRect(QRectF(s * 0.18, s * 0.30, s * 0.48, s * 0.52), 2.0, 2.0)
     p.end()
     return QPixmap.fromImage(img)
@@ -121,8 +123,9 @@ def get_copy_icon(size: int = 16, stroke_color: str = "#CBD5E1") -> QIcon:
     return QIcon(get_copy_pixmap(size, stroke_color))
 
 
-def get_history_pixmap(size: int = 16, color: str = "#ec186c") -> QPixmap:
+def get_history_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
     """Generate clock history icon."""
+    resolved_color = color or PALETTE.get("accent", "#ec186c")
     img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
     img.fill(0)
     p = QPainter(img)
@@ -131,7 +134,7 @@ def get_history_pixmap(size: int = 16, color: str = "#ec186c") -> QPixmap:
     s = float(size)
     cx, cy = s / 2.0, s / 2.0
     pen = QPen(
-        QColor(color),
+        QColor(resolved_color),
         max(1.1, 1.6 * (s / 24.0)),
         Qt.PenStyle.SolidLine,
         Qt.PenCapStyle.RoundCap,
@@ -148,7 +151,7 @@ def get_history_pixmap(size: int = 16, color: str = "#ec186c") -> QPixmap:
     return QPixmap.fromImage(img)
 
 
-def get_history_icon(size: int = 16, color: str = "#ec186c") -> QIcon:
+def get_history_icon(size: int = 16, color: str | None = None) -> QIcon:
     return QIcon(get_history_pixmap(size, color))
 
 

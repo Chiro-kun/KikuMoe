@@ -145,3 +145,15 @@ STATION_ANISON = "anison"
 STATION_NEURO21 = "neuro21"
 STATION_TRUCKERSFM = "truckersfm"
 DEFAULT_STATION = STATION_LISTENMOE
+
+# Theme & Custom Accent Engine (Phase 8)
+KEY_THEME = "theme"
+KEY_CUSTOM_ACCENT_ENABLED = "custom_accent_enabled"
+KEY_CUSTOM_ACCENT = "custom_accent"
+THEME_CYBER_MOE = "cyber_moe"
+THEME_MIDNIGHT_AMOLED = "midnight_amoled"
+THEME_SAKURA_BLOOM = "sakura_bloom"
+THEME_NEON_MATRIX = "neon_matrix"
+THEME_OCEAN_CYAN = "ocean_cyan"
+DEFAULT_THEME = THEME_CYBER_MOE
+DEFAULT_ACCENT_COLOR = "#ec186c"

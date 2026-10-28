@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Theme & Custom Accent Engine**:
+  - Added 5 curated Cyber-Moe visual presets in Settings (*Generali → Aspetto e Tema*), organized in dedicated modular theme files under `ui/themes/` (`cyber_moe.py`, `midnight_amoled.py`, `sakura_bloom.py`, `neon_matrix.py`, `ocean_cyan.py`, and shared `engine.py`): **Cyber Moe** (default dark violet & neon pink), **Midnight AMOLED** (pure `#000000` black surfaces), **Sakura Bloom** (soft rose & cherry glow), **Neon Matrix** (deep slate & acid green), and **Ocean Cyan** (navy deep & cyan glow).
+  - Added an interactive **Custom Accent Color** toggle, glowing color swatch picker, and one-click preset reset (`AccentColorSwatchButton`) that dynamically derives hover, pressed, shimmer, contrast-aware foreground (`on_accent`), glass border, scrollbar, and glow RGBA tokens across the entire UI.
+  - Real-time live preview across the main player, title bar, waveform/equalizer badge, station selector, progress scrubber, lyrics panel, mini-player HUD, dialogs, popovers, and system tray menu, with automatic rollback to persisted `QSettings` on Cancel.
 - **Lyrics**: Show LRCLIB lyrics beside the album cover, with animated scrolling for synchronized tracks and a plain-text fallback.
 - **System Media Controls**: Integrate with Windows SMTC and Linux MPRIS for playback controls and track metadata, with a media-key fallback on Windows.
 - **Discord Rich Presence Button**: Add a localized button linking to the KikuMoe project page.
@@ -58,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added "Cronologia brani..." with vector clock icon directly into the system tray context menu.
 
 ### Fixed
+- **Settings Panel & Backdrop Rendering Performance**:
+  - Cached steady-state HiDPI composited backdrop frames in `FullBleedCanvas` to eliminate per-frame CPU pixmap scaling and multi-gradient recomputation during Settings scrolling, widget hovers, and 60 FPS tab/panel slides.
+  - Moved PyAudio output device enumeration (`Pa_Initialize`) off the Qt main thread into a background worker, deduplicated global QSS rules on embedded `SettingsDialog`, cached tinted icons and theme application state in `ListenMoePlayer.apply_theme`, and eliminated redundant theme re-polishing on Cancel/Apply/OK.
 - **Close Confirmation Dialog**: Use a translucent, themed frame and a compact animated remember-choice checkbox with a vector checkmark.
 - **Station Selector and Settings Transitions**: Deliver station selections immediately, avoid popup motion on Linux, and preserve the settings panel during return animations.
 - **Audio Status Badge**: Show the active audio backend instead of the misleading initial AUTO label, and update its readiness indicator even when legacy widgets are absent.

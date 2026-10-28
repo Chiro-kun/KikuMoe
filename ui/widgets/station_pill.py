@@ -52,7 +52,7 @@ from core.constants import (
     DEFAULT_STATION,
     STATION_LISTENMOE,
 )
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, surface_qcolor
 
 _IS_LINUX = sys.platform.startswith("linux")
 
@@ -89,24 +89,29 @@ class ChannelChip(QPushButton):
         super().leaveEvent(event)
 
     def _update_style(self) -> None:
+        act = PALETTE["accent"]
+        on_act = PALETTE["on_accent"]
         if self.is_active:
-            bg = "#EC186C"
-            fg = "#FFFFFF"
-            border = "1px solid #EC186C"
-            hover_bg = "#FD3585"
-            pressed_bg = "#C70E55"
+            bg = act
+            fg = on_act
+            border = f"1px solid {act}"
+            hover_bg = PALETTE["accent_hover"]
+            pressed_bg = PALETTE["accent_pressed"]
+            hover_fg = on_act
         elif self._hovered:
             bg = "rgba(255, 255, 255, 0.18)"
             fg = "#FFFFFF"
             border = "1px solid rgba(255, 255, 255, 0.40)"
             hover_bg = "rgba(255, 255, 255, 0.22)"
-            pressed_bg = "rgba(236, 24, 108, 0.35)"
+            pressed_bg = PALETTE["accent_glow"]
+            hover_fg = "#FFFFFF"
         else:
             bg = "rgba(255, 255, 255, 0.08)"
             fg = "#B0B7C9"
             border = "1px solid rgba(255, 255, 255, 0.12)"
             hover_bg = "rgba(255, 255, 255, 0.18)"
-            pressed_bg = "rgba(236, 24, 108, 0.35)"
+            pressed_bg = PALETTE["accent_glow"]
+            hover_fg = "#FFFFFF"
 
         self.setStyleSheet(
             f"""
@@ -119,7 +124,7 @@ class ChannelChip(QPushButton):
             }}
             QPushButton:hover {{
                 background-color: {hover_bg};
-                color: #FFFFFF;
+                color: {hover_fg};
             }}
             QPushButton:pressed {{
                 background-color: {pressed_bg};
@@ -182,7 +187,7 @@ class StationRowWithChannels(QWidget):
         font.setPointSize(9)
         font.setBold(self.is_current_station)
         title_lbl.setFont(font)
-        fg_col = "#EC186C" if self.is_current_station else "#E6EAF8"
+        fg_col = PALETTE["accent"] if self.is_current_station else PALETTE["text_primary"]
         title_lbl.setStyleSheet(f"color: {fg_col}; background: transparent; border: none;")
 
         left_layout.addWidget(icon_lbl)
@@ -269,7 +274,7 @@ class SimpleStationRow(QPushButton):
         font.setPointSize(9)
         font.setBold(is_selected)
         self._title_lbl.setFont(font)
-        color = "#EC186C" if is_selected else "#E6EAF8"
+        color = PALETTE["accent"] if is_selected else PALETTE["text_primary"]
         self._title_lbl.setStyleSheet(f"color: {color}; background: transparent; border: none;")
 
         layout.addWidget(self._icon_lbl)
@@ -296,7 +301,7 @@ class SimpleStationRow(QPushButton):
         if self._hovered and self.is_selected:
             bg = PALETTE["station_selected_hover"]
         elif self._hovered:
-            bg = "rgba(236, 24, 108, 0.18)"
+            bg = PALETTE["station_selected_bg"]
         elif self.is_selected:
             bg = PALETTE["station_selected_bg"]
         else:
@@ -737,6 +742,10 @@ class StationPillButton(QWidget):
             self.update()
         super().mouseReleaseEvent(event)
 
+    def refresh_theme(self) -> None:
+        self._accent = QColor(PALETTE.get("accent", "#EC186C"))
+        self.update()
+
     def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -745,21 +754,22 @@ class StationPillButton(QWidget):
         w = float(self.width())
         h = float(self.height())
         radius = h / 2.0
+        self._accent = QColor(PALETTE.get("accent", "#EC186C"))
 
         # Colors matching LiveEqualizerBadge and SettingsIconButton
         if self._pressed or self._menu_open:
-            bg = QColor(24, 26, 40, 245)
+            bg = surface_qcolor(245, "bg_pill_active")
             border = self._accent
             fg = QColor("#ffffff")
             chevron_col = self._accent
         elif self._hovered:
-            bg = QColor(24, 26, 40, 240)
+            bg = surface_qcolor(240, "bg_pill_active")
             border = self._accent
             fg = QColor("#ffffff")
             chevron_col = QColor("#ffffff")
         else:
             # Solid, dark cyber-glass matching LiveEqualizerBadge
-            bg = QColor(14, 16, 26, 215)
+            bg = surface_qcolor(215, "bg_pill_idle")
             border = QColor(255, 255, 255, 36)
             fg = QColor("#e6eaf8")
             chevron_col = QColor(170, 176, 195)

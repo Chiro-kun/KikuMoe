@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
 from core.i18n import I18n
 from core.quick_search import copy_to_clipboard, search_spotify, search_youtube
 from core.song_history import SongHistoryEntry, SongHistoryManager
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 from ui.vector_icons import get_copy_icon, get_spotify_icon, get_youtube_icon
 
 
@@ -97,7 +98,7 @@ class _TrackThumbnail(QLabel):
 
         if self._pixmap and not self._pixmap.isNull():
             # Draw rounded cropped image
-            painter.setBrush(QColor(18, 20, 32))
+            painter.setBrush(surface_qcolor(255, "bg_surface"))
             painter.setPen(QPen(QColor(255, 255, 255, 25), 1.0))
             painter.drawRoundedRect(rect, 6.0, 6.0)
 
@@ -123,18 +124,18 @@ class _TrackThumbnail(QLabel):
             painter.restore()
         else:
             # Fallback Cyber-Moe stylized note thumbnail
-            painter.setBrush(QColor(236, 24, 108, 30))
-            painter.setPen(QPen(QColor(236, 24, 108, 70), 1.0))
+            painter.setBrush(accent_qcolor(30))
+            painter.setPen(QPen(accent_qcolor(70), 1.0))
             painter.drawRoundedRect(rect, 6.0, 6.0)
 
-            accent = QColor("#EC186C")
+            accent = QColor(PALETTE["accent"])
             pen = QPen(accent, 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             # Music note glyph
             painter.drawLine(QPointF(14.0, 20.0), QPointF(14.0, 11.0))
             painter.drawLine(QPointF(14.0, 11.0), QPointF(21.0, 9.0))
             painter.drawLine(QPointF(21.0, 9.0), QPointF(21.0, 18.0))
-            painter.setBrush(QColor("#EC186C"))
+            painter.setBrush(accent)
             painter.drawEllipse(QPointF(12.5, 20.0), 2.5, 2.0)
             painter.drawEllipse(QPointF(19.5, 18.0), 2.5, 2.0)
 
@@ -277,8 +278,8 @@ class SongHistoryRowWidget(QWidget):
         rect = QRectF(2.0, 2.0, float(self.width()) - 4.0, float(self.height()) - 4.0)
 
         if self._hovered:
-            painter.setBrush(QColor(236, 24, 108, 22))
-            painter.setPen(QPen(QColor(236, 24, 108, 60), 1.0))
+            painter.setBrush(accent_qcolor(22))
+            painter.setPen(QPen(accent_qcolor(60), 1.0))
             painter.drawRoundedRect(rect, 8.0, 8.0)
         else:
             painter.setBrush(QColor(255, 255, 255, 4))
@@ -334,8 +335,8 @@ class SongHistoryPopover(QWidget):
 
         self.badge_count = QLabel("")
         self.badge_count.setStyleSheet(
-            "color: #ff5ca8; background: rgba(236, 24, 108, 0.18); "
-            "border: 1px solid rgba(236, 24, 108, 0.4); border-radius: 9px; "
+            f"color: {PALETTE['text_accent']}; background: {PALETTE['accent_subtle']}; "
+            f"border: 1px solid {PALETTE['border_highlight']}; border-radius: 9px; "
             "padding: 1px 7px; font-size: 10px; font-weight: 600;"
         )
         header_row.addWidget(self.badge_count)
@@ -364,12 +365,13 @@ class SongHistoryPopover(QWidget):
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        hover_bar = PALETTE["scrollbar_handle_hover"]
         self.scroll_area.setStyleSheet(
             "QScrollArea { background: transparent; border: none; }"
             "QScrollBar:vertical { background: transparent; width: 6px; margin: 0; }"
             "QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.18); "
             "border-radius: 3px; min-height: 20px; }"
-            "QScrollBar::handle:vertical:hover { background: rgba(236, 24, 108, 0.6); }"
+            f"QScrollBar::handle:vertical:hover {{ background: {hover_bar}; }}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
 
@@ -522,9 +524,9 @@ class SongHistoryPopover(QWidget):
         rect = QRectF(0.5, 0.5, float(self.width()) - 1.0, float(self.height()) - 1.0)
 
         # Dark glass fill
-        painter.setBrush(QColor(12, 14, 23, 245))
+        painter.setBrush(surface_qcolor(245, "bg_popover"))
         # Illuminated border with accent tint
-        painter.setPen(QPen(QColor(236, 24, 108, 90), 1.0))
+        painter.setPen(QPen(accent_qcolor(90), 1.0))
         painter.drawRoundedRect(rect, 12.0, 12.0)
 
         painter.end()

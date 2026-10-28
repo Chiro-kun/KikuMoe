@@ -46,7 +46,7 @@ from core.constants import (
 )
 from core.i18n import I18n
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
-from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 # Vector SVG assets for authentic brand icons and feedback glyphs
@@ -278,10 +278,10 @@ class AboutActionButton(QPushButton):
 
         # Cyber-Moe translucent background and neon accent border on hover
         if self._pressed:
-            bg = QColor(236, 24, 108, 55)
+            bg = accent_qcolor(55)
             border = QColor(PALETTE["accent"])
         elif self._hover:
-            bg = QColor(236, 24, 108, 30)
+            bg = accent_qcolor(30)
             border = QColor(PALETTE["accent"])
         else:
             bg = QColor(255, 255, 255, 14)
@@ -427,10 +427,7 @@ class AboutWidget(QWidget):
 
         # Version Pill Badge
         self._lbl_version = QLabel(f"v{APP_VERSION}")
-        self._lbl_version.setStyleSheet(
-            f"background-color: {PALETTE['accent']}; color: #ffffff; font-size: 10px;"
-            " font-weight: 800; border-radius: 8px; padding: 1px 7px; letter-spacing: 0.5px;"
-        )
+        self._apply_version_pill_style()
         title_row.addWidget(self._lbl_version)
         title_row.addStretch(1)
         v_title_lay.addLayout(title_row)
@@ -672,10 +669,18 @@ class AboutWidget(QWidget):
         main_layout.addWidget(card_sys)
         main_layout.addStretch(1)
 
+    def _apply_version_pill_style(self) -> None:
+        if hasattr(self, "_lbl_version"):
+            self._lbl_version.setStyleSheet(
+                f"background-color: {PALETTE['accent']}; color: {PALETTE['on_accent']};"
+                " font-size: 10px;"
+                " font-weight: 800; border-radius: 8px; padding: 1px 7px; letter-spacing: 0.5px;"
+            )
+
     def _apply_widget_stylesheet(self) -> None:
         self.setStyleSheet(f"""
         QFrame#settingsCard {{
-            background-color: #151826;
+            background-color: {PALETTE["bg_surface"]};
             border: 1px solid rgba(255, 255, 255, 0.10);
             border-top: 1px solid rgba(255, 255, 255, 0.16);
             border-radius: 13px;
@@ -690,6 +695,13 @@ class AboutWidget(QWidget):
             padding-bottom: 2px;
         }}
         """)
+
+    def refresh_theme(self) -> None:
+        self._apply_widget_stylesheet()
+        self._apply_version_pill_style()
+        for btn in self.findChildren(AboutActionButton):
+            btn.update()
+        self.update()
 
     def _copy_system_info(self) -> None:
         """Copies formatted diagnostics string to the system clipboard with tactile feedback."""
@@ -860,12 +872,12 @@ class AboutDialog(QDialog):
         base_qss = get_cyber_moe_stylesheet(PALETTE["accent"])
         extra_qss = f"""
         QDialog#aboutDialogRoot {{
-            background-color: #0c0e17;
+            background-color: {PALETTE["bg_dialog"]};
             border: 1px solid rgba(255, 255, 255, 0.16);
             border-radius: 12px;
         }}
         QFrame#settingsCard {{
-            background-color: #151826;
+            background-color: {PALETTE["bg_surface"]};
             border: 1px solid rgba(255, 255, 255, 0.10);
             border-top: 1px solid rgba(255, 255, 255, 0.16);
             border-radius: 13px;
@@ -881,3 +893,11 @@ class AboutDialog(QDialog):
         }}
         """
         self.setStyleSheet(base_qss + extra_qss)
+
+    def refresh_theme(self) -> None:
+        self._apply_dialog_stylesheet()
+        if hasattr(self, "_title_bar"):
+            self._title_bar.refresh_theme()
+        if hasattr(self, "about_widget"):
+            self.about_widget.refresh_theme()
+        self.update()

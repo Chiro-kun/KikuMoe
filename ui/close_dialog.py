@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from core.i18n import I18n
 from ui.custom_titlebar import CustomTitleBar
-from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 
@@ -59,14 +59,19 @@ class DialogIconBadge(QWidget):
         # 1. Glowing translucent squircle background with Cyber glass gradient
         rect = QRectF(1.0, 1.0, 34.0, 34.0)
         grad = QLinearGradient(0.0, 0.0, 0.0, 36.0)
-        grad.setColorAt(0.0, QColor(236, 24, 108, 38))
-        grad.setColorAt(1.0, QColor(236, 24, 108, 16))
+        grad.setColorAt(0.0, accent_qcolor(38))
+        grad.setColorAt(1.0, accent_qcolor(16))
         painter.setBrush(grad)
-        painter.setPen(QPen(QColor(255, 71, 151, 85), 1.0))
+        painter.setPen(QPen(accent_qcolor(85, "accent_hover"), 1.0))
         painter.drawRoundedRect(rect, 9.0, 9.0)
 
         # 2. Perfectly symmetric power / standby emblem
-        pen = QPen(QColor("#ff4797"), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        pen = QPen(
+            QColor(PALETTE["accent_hover"]),
+            2.0,
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+        )
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
@@ -291,7 +296,7 @@ class CloseConfirmDialog(QDialog):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0)
-        painter.setBrush(QColor(PALETTE["bg_main"]))
+        painter.setBrush(QColor(PALETTE["bg_dialog"]))
         painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0))
         painter.drawRoundedRect(rect, 12.0, 12.0)
         painter.end()
@@ -407,6 +412,8 @@ class CloseConfirmDialog(QDialog):
         accent = PALETTE.get("accent", "#EC186C")
         hover_accent = PALETTE.get("accent_hover", "#FF3388")
         pressed_accent = PALETTE.get("accent_pressed", "#C40C54")
+        on_accent = PALETTE.get("on_accent", "#ffffff")
+        bg_footer = PALETTE.get("bg_footer", "#121523")
         base_qss = get_cyber_moe_stylesheet(accent)
 
         extra_qss = f"""
@@ -415,14 +422,14 @@ class CloseConfirmDialog(QDialog):
             border: none;
         }}
         QFrame#dialogFooter {{
-            background-color: rgba(14, 17, 27, 0.70);
+            background-color: {bg_footer};
             border-top: 1px solid rgba(255, 255, 255, 0.08);
             border-bottom-left-radius: 12px;
             border-bottom-right-radius: 12px;
         }}
         QPushButton#primaryButton {{
             background-color: {accent};
-            color: #ffffff;
+            color: {on_accent};
             border: none;
             border-radius: 8px;
             padding: 6px 16px;

@@ -6,7 +6,7 @@ from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen
 from PyQt6.QtWidgets import QPushButton, QWidget
 
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 
 
 class HistoryIconButton(QPushButton):
@@ -76,20 +76,24 @@ class HistoryIconButton(QPushButton):
 
         # 1. Background squircle styling matching Cyber-Moe HUD
         if self._active:
-            act_col = (
-                PALETTE.get("accent_hover", "#FF3388")
-                if self._hovered
-                else getattr(self, "_accent", PALETTE.get("accent", "#EC186C"))
-            )
+            custom_accent = getattr(self, "_custom_accent", None)
+            if self._hovered:
+                act_col = (
+                    QColor(custom_accent).lighter(118).name()
+                    if custom_accent
+                    else PALETTE.get("accent_hover", "#FF3388")
+                )
+            else:
+                act_col = custom_accent or PALETTE.get("accent", "#EC186C")
             bg = QColor(act_col)
             border = QColor(255, 255, 255, 110)
-            fg = QColor("#ffffff")
+            fg = QColor(PALETTE.get("on_accent", "#ffffff"))
         elif self._hovered:
-            bg = QColor(236, 24, 108, 45)
+            bg = accent_qcolor(45)
             border = QColor(PALETTE.get("accent", "#EC186C"))
             fg = QColor("#ffffff")
         else:
-            bg = QColor(14, 16, 26, 200)
+            bg = surface_qcolor(200, "bg_pill_idle")
             border = QColor(255, 255, 255, 22)
             fg = QColor(200, 208, 225)
 
@@ -134,9 +138,19 @@ class LyricsButton(HistoryIconButton):
         self.setCheckable(True)
         self.toggled.connect(self.set_active)
         self._accent = PALETTE["accent"]
+        self._custom_accent: str | None = None
 
     def set_accent_color(self, color_str: str) -> None:
         self._accent = color_str
+        if color_str.strip().lower() == PALETTE["accent"].lower():
+            self._custom_accent = None
+        else:
+            self._custom_accent = color_str
+        self.update()
+
+    def refresh_theme(self) -> None:
+        self._custom_accent = None
+        self._accent = PALETTE["accent"]
         self.update()
 
     def _draw_icon(self, painter, cx, cy, fg):

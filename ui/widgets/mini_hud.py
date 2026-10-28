@@ -57,6 +57,10 @@ class MarqueeLabel(QWidget):
         self._timer.start()
         self.update()
 
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
     def _tick(self) -> None:
         if not self.isVisible() or self.fontMetrics().horizontalAdvance(self._text) <= self.width():
             self._offset = 0
@@ -110,17 +114,19 @@ class MiniIconButton(QPushButton):
     def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        bg = QColor(PALETTE["accent"] if self.isChecked() else "#25293a")
+        active = self.isChecked() or self.isDown() or self.underMouse()
+        bg = QColor(PALETTE["accent"] if self.isChecked() else PALETTE["bg_subtle"])
         if self.isDown():
             bg = QColor(PALETTE["accent_pressed"])
         elif self.underMouse():
             bg = QColor(PALETTE["accent_hover"])
+        fg = QColor(PALETTE["on_accent"] if active else PALETTE["text_primary"])
         p.setBrush(bg)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawRoundedRect(QRectF(1, 1, 25, 25), 7, 7)
         p.setPen(
             QPen(
-                QColor("#ffffff"),
+                fg,
                 1.6,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
@@ -137,7 +143,7 @@ class MiniIconButton(QPushButton):
                 path.lineTo(19, 13.5)
                 path.lineTo(10, 19)
                 path.closeSubpath()
-                p.setBrush(QColor("#ffffff"))
+                p.setBrush(fg)
                 p.drawPath(path)
         elif self.kind in ("restore", "mini"):
             p.drawRoundedRect(QRectF(7, 8, 13, 11), 1, 1)
@@ -278,6 +284,36 @@ class MiniHud(QWidget):
         self.play_button.clicked.connect(self.play_requested)
         self.close_button.clicked.connect(self._close_window)
         self._drag_offset: Optional[QPoint] = None
+        self.refresh_theme()
+
+    def refresh_theme(self) -> None:
+        self.setStyleSheet(
+            f"QWidget#miniHud {{ background: {PALETTE['bg_footer']}; "
+            f"border: 1px solid {PALETTE['border_card']}; border-radius: 12px; }}"
+            "QSlider::groove:horizontal { height: 4px; background: rgba(255, 255, 255, 0.14); "
+            "border-radius: 2px; }"
+            f"QSlider::sub-page:horizontal {{ background: {PALETTE['accent']}; "
+            "border-radius: 2px; }"
+            "QSlider::handle:horizontal { background: white; width: 10px; margin: -4px 0; "
+            f"border: 2px solid {PALETTE['accent']}; border-radius: 6px; }}"
+        )
+        self.cover.setStyleSheet(f"background: {PALETTE['bg_subtle']}; border-radius: 8px;")
+        self.title.set_color(PALETTE["text_primary"])
+        self.artist.set_color(PALETTE["text_secondary"])
+        for label in (self.elapsed_label, self.duration_label):
+            label.setStyleSheet(
+                f"color: {PALETTE['text_secondary']}; background: transparent; "
+                "border: none; font-size: 9px; font-weight: 600;"
+            )
+        self.volume_popup.setStyleSheet(
+            f"background: {PALETTE['bg_surface_elevated']}; color: {PALETTE['text_primary']}; "
+            f"border: 1px solid {PALETTE['accent']}; border-radius: 6px; "
+            "font-size: 11px; font-weight: 700; padding: 3px 7px;"
+        )
+        self.track_progress.update()
+        for btn in (self.pin_button, self.restore_button, self.play_button, self.close_button):
+            btn.update()
+        self.update()
 
     def _close_window(self) -> None:
         window = self.window()

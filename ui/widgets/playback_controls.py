@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, accent_qcolor
 
 
 class AnimatedVectorButton(QPushButton):
@@ -121,6 +121,7 @@ class HeroPlayButton(AnimatedVectorButton):
         self._size = size
         self._is_playing = False
         self._is_paused = False
+        self._custom_accent: Optional[QColor] = None
         self._accent = QColor(PALETTE["accent"])
         self._accent_hover = QColor(PALETTE["accent_hover"])
         self._accent_pressed = QColor(PALETTE["accent_pressed"])
@@ -133,7 +134,19 @@ class HeroPlayButton(AnimatedVectorButton):
             self.update()
 
     def set_accent_color(self, color_str: str) -> None:
-        self._accent = QColor(color_str)
+        col = QColor(color_str)
+        self._accent = col
+        if color_str.strip().lower() == PALETTE["accent"].lower():
+            self._custom_accent = None
+        else:
+            self._custom_accent = col
+        self.update()
+
+    def refresh_theme(self) -> None:
+        self._custom_accent = None
+        self._accent = QColor(PALETTE["accent"])
+        self._accent_hover = QColor(PALETTE["accent_hover"])
+        self._accent_pressed = QColor(PALETTE["accent_pressed"])
         self.update()
 
     def paintEvent(self, a0) -> None:
@@ -146,13 +159,37 @@ class HeroPlayButton(AnimatedVectorButton):
         cy = h / 2.0
         active = self._is_playing and not self._is_paused
 
-        self._apply_scale_and_ripple(painter, cx, cy, (w / 2.0) - 4.0, self._accent_hover)
+        accent = (
+            self._custom_accent if self._custom_accent is not None else QColor(PALETTE["accent"])
+        )
+        accent_hover = (
+            accent.lighter(118)
+            if self._custom_accent is not None
+            else QColor(PALETTE["accent_hover"])
+        )
+        accent_pressed = (
+            accent.darker(122)
+            if self._custom_accent is not None
+            else QColor(PALETTE["accent_pressed"])
+        )
+        accent_deep = (
+            accent.darker(140)
+            if self._custom_accent is not None
+            else QColor(PALETTE["accent_deep"])
+        )
+        accent_deeper = (
+            accent.darker(165)
+            if self._custom_accent is not None
+            else QColor(PALETTE["accent_deeper"])
+        )
+
+        self._apply_scale_and_ripple(painter, cx, cy, (w / 2.0) - 4.0, accent_hover)
 
         # 1. Soft Outer Radial Glow (only when active or hovered)
         if active or self._hover:
             glow_r = w / 2.0
             glow = QRadialGradient(QPointF(cx, cy), glow_r)
-            c_glow = QColor(self._accent)
+            c_glow = QColor(accent)
             c_glow.setAlpha(105 if active else 55)
             glow.setColorAt(0.45, c_glow)
             glow.setColorAt(1.0, QColor(0, 0, 0, 0))
@@ -163,7 +200,7 @@ class HeroPlayButton(AnimatedVectorButton):
         # 2. Decorative Outer Halo Ring
         outer_ring_r = (w / 2.0) - 2.0
         if active:
-            ring_col = QColor(self._accent_hover)
+            ring_col = QColor(accent_hover)
             ring_col.setAlpha(165)
         elif self._hover:
             ring_col = QColor(255, 255, 255, 85)
@@ -178,13 +215,13 @@ class HeroPlayButton(AnimatedVectorButton):
         grad = QLinearGradient(cx, cy - disc_r, cx, cy + disc_r)
         if active:
             if self._pressed:
-                grad.setColorAt(0.0, self._accent_pressed)
-                grad.setColorAt(1.0, QColor("#8a0a3d"))
+                grad.setColorAt(0.0, accent_pressed)
+                grad.setColorAt(1.0, accent_deeper)
             else:
-                grad.setColorAt(0.0, self._accent_hover)
-                grad.setColorAt(1.0, QColor("#ba0e52"))
+                grad.setColorAt(0.0, accent_hover)
+                grad.setColorAt(1.0, accent_deep)
             rim_col = QColor(255, 255, 255, 80)
-            icon_col = QColor("#ffffff")
+            icon_col = QColor(PALETTE["on_accent"])
         else:
             if self._hover:
                 grad.setColorAt(0.0, QColor(48, 53, 76, 240))
@@ -255,8 +292,8 @@ class StopButton(AnimatedVectorButton):
         self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
 
         if self._hover or self._pressed:
-            bg = QColor(236, 24, 108, 45 if self._pressed else 30)
-            border = QColor(236, 24, 108, 150)
+            bg = accent_qcolor(45 if self._pressed else 30)
+            border = accent_qcolor(150)
             icon_col = QColor("#ffffff")
         else:
             bg = QColor(255, 255, 255, 12)
@@ -304,8 +341,8 @@ class ForceStopButton(AnimatedVectorButton):
         self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
 
         if self._hover or self._pressed:
-            bg = QColor(236, 24, 108, 45 if self._pressed else 30)
-            border = QColor(236, 24, 108, 150)
+            bg = accent_qcolor(45 if self._pressed else 30)
+            border = accent_qcolor(150)
             bolt_col = QColor("#ffffff")
         else:
             bg = QColor(255, 255, 255, 12)
@@ -375,12 +412,12 @@ class SleepButton(AnimatedVectorButton):
         self._apply_scale_and_ripple(painter, cx_btn, cy, radius, QColor(PALETTE["accent"]))
 
         if is_colored:
-            bg = QColor(236, 24, 108, 52 if self._hover else 36)
+            bg = accent_qcolor(52 if self._hover else 36)
             border = QColor(PALETTE["accent"])
             icon_col = QColor("#ffffff" if self._hover else PALETTE["accent_hover"])
         elif self._hover or self._pressed:
-            bg = QColor(236, 24, 108, 28)
-            border = QColor(236, 24, 108, 120)
+            bg = accent_qcolor(28)
+            border = accent_qcolor(120)
             icon_col = QColor("#ffffff")
         else:
             bg = QColor(255, 255, 255, 12)
@@ -447,7 +484,7 @@ class AutoplayPillButton(AnimatedVectorButton):
         self._apply_scale_and_ripple(painter, cx, cy, radius, QColor(PALETTE["accent"]))
 
         if checked:
-            bg = QColor(236, 24, 108, 48 if self._hover else 34)
+            bg = accent_qcolor(48 if self._hover else 34)
             border = QColor(PALETTE["accent"])
             text_col = QColor("#ffffff")
             dot_col = QColor(PALETTE["accent_hover"])
@@ -510,8 +547,8 @@ class SpeakerButton(AnimatedVectorButton):
         self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
 
         if self._hover or self._pressed:
-            bg = QColor(236, 24, 108, 42 if self._pressed else 26)
-            border = QColor(236, 24, 108, 145)
+            bg = accent_qcolor(42 if self._pressed else 26)
+            border = accent_qcolor(145)
             color = QColor("#ffffff")
         else:
             bg = QColor(255, 255, 255, 12)
@@ -740,3 +777,13 @@ class PlaybackControls(QFrame):
         self.btn_autoplay.blockSignals(False)
         self.btn_autoplay.update()
         self.autoplay_toggled.emit(checked)
+
+    def refresh_theme(self) -> None:
+        self.hero_play.refresh_theme()
+        self.btn_stop.update()
+        self.btn_force_stop.update()
+        self.btn_sleep.update()
+        self.btn_autoplay.update()
+        self.speaker_btn.update()
+        self.volume_slider.update()
+        self.update()

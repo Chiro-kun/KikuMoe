@@ -62,11 +62,14 @@ from core.constants import (
     APP_VERSION,
     DEFAULT_DISCORD_CLIENT_ID,
     DEFAULT_STATION,
+    DEFAULT_THEME,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
     KEY_CHANNEL,
     KEY_CLOSE_TO_TRAY,
+    KEY_CUSTOM_ACCENT,
+    KEY_CUSTOM_ACCENT_ENABLED,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_DEV_CONSOLE_SHOW_DEV,
     KEY_DISCORD_CLIENT_ID,
@@ -83,6 +86,7 @@ from core.constants import (
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
     KEY_STATION,
+    KEY_THEME,
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
@@ -112,7 +116,13 @@ from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
 from ui.history_popover import SongHistoryPopover
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
-from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
+from ui.themes.cyber_moe import (
+    PALETTE,
+    apply_theme_palette,
+    derive_accent_tokens,
+    get_cyber_moe_stylesheet,
+    resolve_theme_and_accent,
+)
 from ui.tray_manager import TrayManager
 from ui.vector_icons import (
     get_apple_music_icon,
@@ -171,6 +181,16 @@ class SmoothProgressBar(QWidget):
     def setAccentColor(self, color_str):
         self._accent_color = QColor(color_str)
         self.update()
+
+    def refresh_theme(self) -> None:
+        self._accent_color = QColor(PALETTE["accent"])
+        self.update()
+
+    def _resolve_gradient_shades(self):
+        if self._accent_color.name().lower() == PALETTE["accent"].lower():
+            return QColor(PALETTE["accent_hover"]), QColor(PALETTE["accent_shimmer"])
+        derived = derive_accent_tokens(self._accent_color.name())
+        return QColor(derived["accent_hover"]), QColor(derived["accent_shimmer"])
 
     def setMaximum(self, val):
         self._max = max(1, val)
@@ -275,6 +295,7 @@ class SmoothProgressBar(QWidget):
 
         # Cubic-out easing for Play launch animation
         launch_ease = 1.0 - ((1.0 - self._launch_progress) ** 3)
+        hover_col, shimmer_col = self._resolve_gradient_shades()
 
         # 2. Buffering / Opening Shimmer Wave inside the main progress bar
         if self._buffering_active and (
@@ -292,7 +313,7 @@ class SmoothProgressBar(QWidget):
             grad = QLinearGradient(cx, 0.0, cx + comet_w, 0.0)
             c0 = QColor(self._accent_color)
             c0.setAlpha(0)
-            c1 = QColor("#ff529a")
+            c1 = QColor(hover_col)
             c1.setAlpha(235)
             c2 = QColor(self._accent_color)
             c2.setAlpha(0)
@@ -323,7 +344,7 @@ class SmoothProgressBar(QWidget):
             c0.setAlpha(0)
             c1 = QColor(self._accent_color)
             c1.setAlpha(170)
-            c2 = QColor("#ff7eb6")
+            c2 = QColor(shimmer_col)
             c2.setAlpha(220)
             c3 = QColor(self._accent_color)
             c3.setAlpha(0)
@@ -353,8 +374,8 @@ class SmoothProgressBar(QWidget):
             if fill_w > 0:
                 grad = QLinearGradient(margin_x, 0, margin_x + fill_w, 0)
                 grad.setColorAt(0.0, self._accent_color)
-                grad.setColorAt(0.7, QColor("#ff3d8b"))
-                grad.setColorAt(1.0, QColor("#ff7eb6"))
+                grad.setColorAt(0.7, hover_col)
+                grad.setColorAt(1.0, shimmer_col)
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(grad)
                 painter.drawRoundedRect(
@@ -476,6 +497,13 @@ class ListenMoePlayer(QWidget):
         Sets up the language based on stored settings and initializes the logger.
         """
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
+        saved_theme = str(self.settings.value(KEY_THEME, DEFAULT_THEME) or DEFAULT_THEME)
+        custom_on = self._get_bool(KEY_CUSTOM_ACCENT_ENABLED, False)
+        saved_accent = str(self.settings.value(KEY_CUSTOM_ACCENT, "") or "").strip()
+        apply_theme_palette(
+            saved_theme,
+            custom_accent=saved_accent if (custom_on and saved_accent) else None,
+        )
         saved_lang = self.settings.value(KEY_LANG, "it")
         self.i18n = I18n(saved_lang if saved_lang in ("it", "en") else "it")
         self._lang_map = {"Italiano": "it", "English": "en"}
@@ -785,7 +813,11 @@ class ListenMoePlayer(QWidget):
         track_box.setSpacing(0)
 
         self.now_playing_title = AnimatedTrackLabel(
-            "–", font_px=16, font_weight=800, text_color="#ffffff", interactive=True
+            "–",
+            font_px=16,
+            font_weight=800,
+            text_color=PALETTE["text_primary"],
+            interactive=True,
         )
         self.now_playing_title.setObjectName("songTitleLabel")
         self.now_playing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -805,7 +837,11 @@ class ListenMoePlayer(QWidget):
         self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
 
         self.now_playing_artist = AnimatedTrackLabel(
-            "", font_px=13, font_weight=600, text_color="#c8cee0", interactive=True
+            "",
+            font_px=13,
+            font_weight=600,
+            text_color=PALETTE["text_secondary"],
+            interactive=True,
         )
         self.now_playing_artist.setObjectName("songArtistLabel")
         self.now_playing_artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -844,7 +880,6 @@ class ListenMoePlayer(QWidget):
 
         self.song_elapsed_label = QLabel("0:00")
         self.song_elapsed_label.setObjectName("timeDisplayLabel")
-        self.song_elapsed_label.setStyleSheet("color: #ff4797; font-size: 11px; font-weight: 700;")
         self.song_elapsed_label.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
         )
@@ -854,19 +889,16 @@ class ListenMoePlayer(QWidget):
         initial_tag = f"{str(cfg_st.get('name', 'LISTEN.MOE')).upper()} · STREAM"
         self.stream_tag_label = QLabel(initial_tag)
         self.stream_tag_label.setObjectName("sectionTitleLabel")
-        self.stream_tag_label.setStyleSheet(
-            "font-size: 9px; letter-spacing: 1.5px; color: rgba(255, 255, 255, 0.38);"
-        )
         self.stream_tag_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.stream_tag_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.song_time_label = QLabel("--:--")
         self.song_time_label.setObjectName("timeDisplayLabel")
-        self.song_time_label.setStyleSheet("color: #c4c9dc; font-size: 11px; font-weight: 700;")
         self.song_time_label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self.song_time_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._refresh_time_row_styles()
 
         time_row.addWidget(self.song_elapsed_label)
         time_row.addWidget(self.stream_tag_label, 1)
@@ -885,6 +917,20 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         self._set_album_cover_pixmap(None)
+
+    def _refresh_time_row_styles(self) -> None:
+        if hasattr(self, "song_elapsed_label") and self.song_elapsed_label is not None:
+            self.song_elapsed_label.setStyleSheet(
+                f"color: {PALETTE['accent_hover']}; font-size: 11px; font-weight: 700;"
+            )
+        if hasattr(self, "stream_tag_label") and self.stream_tag_label is not None:
+            self.stream_tag_label.setStyleSheet(
+                f"font-size: 9px; letter-spacing: 1.5px; color: {PALETTE['text_muted']};"
+            )
+        if hasattr(self, "song_time_label") and self.song_time_label is not None:
+            self.song_time_label.setStyleSheet(
+                f"color: {PALETTE['text_secondary']}; font-size: 11px; font-weight: 700;"
+            )
 
     def _toggle_lyrics(self, enabled):
         was_running = self._lyrics_transition.state() == QVariantAnimation.State.Running
@@ -2488,103 +2534,218 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def apply_theme(self) -> None:
+    def apply_theme(
+        self,
+        theme_id: Optional[str] = None,
+        custom_accent: Optional[str] = None,
+        use_custom_accent: Optional[bool] = None,
+        force: bool = False,
+    ) -> None:
         try:
             dark = True
-            accent = getattr(self, "COLOR_ACCENT", PALETTE["accent"])
-            app = QApplication.instance()
-            if not isinstance(app, QApplication):
-                return
-            app.setStyleSheet(get_cyber_moe_stylesheet(accent))
-
-            if hasattr(self, "playback_controls"):
-                self.playback_controls.hero_play.set_accent_color(accent)
-            if hasattr(self, "channel_switch"):
-                self.channel_switch.set_accent_color(accent)
-
-            # --- Icon Dynamic Tinting ---
-            # All icons now use the accent color (Magenta) for consistent branding
-            icon_color = QColor(accent)
-
-            # Use smaller icons for the top menu to facilitate edge alignment
-            sz_small = QSize(18, 18)
-            sz_std = QSize(24, 24)
-
-            self._icon_play = self._tint_icon(self._icon_play_raw, icon_color, sz_std)
-            self._icon_pause = self._tint_icon(self._icon_pause_raw, icon_color, sz_std)
-            self._icon_stop = self._tint_icon(self._icon_stop_raw, icon_color, sz_std)
-            self._icon_mute = self._tint_icon(self._icon_mute_raw, icon_color, sz_std)
-            self._icon_unmute = self._tint_icon(self._icon_unmute_raw, icon_color, sz_std)
-            self._icon_force_stop = self._tint_icon(self._icon_force_stop_raw, icon_color, sz_std)
-            self._icon_channel = self._tint_icon(self._icon_channel_raw, icon_color, sz_small)
-            self._icon_codec = self._tint_icon(self._icon_codec_raw, icon_color, sz_small)
-            self._icon_quit = self._tint_icon(self._icon_quit_raw, icon_color, sz_std)
-            # Branding: Use original colors for the logo, ensured square to prevent stretching
-            self._icon_app = self._make_icon_square(self._icon_app_raw)
-            # Tray-specific icon: fit the full logo in a square while maximizing visible area
-            self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
-            # Skip settings icon as requested (text-only for cleaner alignment)
-            # self._icon_settings = self._tint_icon(self._icon_settings_raw, icon_color, sz_small)
-
-            # Update metadata icon labels with the new tinted icons
-            if hasattr(self, "channel_icon_label"):
-                self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
-            if hasattr(self, "format_icon_label"):
-                self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
-
-            try:
-                self.setWindowIcon(self._icon_app)
-                if getattr(self, "_title_bar", None) is not None:
-                    self._title_bar.set_icon(self._icon_app)
-            except Exception:
-                pass
-
-            # Synchronize icons with TrayManager
-            if hasattr(self, "tray_mgr") and self.tray_mgr:
-                self.tray_mgr.update_icon(self._get_tray_icon())
-                self.tray_mgr.update_controls_icons(
-                    {
-                        "play": self._icon_play,
-                        "pause": self._icon_pause,
-                        "stop": self._icon_stop,
-                        "mute": self._icon_mute,
-                        "unmute": self._icon_unmute,
-                        "force_stop": self._icon_force_stop,
-                        "channel": self._icon_channel,
-                        "codec": self._icon_codec,
-                        "quit": self._icon_quit,
-                        "settings": self._icon_settings,
-                    }
+            if theme_id is None or isinstance(theme_id, bool):
+                effective_theme = str(
+                    self.settings.value(KEY_THEME, DEFAULT_THEME) or DEFAULT_THEME
                 )
-                # Refresh tray menu state to apply icons immediately
+                custom_on = self._get_bool(KEY_CUSTOM_ACCENT_ENABLED, False)
+                saved_accent = str(self.settings.value(KEY_CUSTOM_ACCENT, "") or "").strip()
+                effective_custom = saved_accent if (custom_on and saved_accent) else None
+            else:
+                effective_theme = str(theme_id).strip().lower() or DEFAULT_THEME
+                if use_custom_accent is False:
+                    effective_custom = None
+                else:
+                    effective_custom = str(custom_accent).strip() if custom_accent else None
+
+            target_state = resolve_theme_and_accent(effective_theme, effective_custom)
+            if (
+                not force
+                and getattr(self, "_applied_theme_state", None) == target_state
+                and PALETTE.get("theme_id") == target_state[0]
+                and PALETTE.get("accent") == target_state[1]
+            ):
+                return
+
+            apply_theme_palette(effective_theme, custom_accent=effective_custom)
+            self._applied_theme_state = target_state
+            accent = PALETTE["accent"]
+            self.COLOR_ACCENT = accent
+
+            app = QApplication.instance()
+            if isinstance(app, QApplication):
+                new_qss = get_cyber_moe_stylesheet()
+                if app.styleSheet() != new_qss:
+                    app.setStyleSheet(new_qss)
+
+            if hasattr(self, "_content_widget") and hasattr(self._content_widget, "refresh_theme"):
+                self._content_widget.refresh_theme()
+            if getattr(self, "_title_bar", None) is not None and hasattr(
+                self._title_bar, "refresh_theme"
+            ):
+                self._title_bar.refresh_theme()
+            if hasattr(self, "mini_button") and self.mini_button is not None:
+                self.mini_button.update()
+            if hasattr(self, "live_badge") and hasattr(self.live_badge, "refresh_theme"):
+                self.live_badge.refresh_theme()
+            if hasattr(self, "station_pill") and hasattr(self.station_pill, "refresh_theme"):
+                self.station_pill.refresh_theme()
+            if hasattr(self, "ambient_cover") and hasattr(self.ambient_cover, "refresh_theme"):
+                self.ambient_cover.refresh_theme()
+            if hasattr(self, "now_playing_title") and self.now_playing_title is not None:
+                self.now_playing_title.set_text_color(PALETTE["text_primary"])
+            if hasattr(self, "now_playing_artist") and self.now_playing_artist is not None:
+                self.now_playing_artist.set_text_color(PALETTE["text_secondary"])
+            if hasattr(self, "track_hover_group") and self.track_hover_group is not None:
+                self.track_hover_group.update()
+            if hasattr(self, "track_menu_btn") and self.track_menu_btn is not None:
+                self.track_menu_btn.update()
+            if hasattr(self, "history_button") and self.history_button is not None:
+                self.history_button.update()
+            if hasattr(self, "settings_button") and self.settings_button is not None:
+                self.settings_button.update()
+
+            if hasattr(self, "playback_controls") and self.playback_controls is not None:
+                if hasattr(self.playback_controls, "refresh_theme"):
+                    self.playback_controls.refresh_theme()
+                else:
+                    self.playback_controls.hero_play.set_accent_color(accent)
+            if hasattr(self, "channel_switch") and self.channel_switch is not None:
+                if hasattr(self.channel_switch, "refresh_theme"):
+                    self.channel_switch.refresh_theme()
+                else:
+                    self.channel_switch.set_accent_color(accent)
+
+            self._refresh_time_row_styles()
+
+            # --- Icon Dynamic Tinting (Cached by Accent, Brand App Icon Preserved) ---
+            if hasattr(self, "_icon_play_raw") and hasattr(self, "_tint_icon"):
+                tinted_cache = getattr(self, "_tinted_icons_cache", None)
+                if tinted_cache is None:
+                    tinted_cache = {}
+                    self._tinted_icons_cache = tinted_cache
+
+                cached_icons = tinted_cache.get(accent)
+                if cached_icons is None:
+                    icon_color = QColor(accent)
+                    sz_small = QSize(18, 18)
+                    sz_std = QSize(24, 24)
+                    cached_icons = {
+                        "play": self._tint_icon(self._icon_play_raw, icon_color, sz_std),
+                        "pause": self._tint_icon(self._icon_pause_raw, icon_color, sz_std),
+                        "stop": self._tint_icon(self._icon_stop_raw, icon_color, sz_std),
+                        "mute": self._tint_icon(self._icon_mute_raw, icon_color, sz_std),
+                        "unmute": self._tint_icon(self._icon_unmute_raw, icon_color, sz_std),
+                        "force_stop": self._tint_icon(
+                            self._icon_force_stop_raw, icon_color, sz_std
+                        ),
+                        "channel": self._tint_icon(self._icon_channel_raw, icon_color, sz_small),
+                        "codec": self._tint_icon(self._icon_codec_raw, icon_color, sz_small),
+                        "quit": self._tint_icon(self._icon_quit_raw, icon_color, sz_std),
+                    }
+                    tinted_cache[accent] = cached_icons
+
+                self._icon_play = cached_icons["play"]
+                self._icon_pause = cached_icons["pause"]
+                self._icon_stop = cached_icons["stop"]
+                self._icon_mute = cached_icons["mute"]
+                self._icon_unmute = cached_icons["unmute"]
+                self._icon_force_stop = cached_icons["force_stop"]
+                self._icon_channel = cached_icons["channel"]
+                self._icon_codec = cached_icons["codec"]
+                self._icon_quit = cached_icons["quit"]
+
+                if getattr(self, "_icon_app", None) is None or self._icon_app.isNull():
+                    self._icon_app = self._make_icon_square(self._icon_app_raw)
+                if getattr(self, "_icon_app_tray", None) is None or self._icon_app_tray.isNull():
+                    self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
+
+                if hasattr(self, "channel_icon_label"):
+                    self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
+                if hasattr(self, "format_icon_label"):
+                    self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
+
+                if not getattr(self, "_window_icon_applied", False):
+                    try:
+                        self.setWindowIcon(self._icon_app)
+                        if getattr(self, "_title_bar", None) is not None:
+                            self._title_bar.set_icon(self._icon_app)
+                        self._window_icon_applied = True
+                    except Exception:
+                        pass
+
+                if hasattr(self, "tray_mgr") and self.tray_mgr:
+                    if hasattr(self.tray_mgr, "refresh_theme"):
+                        self.tray_mgr.refresh_theme()
+                    self.tray_mgr.update_icon(self._get_tray_icon())
+                    self.tray_mgr.update_controls_icons(
+                        {
+                            "play": self._icon_play,
+                            "pause": self._icon_pause,
+                            "stop": self._icon_stop,
+                            "mute": self._icon_mute,
+                            "unmute": self._icon_unmute,
+                            "force_stop": self._icon_force_stop,
+                            "channel": self._icon_channel,
+                            "codec": self._icon_codec,
+                            "quit": self._icon_quit,
+                            "settings": self._icon_settings,
+                        }
+                    )
+                    try:
+                        self._update_tray_controls()
+                    except Exception:
+                        pass
+            elif (
+                hasattr(self, "tray_mgr")
+                and self.tray_mgr
+                and hasattr(self.tray_mgr, "refresh_theme")
+            ):
+                self.tray_mgr.refresh_theme()
+
+            # Synchronize custom progress bar, drawers, footer, lyrics, and mini-player
+            if hasattr(self, "song_progress") and self.song_progress is not None:
+                self.song_progress.refresh_theme()
+            if hasattr(self, "sleep_timer_widget") and hasattr(
+                self.sleep_timer_widget, "refresh_theme"
+            ):
+                self.sleep_timer_widget.refresh_theme()
+            if hasattr(self, "status_footer") and hasattr(self.status_footer, "refresh_theme"):
+                self.status_footer.refresh_theme()
+            if hasattr(self, "lyrics_panel") and self.lyrics_panel is not None:
+                if hasattr(self.lyrics_panel, "refresh_theme"):
+                    self.lyrics_panel.refresh_theme()
+                else:
+                    self.lyrics_panel.set_accent(accent)
+            if hasattr(self, "lyrics_button") and self.lyrics_button is not None:
+                if hasattr(self.lyrics_button, "refresh_theme"):
+                    self.lyrics_button.refresh_theme()
+                else:
+                    self.lyrics_button.set_accent_color(accent)
+            if hasattr(self, "mini_hud") and hasattr(self.mini_hud, "refresh_theme"):
+                self.mini_hud.refresh_theme()
+            history_pop = getattr(self, "_history_popover", None)
+            if history_pop is not None:
+                history_pop.update()
+            settings_dlg = getattr(self, "_settings_dlg", None)
+            if settings_dlg is not None and hasattr(settings_dlg, "refresh_theme"):
+                settings_dlg.refresh_theme()
+            about_dlg = getattr(self, "_about_dialog", None)
+            if about_dlg is not None and hasattr(about_dlg, "refresh_theme"):
+                about_dlg.refresh_theme()
+
+            # Apply dark titlebar on Windows once
+            if not getattr(self, "_win_dark_titlebar_applied", False):
                 try:
-                    self._update_tray_controls()
+                    self._apply_windows_titlebar_dark_mode(dark)
+                    self._win_dark_titlebar_applied = True
                 except Exception:
                     pass
-
-            # Synchronize custom progress bar color
-            if hasattr(self, "song_progress"):
-                self.song_progress.setAccentColor(accent)
-            if hasattr(self, "lyrics_panel"):
-                self.lyrics_panel.set_accent(accent)
-            if hasattr(self, "lyrics_button"):
-                self.lyrics_button.set_accent_color(accent)
-
-            try:
-                self._set_album_cover_pixmap(self._cover_cache.get(self._current_cover_url or ""))
-            except Exception:
-                self._set_album_cover_pixmap(None)
-
-            # Apply dark titlebar on Windows
-            try:
-                self._apply_windows_titlebar_dark_mode(dark)
-            except Exception:
-                pass
             try:
                 if hasattr(self, "dev_console") and self.dev_console and self.dev_console.is_open():
                     self.dev_console.apply_theme(dark)
             except Exception:
                 pass
+            self.update()
         except Exception:
             pass
 
@@ -2599,7 +2760,10 @@ class ListenMoePlayer(QWidget):
         """Remove compositor decorations from a QMessageBox and add a visible border."""
         if not _IS_WIN32:
             msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-            msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
+            msg.setStyleSheet(
+                f"QDialog {{ background-color: {PALETTE['bg_dialog']}; "
+                f"border: 1px solid {PALETTE['border_card']}; }}"
+            )
 
     def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:
@@ -3156,32 +3320,32 @@ class ListenMoePlayer(QWidget):
 
             menu = QMenu(self)
             menu.setStyleSheet(
-                """
-                QMenu {
-                    background-color: #0e111b;
-                    border: 1px solid rgba(255, 255, 255, 0.14);
+                f"""
+                QMenu {{
+                    background-color: {PALETTE["bg_popover"]};
+                    border: 1px solid {PALETTE["border_card"]};
                     border-radius: 8px;
                     padding: 6px 0px;
-                }
-                QMenu::item {
+                }}
+                QMenu::item {{
                     padding: 6px 24px 6px 10px;
                     border-radius: 5px;
                     margin: 1px 6px;
-                    color: #e2e8f0;
+                    color: {PALETTE["text_primary"]};
                     font-size: 12px;
-                }
-                QMenu::icon {
+                }}
+                QMenu::icon {{
                     padding-left: 4px;
-                }
-                QMenu::item:selected {
-                    background-color: rgba(236, 24, 108, 0.25);
-                    color: #ffffff;
-                }
-                QMenu::separator {
+                }}
+                QMenu::item:selected {{
+                    background-color: {PALETTE["accent_menu_hover"]};
+                    color: {PALETTE["text_primary"]};
+                }}
+                QMenu::separator {{
                     height: 1px;
-                    background-color: rgba(255, 255, 255, 0.08);
+                    background-color: {PALETTE["border_subtle"]};
                     margin: 4px 8px;
-                }
+                }}
                 """
             )
 
@@ -3276,6 +3440,8 @@ class ListenMoePlayer(QWidget):
                 if tab_idx != 0 and hasattr(self, "_settings_dlg") and self._settings_dlg:
                     self._settings_dlg.set_tab(tab_idx)
                     return
+                if hasattr(self, "_settings_dlg") and self._settings_dlg:
+                    self._settings_dlg._restore_persisted_theme()
                 self._close_embedded_settings()
                 return
 
@@ -3353,6 +3519,7 @@ class ListenMoePlayer(QWidget):
                 pass
 
             def _on_dialog_accepted():
+                self.apply_theme()
                 # Lingua: applica solo se effettivamente modificata
                 lang = self.settings.value(KEY_LANG, "it")
                 if lang != prev_lang:

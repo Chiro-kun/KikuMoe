@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 
 
 class _AnimatedSleepBtn(QPushButton):
@@ -141,21 +141,22 @@ class _AnimatedCountdownBadge(QLabel):
         rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
         grad = QLinearGradient(0.0, 0.0, w, 0.0)
         grad.setColorAt(0.0, QColor(PALETTE["accent"]))
-        grad.setColorAt(1.0, QColor("#ff4797"))
+        grad.setColorAt(1.0, QColor(PALETTE["accent_hover"]))
         painter.setBrush(grad)
         painter.setPen(QPen(QColor(255, 255, 255, 65), 1.0))
         painter.drawRoundedRect(rect, 9.5, 9.5)
 
-        # Live white dot on the left of the badge
+        # Live indicator dot on the left of the badge
+        on_col = QColor(PALETTE["on_accent"])
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#ffffff"))
+        painter.setBrush(on_col)
         painter.drawEllipse(QPointF(10.0, h / 2.0), 2.4, 2.4)
 
         font = QFont("Segoe UI")
         font.setPixelSize(11)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(on_col)
         painter.drawText(
             QRectF(15.0, 0.0, w - 18.0, h),
             Qt.AlignmentFlag.AlignCenter,
@@ -249,19 +250,9 @@ class SleepTimerWidget(QFrame):
         controls_row.setContentsMargins(0, 0, 0, 0)
         controls_row.setSpacing(6)
 
-        step_btn_style = (
-            "QPushButton { background-color: rgba(255, 255, 255, 0.06);"
-            " border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 9px;"
-            " padding: 0px; font-size: 14px; font-weight: 700; color: #d0d5e8; }"
-            " QPushButton:hover { background-color: rgba(236, 24, 108, 0.25);"
-            " border-color: #ec186c; color: #ffffff; }"
-            " QPushButton:pressed { background-color: rgba(236, 24, 108, 0.45); }"
-        )
-
         self.btn_minus = _AnimatedSleepBtn("−")
         self.btn_minus.setFixedSize(26, 25)
         self.btn_minus.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_minus.setStyleSheet(step_btn_style)
         self.btn_minus.clicked.connect(
             lambda: self.spin_minutes.setValue(max(1, self.spin_minutes.value() - 5))
         )
@@ -284,10 +275,10 @@ class SleepTimerWidget(QFrame):
         self.btn_plus = _AnimatedSleepBtn("+")
         self.btn_plus.setFixedSize(26, 25)
         self.btn_plus.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_plus.setStyleSheet(step_btn_style)
         self.btn_plus.clicked.connect(
             lambda: self.spin_minutes.setValue(min(480, self.spin_minutes.value() + 5))
         )
+        self._apply_step_button_styles()
 
         self.btn_start = _AnimatedSleepBtn("Start")
         self.btn_start.setObjectName("primaryButton")
@@ -349,16 +340,16 @@ class SleepTimerWidget(QFrame):
         rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
         p = self._active_progress
 
-        # 1. Base dark glass card + interpolated active magenta ambient glow
+        # 1. Base dark glass card + interpolated active accent ambient glow
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(18, 20, 32, 195))
+        painter.setBrush(surface_qcolor(195, "bg_surface"))
         painter.drawRoundedRect(rect, 14.0, 14.0)
 
         if p > 0.01:
             glow_grad = QLinearGradient(0.0, 0.0, w, h)
-            glow_grad.setColorAt(0.0, QColor(236, 24, 108, int(34 * p)))
-            glow_grad.setColorAt(0.6, QColor(236, 24, 108, int(12 * p)))
-            glow_grad.setColorAt(1.0, QColor(18, 20, 32, 0))
+            glow_grad.setColorAt(0.0, accent_qcolor(int(34 * p)))
+            glow_grad.setColorAt(0.6, accent_qcolor(int(12 * p)))
+            glow_grad.setColorAt(1.0, surface_qcolor(0, "bg_surface"))
             painter.setBrush(glow_grad)
             painter.drawRoundedRect(rect, 14.0, 14.0)
 
@@ -368,7 +359,7 @@ class SleepTimerWidget(QFrame):
             wave_w = w * 0.45
             if self._wave_dir >= 0:
                 wx = -wave_w + ease * (w + wave_w)
-                wave_col = QColor(236, 24, 108, int(90 * (1.0 - self._wave_progress)))
+                wave_col = accent_qcolor(int(90 * (1.0 - self._wave_progress)))
             else:
                 wx = w - ease * (w + wave_w)
                 wave_col = QColor(180, 195, 230, int(75 * (1.0 - self._wave_progress)))
@@ -382,22 +373,35 @@ class SleepTimerWidget(QFrame):
             painter.setBrush(w_grad)
             painter.drawRoundedRect(rect, 14.0, 14.0)
 
-        # 3. Animated Card Border (neutral glass -> glowing magenta when active)
-        r = int(255 + (236 - 255) * p)
-        g = int(255 + (24 - 255) * p)
-        b = int(255 + (108 - 255) * p)
+        # 3. Animated Card Border (neutral glass -> glowing accent when active)
+        act_col = QColor(PALETTE["accent"])
+        r = int(255 + (act_col.red() - 255) * p)
+        g = int(255 + (act_col.green() - 255) * p)
+        b = int(255 + (act_col.blue() - 255) * p)
         a = int(36 + (145 - 36) * p)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(r, g, b, a), 1.1 + 0.3 * p))
         painter.drawRoundedRect(rect, 14.0, 14.0)
         painter.end()
 
+    def _apply_step_button_styles(self) -> None:
+        step_btn_style = (
+            "QPushButton { background-color: rgba(255, 255, 255, 0.06);"
+            " border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 9px;"
+            " padding: 0px; font-size: 14px; font-weight: 700; color: #d0d5e8; }"
+            f" QPushButton:hover {{ background-color: {PALETTE['accent_menu_hover']};"
+            f" border-color: {PALETTE['accent']}; color: #ffffff; }}"
+            f" QPushButton:pressed {{ background-color: {PALETTE['accent_glow']}; }}"
+        )
+        self.btn_minus.setStyleSheet(step_btn_style)
+        self.btn_plus.setStyleSheet(step_btn_style)
+
     def _refresh_chip_styles(self) -> None:
         current_val = self.spin_minutes.value()
         for mins, chip in self._chip_map.items():
             if self._is_active and mins == current_val:
                 chip.setStyleSheet(
-                    f"QPushButton {{ background-color: rgba(236, 24, 108, 0.30);"
+                    f"QPushButton {{ background-color: {PALETTE['station_selected_hover']};"
                     f" border: 1px solid {PALETTE['accent']}; border-radius: 11px;"
                     " padding: 0px 6px; font-size: 11px; font-weight: 700; color: #ffffff; }"
                 )
@@ -406,13 +410,13 @@ class SleepTimerWidget(QFrame):
                     "QPushButton { background-color: rgba(255, 255, 255, 0.05);"
                     " border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 11px;"
                     " padding: 0px 6px; font-size: 11px; font-weight: 600; color: #9ea4ba; }"
-                    " QPushButton:hover { background-color: rgba(236, 24, 108, 0.20);"
-                    " border-color: #ec186c; color: #ffffff; }"
+                    f" QPushButton:hover {{ background-color: {PALETTE['station_selected_bg']};"
+                    f" border-color: {PALETTE['accent']}; color: #ffffff; }}"
                 )
 
     def _refresh_action_button_styles(self) -> None:
         active_colored_style = (
-            f"QPushButton {{ background-color: {PALETTE['accent']}; color: #ffffff;"
+            f"QPushButton {{ background-color: {PALETTE['accent']}; color: {PALETTE['on_accent']};"
             " border: none; border-radius: 12px; padding: 0px 10px;"
             " font-size: 11px; font-weight: 700; }"
             f" QPushButton:hover {{ background-color: {PALETTE['accent_hover']}; }}"
@@ -485,3 +489,10 @@ class SleepTimerWidget(QFrame):
         self.title_label.setText(title.upper())
         self.btn_start.setText(start_btn)
         self.btn_cancel.setText(cancel_btn)
+
+    def refresh_theme(self) -> None:
+        self._apply_step_button_styles()
+        self._refresh_action_button_styles()
+        self._refresh_chip_styles()
+        self.badge_countdown.update()
+        self.update()

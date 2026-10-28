@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import (
 
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.settings_dialog import GlassComboBox
-from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 
@@ -145,7 +145,7 @@ class _ConsolePillToggle(QCheckBox):
         painter.setBrush(QColor(255, 255, 255, bg_alpha))
         painter.setPen(
             QPen(
-                QColor(236, 24, 108, int(90 * p)) if p > 0.1 else QColor(255, 255, 255, 28),
+                accent_qcolor(int(90 * p)) if p > 0.1 else QColor(255, 255, 255, 28),
                 1.0,
             )
         )
@@ -158,9 +158,10 @@ class _ConsolePillToggle(QCheckBox):
         sw_y = (h - sw_h) / 2.0
         sw_rect = QRectF(sw_x, sw_y, sw_w, sw_h)
 
-        r = int(34 + (236 - 34) * p)
-        g = int(38 + (24 - 38) * p)
-        b = int(56 + (108 - 56) * p)
+        act_col = QColor(PALETTE["accent"])
+        r = int(34 + (act_col.red() - 34) * p)
+        g = int(38 + (act_col.green() - 38) * p)
+        b = int(56 + (act_col.blue() - 56) * p)
         painter.setBrush(QColor(r, g, b))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(sw_rect, sw_h / 2.0, sw_h / 2.0)
@@ -258,13 +259,13 @@ class _ConsoleActionButton(QPushButton):
         if self._role in ("primary", "active_pause"):
             bg = QColor(PALETTE["accent_hover"] if self._hover else PALETTE["accent"])
             border = QColor(255, 255, 255, 55)
-            fg = QColor("#ffffff")
+            fg = QColor(PALETTE["on_accent"])
         elif self._role == "danger":
             bg = QColor(255, 75, 95, 52 if self._hover else 22)
             border = QColor(255, 95, 115, 130 if self._hover else 65)
             fg = QColor("#ffffff" if self._hover else "#ff8595")
         else:
-            bg = QColor(236, 24, 108, 38) if self._hover else QColor(255, 255, 255, 16)
+            bg = accent_qcolor(38) if self._hover else QColor(255, 255, 255, 16)
             border = QColor(PALETTE["accent"]) if self._hover else QColor(255, 255, 255, 36)
             fg = QColor("#ffffff" if self._hover else "#dfe4f4")
 
@@ -489,7 +490,7 @@ class DevConsole(QObject):
                 f"● {self._t('dev_console_status_paused', 'PAUSED').upper()}"
             )
             self._status_badge.setStyleSheet(
-                f"background-color: rgba(236, 24, 108, 0.24);"
+                f"background-color: {PALETTE['accent_soft']};"
                 f" border: 1px solid {PALETTE['accent']};"
                 " border-radius: 9px; padding: 2px 9px;"
                 " color: #ffffff; font-size: 10px; font-weight: 800; letter-spacing: 0.8px;"
@@ -510,34 +511,53 @@ class DevConsole(QObject):
             base_qss = get_cyber_moe_stylesheet(PALETTE["accent"])
             console_qss = f"""
             QDialog#devConsoleRoot {{
-                background-color: #0c0e17;
+                background-color: {PALETTE["bg_dialog"]};
                 border: 1px solid rgba(255, 255, 255, 0.16);
                 border-radius: 12px;
             }}
             QFrame#devConsoleToolbar {{
-                background-color: #151826;
+                background-color: {PALETTE["bg_surface"]};
                 border: 1px solid rgba(255, 255, 255, 0.10);
                 border-top: 1px solid rgba(255, 255, 255, 0.16);
                 border-radius: 12px;
             }}
             QFrame#devConsoleFooter {{
-                background-color: #131624;
+                background-color: {PALETTE["bg_footer"]};
                 border: 1px solid rgba(255, 255, 255, 0.10);
                 border-radius: 12px;
             }}
             QTextEdit#devConsoleTerminal {{
-                background-color: #080a11;
-                color: #e2e7f8;
+                background-color: {PALETTE["bg_terminal"]};
+                color: {PALETTE["text_primary"]};
                 border: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 12px;
                 padding: 10px 12px;
                 font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
                 font-size: 12px;
                 selection-background-color: {PALETTE["accent"]};
-                selection-color: #ffffff;
+                selection-color: {PALETTE["on_accent"]};
             }}
             """
             self._console_dialog.setStyleSheet(base_qss + console_qss)
+            if self._lvl_lbl is not None:
+                self._lvl_lbl.setStyleSheet(
+                    f"font-size: 10px; font-weight: 800; letter-spacing: 0.9px;"
+                    f" color: {PALETTE['accent_hover']}; background: transparent; border: none;"
+                )
+            if self._title_bar is not None:
+                self._title_bar.refresh_theme()
+            if self._level_combo is not None and hasattr(self._level_combo, "refresh_theme"):
+                self._level_combo.refresh_theme()
+            for w in (
+                self._cb_autoscroll,
+                self._cb_wrap,
+                self._btn_pause,
+                self._btn_save,
+                self._btn_clear,
+                self._btn_copy,
+            ):
+                if w is not None:
+                    w.update()
             self._update_status_badge()
             try:
                 self._apply_windows_titlebar_dark_mode(True)

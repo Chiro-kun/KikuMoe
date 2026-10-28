@@ -137,6 +137,11 @@ class LyricsPanel(QWidget):
     def set_accent(self, accent):
         self._accent = accent
         self._update_styles(animate=False)
+        self.skeleton.update()
+        self.update()
+
+    def refresh_theme(self):
+        self.set_accent(PALETTE["accent"])
 
     def _clear(self):
         self.animation.stop()
