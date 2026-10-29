@@ -9,7 +9,7 @@ Features:
 """
 
 import math
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -837,6 +837,7 @@ class AmbientCoverCard(QWidget):
         self._num_wave_points = 64
         self._spectrum_bars: List[float] = [0.0] * self._num_wave_points
         self._bass_energy: float = 0.0
+        self._phase: float = 0.0
 
         # Precompute wave angular directions and base contour distances
         self._wave_thetas: List[float] = [
@@ -848,7 +849,7 @@ class AmbientCoverCard(QWidget):
         self._base_contour: List[float] = []
         self._recompute_base_contour()
 
-        self.setFixedHeight(self._cover_size + 36)
+        self.setFixedHeight(self._cover_size + 56)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self._fade_timer = QTimer(self)
@@ -874,7 +875,7 @@ class AmbientCoverCard(QWidget):
 
     def set_cover_size(self, size: int) -> None:
         self._cover_size = size
-        self.setFixedHeight(self._cover_size + 36)
+        self.setFixedHeight(self._cover_size + 56)
         self._recompute_base_contour()
         self._cached_rounded_cover = None
         self._prev_rounded_cover = None
@@ -912,6 +913,7 @@ class AmbientCoverCard(QWidget):
                 self._viz_timer.start()
 
     def _tick_visualizer(self) -> None:
+        self._phase += 0.06
         mags, bass = self._analyzer.get_spectrum(32)
         # Distribuzione simmetrica lungo il perimetro dell'onda:
         # Sub-bass/cassa in basso (indice 32), medi ai lati (16 e 48), acuti in alto (0 e 63)
@@ -930,19 +932,74 @@ class AmbientCoverCard(QWidget):
                     self._viz_timer.stop()
         self.update()
 
+    def _get_wave_gradient_colors(self, cur_amb: QColor) -> Tuple[QColor, QColor, QColor, QColor]:
+        """
+        Deriva una palette cyberpunk a 4 stop (evidenziazione, primario, secondario, shimmer)
+        perfettamente intonata al tema attivo o al colore dominante dell'album.
+        """
+        h = cur_amb.hsvHue()
+        s = cur_amb.hsvSaturation()
+        v = cur_amb.value()
+        if h < 0:
+            h = 338
+
+        is_cyber_moe = PALETTE.get("theme_id") in (None, "cyber_moe")
+        if is_cyber_moe and (self._cover_pixmap is None or abs(h - 338) < 15):
+            c_high = QColor("#ff4088")
+            c_prim = QColor(PALETTE.get("accent", "#ec186c"))
+            c_sec = QColor("#a855f7")
+            c_shim = QColor("#00d2ff")
+            return c_high, c_prim, c_sec, c_shim
+
+        c_high = QColor.fromHsv(
+            (h - 10) % 360,
+            min(255, max(180, int(s * 1.1))),
+            min(255, max(230, int(v * 1.18))),
+        )
+        c_prim = QColor(cur_amb)
+        c_sec = QColor.fromHsv(
+            (h + 42) % 360,
+            min(255, max(190, s)),
+            min(255, max(195, v)),
+        )
+        c_shim = QColor.fromHsv(
+            (h + 85) % 360,
+            min(255, max(160, int(s * 0.85))),
+            255,
+        )
+        return c_high, c_prim, c_sec, c_shim
+
     def _build_wave_path(
-        self, center: QPointF, extra_offset: float, amp_scale: float
+        self,
+        center: QPointF,
+        extra_offset: float,
+        amp_scale: float,
+        phase_shift: float = 0.0,
     ) -> QPainterPath:
         """Costruisce una spline chiusa fluida attorno alla sagoma arrotondata della cover."""
         pts: List[QPointF] = []
         n = self._num_wave_points
-        max_amp_x = max(22.0, self._cover_size * 0.16) * amp_scale
-        max_amp_y = max(8.0, self._cover_size * 0.055) * amp_scale
+
+        # Margine verticale disponibile per evitare assolutamente il taglio (clipping) sui bordi
+        vert_margin = max(12.0, (float(self.height()) - (self._cover_size + 12.0)) / 2.0)
+        # Limite di sicurezza massimo in Y: garantisce respiro ed evita clipping con bloom
+        max_allowed_dy = max(6.0, vert_margin - 5.5)
+
+        max_amp_x = max(24.0, self._cover_size * 0.16) * amp_scale
+        base_amp_y = min(max_allowed_dy * 0.65, max(7.0, self._cover_size * 0.055)) * amp_scale
+
         for i in range(n):
             mag = self._spectrum_bars[i]
+            theta = self._wave_thetas[i]
+            ambient_ripple = math.sin(self._phase * 2.0 + theta * 3.0 + phase_shift) * (
+                1.0 + 1.8 * self._bass_energy
+            )
             r = self._base_contour[i] + extra_offset
-            dx = (r + mag * max_amp_x) * self._wave_cos[i]
-            dy = (r + mag * max_amp_y) * self._wave_sin[i]
+            dx = (r + mag * max_amp_x + ambient_ripple * 1.2) * self._wave_cos[i]
+            # Esclusione clipping: l'ondulazione in Y resta sempre entro i limiti del widget
+            wave_dy = mag * base_amp_y + ambient_ripple * 0.55
+            total_dy = min(max_allowed_dy, extra_offset + wave_dy)
+            dy = (self._base_contour[i] + total_dy) * self._wave_sin[i]
             pts.append(QPointF(center.x() + dx, center.y() + dy))
 
         path = QPainterPath()
@@ -1149,31 +1206,73 @@ class AmbientCoverCard(QWidget):
         painter.drawEllipse(QPointF(0.0, 0.0), 1.0, 1.0)
         painter.restore()
 
-        # 2. Audio-Reactive Conformal Fluid Neon Wave around the cover
-        if self._visualizer_enabled and any(m > 0.005 for m in self._spectrum_bars):
-            wave_primary = self._build_wave_path(center, extra_offset=3.5, amp_scale=1.15)
+        # 2. Audio-Reactive Conformal Fluid Neon Wave with Multi-Stop Cyber Gradient
+        if self._visualizer_enabled and (
+            any(m > 0.005 for m in self._spectrum_bars) or self._bass_energy > 0.005
+        ):
+            c_high, c_prim, c_sec, c_shim = self._get_wave_gradient_colors(cur_amb)
 
-            # Translucent neon fill behind the primary wave
-            fill_col = QColor(cur_amb)
-            fill_col.setAlpha(min(45, int(15 + 40 * self._bass_energy)))
-            painter.setBrush(QBrush(fill_col))
+            wave_primary = self._build_wave_path(
+                center, extra_offset=4.0, amp_scale=1.15, phase_shift=0.0
+            )
+
+            # Translucent radial glow fill behind primary wave
+            fill_grad = QRadialGradient(center, side * 0.78)
+            f_col1 = QColor(c_prim)
+            f_col1.setAlpha(min(55, int(22 + 45 * self._bass_energy)))
+            f_col2 = QColor(c_sec)
+            f_col2.setAlpha(min(35, int(15 + 25 * self._bass_energy)))
+            f_col3 = QColor(c_shim)
+            f_col3.setAlpha(8)
+            fill_grad.setColorAt(0.0, f_col1)
+            fill_grad.setColorAt(0.65, f_col2)
+            fill_grad.setColorAt(1.0, f_col3)
+
+            painter.setBrush(QBrush(fill_grad))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawPath(wave_primary)
 
-            # Secondary resonant echo wave
-            wave_echo = self._build_wave_path(center, extra_offset=1.8, amp_scale=0.60)
-            echo_col = QColor(cur_amb)
-            echo_col.setAlpha(115)
+            # Secondary resonant echo wave with cyber gradient
+            wave_echo = self._build_wave_path(
+                center, extra_offset=1.5, amp_scale=0.55, phase_shift=1.4
+            )
+            echo_grad = QLinearGradient(cover_x, cover_y, cover_x + side, cover_y + side)
+            e1 = QColor(c_high)
+            e1.setAlpha(115)
+            e2 = QColor(c_sec)
+            e2.setAlpha(95)
+            e3 = QColor(c_shim)
+            e3.setAlpha(110)
+            echo_grad.setColorAt(0.0, e1)
+            echo_grad.setColorAt(0.60, e2)
+            echo_grad.setColorAt(1.0, e3)
+
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(echo_col, 1.8))
+            painter.setPen(QPen(QBrush(echo_grad), 1.8))
             painter.drawPath(wave_echo)
 
-            # Primary wave outer bloom pass
-            bloom_col = QColor(cur_amb)
-            bloom_col.setAlpha(min(255, int(110 + 90 * self._bass_energy)))
+            # Primary wave outer bloom pass with multi-stop linear gradient
+            bloom_grad = QLinearGradient(
+                cover_x - 20, cover_y - 10, cover_x + side + 20, cover_y + side + 10
+            )
+            alpha_bloom = min(255, int(120 + 85 * self._bass_energy))
+            b1 = QColor(c_high)
+            b1.setAlpha(alpha_bloom)
+            b2 = QColor(c_prim)
+            b2.setAlpha(alpha_bloom)
+            b3 = QColor(c_sec)
+            b3.setAlpha(alpha_bloom)
+            b4 = QColor(c_shim)
+            b4.setAlpha(alpha_bloom)
+
+            bloom_grad.setColorAt(0.0, b1)
+            bloom_grad.setColorAt(0.38, b2)
+            bloom_grad.setColorAt(0.72, b3)
+            bloom_grad.setColorAt(1.0, b4)
+
             bloom_pen = QPen(
-                bloom_col,
-                5.0,
+                QBrush(bloom_grad),
+                5.2,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,
                 Qt.PenJoinStyle.RoundJoin,
@@ -1181,10 +1280,15 @@ class AmbientCoverCard(QWidget):
             painter.setPen(bloom_pen)
             painter.drawPath(wave_primary)
 
-            # Primary wave core neon line
-            core_col = QColor("#ffffff")
+            # Primary wave core neon line with white-to-pastels gradient
+            core_grad = QLinearGradient(cover_x - 10, cover_y, cover_x + side + 10, cover_y + side)
+            core_grad.setColorAt(0.0, QColor("#ffffff"))
+            core_grad.setColorAt(0.35, QColor("#ffeef6"))
+            core_grad.setColorAt(0.70, QColor("#f3e8ff"))
+            core_grad.setColorAt(1.0, QColor("#e0f7ff"))
+
             core_pen = QPen(
-                core_col,
+                QBrush(core_grad),
                 2.2,
                 Qt.PenStyle.SolidLine,
                 Qt.PenCapStyle.RoundCap,

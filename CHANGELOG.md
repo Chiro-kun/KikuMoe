@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta3] - Unreleased
 
 ### Added
+- **Audio-Reactive Conformal Fluid Wave Visualizer with Multi-Stop Cyber Gradient**:
+  - Replaced radial line bars with a 60 FPS conformal spline wave undulating organically around the album cover pedestal without occluding artwork.
+  - Implemented pre-fader audio tapping in `audio/player_ffmpeg.py`, feeding raw unattenuated PCM to `AudioSpectrumAnalyzer` so visualizer reactivity remains at full dynamic range regardless of the user listening volume slider.
+  - Added real-time Automatic Gain Control (AGC) with peak envelope tracking and musical spectrum focus (bins 1..68, ~40Hz to ~11.7kHz) in `core/audio_analyzer.py`, ensuring punchy, expressive animation across all genres from heavy metal to acoustic lo-fi.
+  - Enhanced wave aesthetics with a multi-stop neon cyber gradient across the primary bloom stroke, specular core highlight, resonant echo wave, and translucent radial glow fill, dynamically harmonized with active theme palettes and artwork dominant colors.
+  - Resolved vertical wave clipping ("viene tagliato") with dynamic margin-aware boundary safety limits and adjusted album cover sizing (`180px`), completely eliminating boundary chopping while preserving full clearance at minimum window height.
 - **Cyber-Glass System Tray Header Card (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
   - Replaced the two plain disabled text lines with a rich, interactive cyber-glass card embedded at the top of the tray menu via `QWidgetAction`.
   - Displays high-resolution rounded album cover art (or fallback KikuMoe brand logo) with anti-aliased corner clipping.

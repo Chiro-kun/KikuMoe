@@ -702,7 +702,9 @@ class PlayerFFmpeg:
 
         if self._audio_tap is not None:
             try:
-                self._audio_tap(chunk_to_write)
+                # Pre-fader audio tap: visualizer receives raw unattenuated 100% dynamic
+                # range PCM stream regardless of user volume slider setting.
+                self._audio_tap(data)
             except Exception:
                 pass
 

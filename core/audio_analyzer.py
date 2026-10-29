@@ -48,6 +48,7 @@ class AudioSpectrumAnalyzer:
         self._smoothed: List[float] = []
         self._bass_smoothed: float = 0.0
         self._proc_phase: float = 0.0
+        self._peak_history: float = 0.12
 
     @staticmethod
     def _bit_reverse(n: int, bits: int) -> int:
@@ -73,6 +74,7 @@ class AudioSpectrumAnalyzer:
         self._smoothed = [0.0] * len(self._smoothed)
         self._bass_smoothed = 0.0
         self._proc_phase = 0.0
+        self._peak_history = 0.12
 
     def feed_pcm(self, data: bytes) -> None:
         """
@@ -159,7 +161,18 @@ class AudioSpectrumAnalyzer:
 
             # Compute normalized magnitudes for positive frequencies (bins 1..NUM_BINS)
             mags = [abs(fft_res[i]) / (self.FFT_SIZE / 2) for i in range(1, self.NUM_BINS)]
-            total_bins = len(mags)
+
+            # Restrict active spectrum to audible musical range (bins 1..68, ~40Hz to ~11.7kHz).
+            # Streaming codecs filter out frequencies >15kHz, so higher bins are silence.
+            usable_bins = min(68, len(mags))
+            active_mags = mags[:usable_bins]
+
+            # Adaptive AGC: peak tracker with fast attack and smooth decay
+            cur_peak = max(active_mags) if active_mags else 0.0
+            self._peak_history = max(0.06, max(self._peak_history * 0.985, cur_peak))
+            gain_scale = 1.0 / self._peak_history
+
+            total_bins = len(active_mags)
 
             # Logarithmic grouping of bins into num_bars (human ear perception)
             for b in range(num_bars):
@@ -168,13 +181,14 @@ class AudioSpectrumAnalyzer:
                 i_start = max(0, min(total_bins - 1, int(f_start)))
                 i_end = max(i_start + 1, min(total_bins, int(math.ceil(f_end))))
 
-                band_vals = mags[i_start:i_end]
+                band_vals = active_mags[i_start:i_end]
                 if band_vals:
                     val = math.sqrt(sum(v * v for v in band_vals) / len(band_vals))
+                    val = val * gain_scale
                     # High-frequency tilt compensation for natural pink noise roll-off
-                    tilt = 1.0 + 1.8 * (b / num_bars)
+                    tilt = 1.0 + 1.25 * (b / num_bars)
                     val *= tilt
-                    norm = min(1.0, math.log10(1.0 + 9.0 * min(1.0, val * 3.5)))
+                    norm = min(1.0, math.log10(1.0 + 9.0 * min(1.0, val * 1.35)))
                     raw_magnitudes[b] = norm
 
             # Bass energy: first ~15% of bars (sub-bass and kick drum punch)
@@ -205,8 +219,8 @@ class AudioSpectrumAnalyzer:
             current_bass = 0.0
 
         # Silky attack (fast rise) and exponential decay gravity physics
-        attack = 0.65
-        decay = 0.86
+        attack = 0.72
+        decay = 0.84
         for b in range(num_bars):
             target = raw_magnitudes[b]
             prev = self._smoothed[b]

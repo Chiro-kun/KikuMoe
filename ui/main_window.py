@@ -789,7 +789,7 @@ class ListenMoePlayer(QWidget):
         self.sleep_label.setVisible(False)
 
         # 2. Central Artwork Hero Showcase
-        self._album_cover_size = 196
+        self._album_cover_size = 180
         self.ambient_cover = AmbientCoverCard(cover_size=self._album_cover_size)
         viz_enabled = self._get_bool(KEY_VISUALIZER_ENABLED, DEFAULT_VISUALIZER_ENABLED)
         self.ambient_cover.set_visualizer_enabled(viz_enabled)
