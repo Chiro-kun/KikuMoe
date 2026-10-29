@@ -174,7 +174,7 @@ def test_ambient_cover_radial_visualizer(qapp):
 
     # Tick visualizer directly
     cover._tick_visualizer()
-    assert len(cover._spectrum_bars) == 48
+    assert len(cover._spectrum_bars) == 64
     assert any(m > 0.0 for m in cover._spectrum_bars)
 
     # Test feed PCM

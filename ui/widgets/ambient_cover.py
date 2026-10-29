@@ -785,6 +785,32 @@ class TrackHoverGroup(QWidget):
         painter.end()
 
 
+def _distance_to_rounded_rect(theta: float, width: float, height: float, r: float) -> float:
+    """Distanza dal centro al perimetro di un rettangolo arrotondato ad angolo theta."""
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    hw = width / 2.0
+    hh = height / 2.0
+    tx = hw / abs(cos_t) if abs(cos_t) > 1e-6 else 1e9
+    ty = hh / abs(sin_t) if abs(sin_t) > 1e-6 else 1e9
+    t_box = min(tx, ty)
+
+    px = t_box * abs(cos_t)
+    py = t_box * abs(sin_t)
+
+    dx = px - (hw - r)
+    dy = py - (hh - r)
+    if dx > 0 and dy > 0:
+        xc = hw - r
+        yc = hh - r
+        b = -2.0 * (abs(cos_t) * xc + abs(sin_t) * yc)
+        c_quad = xc * xc + yc * yc - r * r
+        disc = b * b - 4.0 * c_quad
+        if disc >= 0:
+            return (-b + math.sqrt(disc)) / 2.0
+    return t_box
+
+
 class AmbientCoverCard(QWidget):
     """
     Hero album cover card with frosted glass frame, dynamic ambient halo,
@@ -804,14 +830,25 @@ class AmbientCoverCard(QWidget):
         self._corner_radius = 16.0
         self._fade_progress: float = 1.0
 
-        # Audio-reactive radial halo visualizer
+        # Audio-reactive conformal fluid neon wave visualizer
         self._analyzer: AudioSpectrumAnalyzer = AudioSpectrumAnalyzer()
         self._visualizer_enabled: bool = True
         self._is_playing: bool = False
-        self._spectrum_bars: List[float] = [0.0] * 48
+        self._num_wave_points = 64
+        self._spectrum_bars: List[float] = [0.0] * self._num_wave_points
         self._bass_energy: float = 0.0
 
-        self.setFixedHeight(self._cover_size + 48)
+        # Precompute wave angular directions and base contour distances
+        self._wave_thetas: List[float] = [
+            i * 2.0 * math.pi / self._num_wave_points - math.pi / 2.0
+            for i in range(self._num_wave_points)
+        ]
+        self._wave_cos: List[float] = [math.cos(t) for t in self._wave_thetas]
+        self._wave_sin: List[float] = [math.sin(t) for t in self._wave_thetas]
+        self._base_contour: List[float] = []
+        self._recompute_base_contour()
+
+        self.setFixedHeight(self._cover_size + 36)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self._fade_timer = QTimer(self)
@@ -822,13 +859,23 @@ class AmbientCoverCard(QWidget):
         self._viz_timer.setInterval(16)
         self._viz_timer.timeout.connect(self._tick_visualizer)
 
+    def _recompute_base_contour(self) -> None:
+        """Precalcola la distanza dal centro al bordo della cornice per ogni punto angolare."""
+        frame_w = self._cover_size + 12.0
+        frame_h = self._cover_size + 12.0
+        frame_r = self._corner_radius + 5.0
+        self._base_contour = [
+            _distance_to_rounded_rect(t, frame_w, frame_h, frame_r) for t in self._wave_thetas
+        ]
+
     @property
     def ambient_color(self) -> QColor:
         return self._ambient_color
 
     def set_cover_size(self, size: int) -> None:
         self._cover_size = size
-        self.setFixedHeight(self._cover_size + 48)
+        self.setFixedHeight(self._cover_size + 36)
+        self._recompute_base_contour()
         self._cached_rounded_cover = None
         self._prev_rounded_cover = None
         self.update()
@@ -839,10 +886,10 @@ class AmbientCoverCard(QWidget):
             self._analyzer.feed_pcm(data)
 
     def set_visualizer_enabled(self, enabled: bool) -> None:
-        """Abilita o disabilita il visualizzatore halo radiale attorno alla cover."""
+        """Abilita o disabilita il visualizzatore a onda fluida attorno alla cover."""
         self._visualizer_enabled = bool(enabled)
         if not self._visualizer_enabled:
-            self._spectrum_bars = [0.0] * 48
+            self._spectrum_bars = [0.0] * self._num_wave_points
             self._bass_energy = 0.0
             if not self._fade_timer.isActive():
                 self._viz_timer.stop()
@@ -865,17 +912,48 @@ class AmbientCoverCard(QWidget):
                 self._viz_timer.start()
 
     def _tick_visualizer(self) -> None:
-        mags, bass = self._analyzer.get_spectrum(24)
-        # Specchia 24 bande per una simmetria radiale perfetta (48 barre a 360°)
-        self._spectrum_bars = mags[::-1] + mags
+        mags, bass = self._analyzer.get_spectrum(32)
+        # Distribuzione simmetrica lungo il perimetro dell'onda:
+        # Sub-bass/cassa in basso (indice 32), medi ai lati (16 e 48), acuti in alto (0 e 63)
+        bars = [0.0] * self._num_wave_points
+        for i in range(self._num_wave_points):
+            dist_from_bottom = abs(32 - i)
+            band_idx = min(31, dist_from_bottom)
+            bars[i] = mags[band_idx]
+        self._spectrum_bars = bars
         self._bass_energy = bass
         if not self._is_playing:
             if all(m < 0.005 for m in self._spectrum_bars) and self._bass_energy < 0.005:
-                self._spectrum_bars = [0.0] * 48
+                self._spectrum_bars = [0.0] * self._num_wave_points
                 self._bass_energy = 0.0
                 if not self._fade_timer.isActive():
                     self._viz_timer.stop()
         self.update()
+
+    def _build_wave_path(
+        self, center: QPointF, extra_offset: float, amp_scale: float
+    ) -> QPainterPath:
+        """Costruisce una spline chiusa fluida attorno alla sagoma arrotondata della cover."""
+        pts: List[QPointF] = []
+        n = self._num_wave_points
+        max_amp_x = max(22.0, self._cover_size * 0.16) * amp_scale
+        max_amp_y = max(8.0, self._cover_size * 0.055) * amp_scale
+        for i in range(n):
+            mag = self._spectrum_bars[i]
+            r = self._base_contour[i] + extra_offset
+            dx = (r + mag * max_amp_x) * self._wave_cos[i]
+            dy = (r + mag * max_amp_y) * self._wave_sin[i]
+            pts.append(QPointF(center.x() + dx, center.y() + dy))
+
+        path = QPainterPath()
+        path.moveTo(pts[0])
+        for i in range(n):
+            p_curr = pts[i]
+            p_next = pts[(i + 1) % n]
+            mid = QPointF((p_curr.x() + p_next.x()) / 2.0, (p_curr.y() + p_next.y()) / 2.0)
+            path.quadTo(p_curr, mid)
+        path.closeSubpath()
+        return path
 
     def set_cover(self, pixmap: Optional[QPixmap]) -> None:
         new_key = pixmap.cacheKey() if (pixmap is not None and not pixmap.isNull()) else None
@@ -1071,39 +1149,49 @@ class AmbientCoverCard(QWidget):
         painter.drawEllipse(QPointF(0.0, 0.0), 1.0, 1.0)
         painter.restore()
 
-        # 2. Audio-Reactive Radial Halo Bars around the cover
+        # 2. Audio-Reactive Conformal Fluid Neon Wave around the cover
         if self._visualizer_enabled and any(m > 0.005 for m in self._spectrum_bars):
-            num_bars = len(self._spectrum_bars)
-            base_r = side * 0.44
-            max_len = max(24.0, side * 0.20)
+            wave_primary = self._build_wave_path(center, extra_offset=3.5, amp_scale=1.15)
 
-            for i, mag in enumerate(self._spectrum_bars):
-                if mag < 0.005:
-                    continue
-                angle = (i / num_bars) * 2.0 * math.pi - math.pi / 2.0
-                cos_a = math.cos(angle)
-                sin_a = math.sin(angle)
+            # Translucent neon fill behind the primary wave
+            fill_col = QColor(cur_amb)
+            fill_col.setAlpha(min(45, int(15 + 40 * self._bass_energy)))
+            painter.setBrush(QBrush(fill_col))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawPath(wave_primary)
 
-                bar_len = 8.0 + mag * max_len
-                r0 = base_r
-                r1 = base_r + bar_len
+            # Secondary resonant echo wave
+            wave_echo = self._build_wave_path(center, extra_offset=1.8, amp_scale=0.60)
+            echo_col = QColor(cur_amb)
+            echo_col.setAlpha(115)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(echo_col, 1.8))
+            painter.drawPath(wave_echo)
 
-                p0 = QPointF(center.x() + cos_a * r0, center.y() + sin_a * r0)
-                p1 = QPointF(center.x() + cos_a * r1, center.y() + sin_a * r1)
+            # Primary wave outer bloom pass
+            bloom_col = QColor(cur_amb)
+            bloom_col.setAlpha(min(255, int(110 + 90 * self._bass_energy)))
+            bloom_pen = QPen(
+                bloom_col,
+                5.0,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+            painter.setPen(bloom_pen)
+            painter.drawPath(wave_primary)
 
-                # Outer bloom pass
-                bloom_col = QColor(cur_amb)
-                bloom_col.setAlpha(min(255, int(60 + 95 * mag)))
-                bloom_pen = QPen(bloom_col, 4.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-                painter.setPen(bloom_pen)
-                painter.drawLine(p0, p1)
-
-                # Core beam pass
-                core_col = QColor("#ffffff") if mag > 0.82 else QColor(cur_amb)
-                core_col.setAlpha(min(255, int(185 + 70 * mag)))
-                core_pen = QPen(core_col, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-                painter.setPen(core_pen)
-                painter.drawLine(p0, p1)
+            # Primary wave core neon line
+            core_col = QColor("#ffffff")
+            core_pen = QPen(
+                core_col,
+                2.2,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+            painter.setPen(core_pen)
+            painter.drawPath(wave_primary)
 
         # 3. Outer Frosted Glass Frame Pedestal around the cover
         frame_rect = QRectF(cover_x - 6, cover_y - 6, side + 12, side + 12)
