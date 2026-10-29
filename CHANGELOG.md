@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added real-time Automatic Gain Control (AGC) with peak envelope tracking and musical spectrum focus (bins 1..68, ~40Hz to ~11.7kHz) in `core/audio_analyzer.py`, ensuring punchy, expressive animation across all genres from heavy metal to acoustic lo-fi.
   - Enhanced wave aesthetics with a multi-stop neon cyber gradient across the primary bloom stroke, specular core highlight, resonant echo wave, and translucent radial glow fill, dynamically harmonized with active theme palettes and artwork dominant colors.
   - Resolved vertical wave clipping ("viene tagliato") with dynamic margin-aware boundary safety limits and adjusted album cover sizing (`180px`), completely eliminating boundary chopping while preserving full clearance at minimum window height.
+  - Configured visualizer toggle to default to disabled (`off`) in `core/constants.py` and `ui/widgets/ambient_cover.py`.
 - **Cyber-Glass System Tray Header Card (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
   - Replaced the two plain disabled text lines with a rich, interactive cyber-glass card embedded at the top of the tray menu via `QWidgetAction`.
   - Displays high-resolution rounded album cover art (or fallback KikuMoe brand logo) with anti-aliased corner clipping.

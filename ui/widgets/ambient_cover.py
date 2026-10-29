@@ -832,7 +832,7 @@ class AmbientCoverCard(QWidget):
 
         # Audio-reactive conformal fluid neon wave visualizer
         self._analyzer: AudioSpectrumAnalyzer = AudioSpectrumAnalyzer()
-        self._visualizer_enabled: bool = True
+        self._visualizer_enabled: bool = False
         self._is_playing: bool = False
         self._num_wave_points = 64
         self._spectrum_bars: List[float] = [0.0] * self._num_wave_points

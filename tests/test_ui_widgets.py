@@ -158,9 +158,12 @@ def test_cover_halo_fades_before_widget_edges(qapp, width):
 def test_ambient_cover_radial_visualizer(qapp):
     cover = AmbientCoverCard(cover_size=196)
     cover.show()
-    assert cover.is_visualizer_enabled() is True
+    # Default is disabled (off)
+    assert cover.is_visualizer_enabled() is False
 
     # Test toggling visualizer
+    cover.set_visualizer_enabled(True)
+    assert cover.is_visualizer_enabled() is True
     cover.set_visualizer_enabled(False)
     assert cover.is_visualizer_enabled() is False
     assert all(m == 0.0 for m in cover._spectrum_bars)
