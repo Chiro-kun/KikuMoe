@@ -67,6 +67,7 @@ from core.constants import (
     DEFAULT_DISCORD_CLIENT_ID,
     DEFAULT_STATION,
     DEFAULT_THEME,
+    DEFAULT_VISUALIZER_ENABLED,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -94,6 +95,7 @@ from core.constants import (
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_VISUALIZER_ENABLED,
     KEY_VOLUME,
     KEY_WINDOW_GEOMETRY,
     ORG_NAME,
@@ -789,6 +791,8 @@ class ListenMoePlayer(QWidget):
         # 2. Central Artwork Hero Showcase
         self._album_cover_size = 196
         self.ambient_cover = AmbientCoverCard(cover_size=self._album_cover_size)
+        viz_enabled = self._get_bool(KEY_VISUALIZER_ENABLED, DEFAULT_VISUALIZER_ENABLED)
+        self.ambient_cover.set_visualizer_enabled(viz_enabled)
         self.ambient_cover.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.ambient_cover.customContextMenuRequested.connect(self._show_track_context_menu)
         self._artwork_row = QHBoxLayout()
@@ -1241,6 +1245,8 @@ class ListenMoePlayer(QWidget):
                 mpv_err or "unavailable",
                 vlc_err or "unavailable",
             )
+        if hasattr(player, "set_audio_tap") and hasattr(self, "ambient_cover"):
+            player.set_audio_tap(self.ambient_cover.feed_pcm)
         return player
 
     def _init_audio_backend(self):
@@ -2494,6 +2500,8 @@ class ListenMoePlayer(QWidget):
                 )
             if hasattr(self, "live_badge"):
                 self.live_badge.set_playing(bool(force_playing))
+            if hasattr(self, "ambient_cover"):
+                self.ambient_cover.set_playing(bool(force_playing))
         except Exception:
             pass
 

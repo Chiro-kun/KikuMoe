@@ -103,6 +103,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dynamic theme accent styling and increased font size (`11px` bold) for tray section headers (*FINESTRA*, *PREFERENZE*), harmonizing section titles with the active theme and custom accent.
   - Inward subcontrol positioning for submenu chevrons (`QMenu::right-arrow { right: 12px; }`), preventing `>` arrows from colliding with the right border.
   - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
+- **Audio-Reactive Radial Halo Visualizer (`core/audio_analyzer.py`, `ui/widgets/ambient_cover.py`)**:
+  - Implemented an audio-reactive 360-degree **Radial Halo Visualizer** radiating around the album cover art and vinyl disc placeholder, bringing dynamic Cyber-Moe concert energy to playback.
+  - Zero binary dependencies: high-performance pure-Python Radix-2 Cooley-Tukey iterative FFT (<0.2 ms execution budget per frame) with Hanning windowing and logarithmic frequency grouping into 48 symmetric perceptual bands.
+  - Silky physical smoothing with instant attack (0.65) and exponential gravity decay (0.86), preventing harsh flickering and ensuring smooth natural movement at 60 FPS.
+  - Audio-reactive ambient nebula glow: kick-drum / sub-bass energy dynamically pulses the radial background glow behind the artwork in real time.
+  - Thread-safe zero-overhead PCM tap on `PlayerFFmpeg` with procedural harmonic generator fallback when streaming via VLC/MPV or when muted.
+  - Fully integrated with dynamic themes and custom accents: visualizer halo and glow inherit `PALETTE["accent"]` or artwork dominant colors automatically.
+  - Configurable toggle switch (*Visualizzatore audio radiale*) in *Impostazioni → Aspetto* with instant live preview.
 
 ### Fixed
 - **System Tray Section Header Alignment**: Corrected the horizontal alignment of disabled section headers (*FINESTRA*, *PREFERENZE*) in `ui/tray_manager.py` by applying `margin-left: -13px; padding-left: 0px;` on `QMenu::item:disabled`, bringing section titles into perfect optical alignment with the icon column.

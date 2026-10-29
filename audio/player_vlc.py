@@ -579,6 +579,10 @@ class PlayerVLC:
         except Exception:
             self._emit("error", None)
 
+    def set_audio_tap(self, callback: Any | None) -> None:
+        """Interfaccia opzionale tap audio (non implementata per VLC)."""
+        self._audio_tap = callback
+
     def get_volume(self) -> int:
         return self._volume
 

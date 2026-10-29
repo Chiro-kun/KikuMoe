@@ -158,3 +158,7 @@ THEME_NEON_MATRIX = "neon_matrix"
 THEME_OCEAN_CYAN = "ocean_cyan"
 DEFAULT_THEME = THEME_CYBER_MOE
 DEFAULT_ACCENT_COLOR = "#ec186c"
+
+# Audio visualizer (Radial Halo)
+KEY_VISUALIZER_ENABLED = "visualizer_enabled"
+DEFAULT_VISUALIZER_ENABLED = True

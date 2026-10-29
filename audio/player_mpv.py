@@ -554,6 +554,10 @@ class PlayerMPV:
         except Exception:
             pass
 
+    def set_audio_tap(self, callback: Any | None) -> None:
+        """Interfaccia opzionale tap audio (non implementata per MPV)."""
+        self._audio_tap = callback
+
     def get_volume(self) -> int:
         return self._volume
 

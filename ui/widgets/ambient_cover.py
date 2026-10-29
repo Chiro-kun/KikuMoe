@@ -9,7 +9,7 @@ Features:
 """
 
 import math
-from typing import Optional
+from typing import List, Optional
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -38,6 +38,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from core.audio_analyzer import AudioSpectrumAnalyzer
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 
 
@@ -803,12 +804,23 @@ class AmbientCoverCard(QWidget):
         self._corner_radius = 16.0
         self._fade_progress: float = 1.0
 
-        self.setFixedHeight(self._cover_size + 26)
+        # Audio-reactive radial halo visualizer
+        self._analyzer: AudioSpectrumAnalyzer = AudioSpectrumAnalyzer()
+        self._visualizer_enabled: bool = True
+        self._is_playing: bool = False
+        self._spectrum_bars: List[float] = [0.0] * 48
+        self._bass_energy: float = 0.0
+
+        self.setFixedHeight(self._cover_size + 48)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self._fade_timer = QTimer(self)
         self._fade_timer.setInterval(16)
         self._fade_timer.timeout.connect(self._tick_fade)
+
+        self._viz_timer = QTimer(self)
+        self._viz_timer.setInterval(16)
+        self._viz_timer.timeout.connect(self._tick_visualizer)
 
     @property
     def ambient_color(self) -> QColor:
@@ -816,9 +828,53 @@ class AmbientCoverCard(QWidget):
 
     def set_cover_size(self, size: int) -> None:
         self._cover_size = size
-        self.setFixedHeight(self._cover_size + 26)
+        self.setFixedHeight(self._cover_size + 48)
         self._cached_rounded_cover = None
         self._prev_rounded_cover = None
+        self.update()
+
+    def feed_pcm(self, data: bytes) -> None:
+        """Invia i chunk PCM audio decodificati all'analizzatore di spettro."""
+        if self._visualizer_enabled:
+            self._analyzer.feed_pcm(data)
+
+    def set_visualizer_enabled(self, enabled: bool) -> None:
+        """Abilita o disabilita il visualizzatore halo radiale attorno alla cover."""
+        self._visualizer_enabled = bool(enabled)
+        if not self._visualizer_enabled:
+            self._spectrum_bars = [0.0] * 48
+            self._bass_energy = 0.0
+            if not self._fade_timer.isActive():
+                self._viz_timer.stop()
+        elif self._is_playing and not self._viz_timer.isActive():
+            self._viz_timer.start()
+        self.update()
+
+    def is_visualizer_enabled(self) -> bool:
+        return self._visualizer_enabled
+
+    def set_playing(self, playing: bool) -> None:
+        """Notifica lo stato di riproduzione per sincronizzare l'animazione o il decadimento."""
+        self._is_playing = bool(playing)
+        self._analyzer.set_playing(playing)
+        if self._is_playing and self._visualizer_enabled:
+            if not self._viz_timer.isActive():
+                self._viz_timer.start()
+        elif not self._is_playing:
+            if not self._viz_timer.isActive() and any(m > 0.005 for m in self._spectrum_bars):
+                self._viz_timer.start()
+
+    def _tick_visualizer(self) -> None:
+        mags, bass = self._analyzer.get_spectrum(24)
+        # Specchia 24 bande per una simmetria radiale perfetta (48 barre a 360°)
+        self._spectrum_bars = mags[::-1] + mags
+        self._bass_energy = bass
+        if not self._is_playing:
+            if all(m < 0.005 for m in self._spectrum_bars) and self._bass_energy < 0.005:
+                self._spectrum_bars = [0.0] * 48
+                self._bass_energy = 0.0
+                if not self._fade_timer.isActive():
+                    self._viz_timer.stop()
         self.update()
 
     def set_cover(self, pixmap: Optional[QPixmap]) -> None:
@@ -989,19 +1045,21 @@ class AmbientCoverCard(QWidget):
         cover_y = (h - side) // 2
         ease = 1.0 - ((1.0 - self._fade_progress) ** 3)
 
-        # 1. Rich Dynamic Ambient Halo behind the artwork (smoothly color-interpolated)
+        # 1. Rich Dynamic Ambient Halo behind artwork (audio-reactive & color-interpolated)
         cur_amb = _lerp_color(self._prev_ambient_color, self._ambient_color, ease)
-        glow_radius = max(side * 0.85, 155.0)
+        bass_boost = (self._bass_energy * 32.0) if self._visualizer_enabled else 0.0
+        glow_radius = max(side * 0.85, 155.0) + bass_boost
         glow_x = min(glow_radius, max(1.0, w / 2.0 - 1.0))
         glow_y = min(glow_radius, max(1.0, h / 2.0 - 1.0))
         center = QPointF(w / 2.0, h / 2.0)
         rad_grad = QRadialGradient(QPointF(0.0, 0.0), 1.0)
 
+        alpha_boost = int(50 * self._bass_energy) if self._visualizer_enabled else 0
         glow_col = QColor(cur_amb)
-        glow_col.setAlpha(95)
+        glow_col.setAlpha(min(255, 95 + alpha_boost))
         rad_grad.setColorAt(0.0, glow_col)
         glow_mid = QColor(cur_amb)
-        glow_mid.setAlpha(42)
+        glow_mid.setAlpha(min(255, 42 + alpha_boost // 2))
         rad_grad.setColorAt(0.58, glow_mid)
         rad_grad.setColorAt(1.0, QColor(0, 0, 0, 0))
 
@@ -1013,7 +1071,41 @@ class AmbientCoverCard(QWidget):
         painter.drawEllipse(QPointF(0.0, 0.0), 1.0, 1.0)
         painter.restore()
 
-        # 2. Outer Frosted Glass Frame Pedestal around the cover
+        # 2. Audio-Reactive Radial Halo Bars around the cover
+        if self._visualizer_enabled and any(m > 0.005 for m in self._spectrum_bars):
+            num_bars = len(self._spectrum_bars)
+            base_r = side * 0.44
+            max_len = max(24.0, side * 0.20)
+
+            for i, mag in enumerate(self._spectrum_bars):
+                if mag < 0.005:
+                    continue
+                angle = (i / num_bars) * 2.0 * math.pi - math.pi / 2.0
+                cos_a = math.cos(angle)
+                sin_a = math.sin(angle)
+
+                bar_len = 8.0 + mag * max_len
+                r0 = base_r
+                r1 = base_r + bar_len
+
+                p0 = QPointF(center.x() + cos_a * r0, center.y() + sin_a * r0)
+                p1 = QPointF(center.x() + cos_a * r1, center.y() + sin_a * r1)
+
+                # Outer bloom pass
+                bloom_col = QColor(cur_amb)
+                bloom_col.setAlpha(min(255, int(60 + 95 * mag)))
+                bloom_pen = QPen(bloom_col, 4.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(bloom_pen)
+                painter.drawLine(p0, p1)
+
+                # Core beam pass
+                core_col = QColor("#ffffff") if mag > 0.82 else QColor(cur_amb)
+                core_col.setAlpha(min(255, int(185 + 70 * mag)))
+                core_pen = QPen(core_col, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(core_pen)
+                painter.drawLine(p0, p1)
+
+        # 3. Outer Frosted Glass Frame Pedestal around the cover
         frame_rect = QRectF(cover_x - 6, cover_y - 6, side + 12, side + 12)
         frame_path = QPainterPath()
         frame_path.addRoundedRect(frame_rect, self._corner_radius + 5, self._corner_radius + 5)
@@ -1021,7 +1113,7 @@ class AmbientCoverCard(QWidget):
         painter.setPen(QPen(QColor(255, 255, 255, 26), 1.0))
         painter.drawPath(frame_path)
 
-        # 3. Deep Drop Shadow under cover
+        # 4. Deep Drop Shadow under cover
         shadow_rect = QRectF(cover_x + 1, cover_y + 4, side - 2, side)
         shadow_path = QPainterPath()
         shadow_path.addRoundedRect(shadow_rect, self._corner_radius + 1, self._corner_radius + 1)
@@ -1029,7 +1121,7 @@ class AmbientCoverCard(QWidget):
         painter.setBrush(QColor(0, 0, 0, 125))
         painter.drawPath(shadow_path)
 
-        # 4. Draw Rounded Cover Art with 60 FPS Crossfade + Subtle Scale-In
+        # 5. Draw Rounded Cover Art with 60 FPS Crossfade + Subtle Scale-In
         if self._cached_rounded_cover is None or self._cached_rounded_cover.width() != side:
             self._cached_rounded_cover = self._render_rounded_cover(side)
 
@@ -1058,7 +1150,7 @@ class AmbientCoverCard(QWidget):
 
         painter.restore()
 
-        # 5. Inner Specular Rim Outline
+        # 6. Inner Specular Rim Outline
         border_path = QPainterPath()
         border_path.addRoundedRect(
             QRectF(cover_x + 0.5, cover_y + 0.5, side - 1, side - 1),

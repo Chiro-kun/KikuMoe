@@ -69,6 +69,7 @@ from core.constants import (
     DEFAULT_ACCENT_COLOR,
     DEFAULT_STATION,
     DEFAULT_THEME,
+    DEFAULT_VISUALIZER_ENABLED,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -90,6 +91,7 @@ from core.constants import (
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_VISUALIZER_ENABLED,
     ORG_NAME,
     STATION_ANISON,
     STATION_GENSOKYO,
@@ -1182,8 +1184,23 @@ class SettingsDialog(QDialog):
         self.custom_accent_row.setVisible(self.chk_custom_accent.isChecked())
         theme_lay.addWidget(self.custom_accent_row)
 
+        self.chk_visualizer = AnimatedToggleSwitch(
+            "Visualizzatore audio radiale" if is_it else "Radial audio visualizer"
+        )
+        def_viz = "true" if DEFAULT_VISUALIZER_ENABLED else "false"
+        self.chk_visualizer.setChecked(
+            self.settings.value(KEY_VISUALIZER_ENABLED, def_viz) == "true"
+        )
+        self.chk_visualizer.setToolTip(
+            "Mostra un alone audio-reattivo attorno alla copertina dell'album"
+            if is_it
+            else "Show an audio-reactive halo around the album cover art"
+        )
+        theme_lay.addWidget(self.chk_visualizer)
+
         self.cmb_theme.currentIndexChanged.connect(self._on_theme_combo_changed)
         self.chk_custom_accent.toggled.connect(self._on_custom_accent_toggled)
+        self.chk_visualizer.toggled.connect(self._on_visualizer_toggled)
         self.btn_accent_swatch.color_changed.connect(self._on_custom_accent_color_changed)
         self.btn_accent_reset.clicked.connect(self._on_reset_custom_accent)
 
@@ -1591,6 +1608,13 @@ class SettingsDialog(QDialog):
         if self._reloading_settings:
             return
         self._preview_current_theme()
+
+    def _on_visualizer_toggled(self, checked: bool) -> None:
+        self.settings.setValue(KEY_VISUALIZER_ENABLED, "true" if checked else "false")
+        host = self._host_window or self.window()
+        if host and hasattr(host, "ambient_cover"):
+            host.ambient_cover.set_visualizer_enabled(checked)
+        self.settings_changed.emit()
 
     def _on_custom_accent_color_changed(self, _hex_color: str) -> None:
         if self._reloading_settings:
@@ -2037,6 +2061,9 @@ class SettingsDialog(QDialog):
             "theme": self.cmb_theme.currentData() or DEFAULT_THEME,
             "custom_accent_enabled": self.chk_custom_accent.isChecked(),
             "custom_accent": self.btn_accent_swatch.color(),
+            "visualizer": (
+                self.chk_visualizer.isChecked() if hasattr(self, "chk_visualizer") else True
+            ),
             "autoplay": self.chk_autoplay.isChecked(),
             "discord_rpc": self.chk_discord_rpc.isChecked(),
             "discord_id": self.txt_discord_client_id.text().strip(),
@@ -2144,6 +2171,10 @@ class SettingsDialog(QDialog):
             "true" if self.chk_custom_accent.isChecked() else "false",
         )
         self.settings.setValue(KEY_CUSTOM_ACCENT, self.btn_accent_swatch.color())
+        if hasattr(self, "chk_visualizer"):
+            self.settings.setValue(
+                KEY_VISUALIZER_ENABLED, "true" if self.chk_visualizer.isChecked() else "false"
+            )
         self.settings.setValue(KEY_AUTOPLAY, "true" if self.chk_autoplay.isChecked() else "false")
         self.settings.setValue(
             KEY_DISCORD_RPC_ENABLED, "true" if self.chk_discord_rpc.isChecked() else "false"

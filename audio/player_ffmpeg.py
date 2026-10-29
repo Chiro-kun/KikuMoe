@@ -92,6 +92,7 @@ class PlayerFFmpeg:
         # Track pause state explicitly
         self._paused: bool = False
         self._init_error: str | None = None
+        self._audio_tap: Callable[[bytes], None] | None = None
         self.log = get_logger("PlayerFFmpeg")
         self._ffmpeg_bin = _find_ffmpeg_bin()
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.11.0")
@@ -442,6 +443,10 @@ class PlayerFFmpeg:
     def set_mute(self, mute: bool) -> None:
         self._muted = bool(mute)
 
+    def set_audio_tap(self, callback: Callable[[bytes], None] | None) -> None:
+        """Registra callback per intercettare i chunk PCM raw per il visualizzatore."""
+        self._audio_tap = callback
+
     def get_volume(self) -> int:
         return self._user_volume
 
@@ -694,6 +699,12 @@ class PlayerFFmpeg:
                 chunk_to_write = struct.pack(f"<{n_samples}h", *vol_samples)
             except Exception:
                 chunk_to_write = data
+
+        if self._audio_tap is not None:
+            try:
+                self._audio_tap(chunk_to_write)
+            except Exception:
+                pass
 
         try:
             stream.write(chunk_to_write, exception_on_underflow=False)
