@@ -100,6 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Modernized section headers (`FINESTRA`, `PREFERENZE`) with bold, uppercase, tracked typography and polished item spacing.
   - Deep glassmorphism background (`#141624`), subtle borders (`PALETTE["border_card"]`), and smooth accent hover highlights (`PALETTE["accent_menu_hover"]`).
   - Full-box edge-to-edge menu item hover state (`margin: 0px`, `padding: 0px` on menu): removed inset horizontal margins and bottom padding so hover states fill the entire width and reach the bottom of the tray menu seamlessly.
+  - Dynamic theme accent styling and increased font size (`11px` bold) for tray section headers (*FINESTRA*, *PREFERENZE*), harmonizing section titles with the active theme and custom accent.
+  - Inward subcontrol positioning for submenu chevrons (`QMenu::right-arrow { right: 12px; }`), preventing `>` arrows from colliding with the right border.
   - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
 
 ### Fixed

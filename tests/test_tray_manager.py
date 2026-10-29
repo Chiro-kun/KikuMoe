@@ -392,8 +392,12 @@ def test_tray_menu_hover_cyber_glass_styling(qapp):
     assert "padding: 0px;" in ss
     # Icon must have left padding to avoid touching menu border
     assert "padding-left: 10px;" in ss
-    # Section headers must align with icon column
+    # Submenu right arrow must have inward offset to avoid touching border
+    assert "right: 12px;" in ss
+    # Section headers must align with icon column and have theme accent + 11px bold size
     assert "margin-left: -13px;" in ss
+    assert "font-size: 11px;" in ss
+    assert PALETTE["accent"] in ss
     # Must use theme accent menu hover
     assert PALETTE["accent_menu_hover"] in ss
     # Card controls hover style check
@@ -406,6 +410,7 @@ def test_tray_menu_hover_cyber_glass_styling(qapp):
     tray_mgr.refresh_theme()
     ss_ocean = menu.styleSheet()
     assert PALETTE["accent_menu_hover"] in ss_ocean
+    assert PALETTE["accent"] in ss_ocean
 
     apply_theme_palette("cyber_moe")
     tray_mgr.refresh_theme()

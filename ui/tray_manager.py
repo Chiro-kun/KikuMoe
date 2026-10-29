@@ -605,7 +605,7 @@ class TrayManager(QObject):
 
                     # Font per intestazioni di sezione (maiuscole, bold, letter-spaced)
                     header_font = QFont(menu.font())
-                    header_font.setPointSize(9)
+                    header_font.setPointSize(10)
                     header_font.setBold(True)
                     header_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
 
@@ -1077,7 +1077,7 @@ class TrayManager(QObject):
             hover_rgba = PALETTE.get("accent_menu_hover", "rgba(236, 24, 108, 0.25)")
             bg_pop = PALETTE.get("bg_popover", "#141624")
             text_pri = PALETTE.get("text_primary", "#ffffff")
-            text_mut = PALETTE.get("text_muted", "#8E95A5")
+            accent = PALETTE.get("accent", "#EC186C")
             padding_val = "2px 0px" if is_submenu else "0px"
             menu.setStyleSheet(
                 f"""
@@ -1089,7 +1089,7 @@ class TrayManager(QObject):
                     spacing: 0px;
                 }}
                 QMenu::item {{
-                    padding: 7px 24px 7px 6px;
+                    padding: 7px 28px 7px 6px;
                     margin: 0px;
                     border: none;
                     color: {text_pri};
@@ -1098,6 +1098,11 @@ class TrayManager(QObject):
                 QMenu::icon {{
                     padding-left: 10px;
                     padding-right: 6px;
+                }}
+                QMenu::right-arrow {{
+                    subcontrol-origin: margin;
+                    subcontrol-position: center right;
+                    right: 12px;
                 }}
                 QMenu::item:enabled:selected {{
                     background-color: {hover_rgba};
@@ -1108,11 +1113,12 @@ class TrayManager(QObject):
                     color: #ffffff;
                 }}
                 QMenu::item:disabled {{
-                    color: {text_mut};
+                    color: {accent};
                     background-color: transparent;
                     margin-left: -13px;
                     padding: 8px 12px 3px 0px;
-                    font-size: 10px;
+                    font-size: 11px;
+                    font-weight: bold;
                 }}
                 QMenu::separator {{
                     height: 1px;
