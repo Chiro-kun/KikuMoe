@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Callable
 
 from PyQt6.QtCore import (
@@ -22,6 +23,7 @@ from PyQt6.QtGui import (
     QEnterEvent,
     QFont,
     QFontMetrics,
+    QHideEvent,
     QIcon,
     QKeyEvent,
     QLinearGradient,
@@ -113,6 +115,17 @@ class RememberCheckBox(QCheckBox):
         self._animation.setStartValue(self._progress)
         self._animation.setEndValue(1.0 if checked else 0.0)
         self._animation.start()
+
+    def stop_animation(self) -> None:
+        if (
+            hasattr(self, "_animation")
+            and self._animation.state() == QVariantAnimation.State.Running
+        ):
+            self._animation.stop()
+
+    def hideEvent(self, a0: QHideEvent | None) -> None:
+        self.stop_animation()
+        super().hideEvent(a0)
 
     def enterEvent(self, event: QEnterEvent | None) -> None:
         self._hovered = True
@@ -304,16 +317,38 @@ class CloseConfirmDialog(QDialog):
         painter.drawRoundedRect(rect, 12.0, 12.0)
         painter.end()
 
+    def _stop_animations(self) -> None:
+        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
+            self._anim_group.stop()
+        if hasattr(self, "cb_remember") and hasattr(self.cb_remember, "stop_animation"):
+            self.cb_remember.stop_animation()
+
+    def hideEvent(self, a0: QHideEvent | None) -> None:
+        self._stop_animations()
+        super().hideEvent(a0)
+
+    def reject(self) -> None:
+        self._stop_animations()
+        super().reject()
+
+    def accept(self) -> None:
+        self._stop_animations()
+        super().accept()
+
     def _animate_entrance(self) -> None:
         if self._entrance_animated:
             return
         self._entrance_animated = True
 
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            self.setWindowOpacity(1.0)
+            self._anim_group = QParallelAnimationGroup(self)
+            return
+
         target_pos = self.pos()
         start_pos = QPoint(target_pos.x(), target_pos.y() - 10)
 
-        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
-            self._anim_group.stop()
+        self._stop_animations()
 
         self.setWindowOpacity(0.0)
         self.move(start_pos)
@@ -345,12 +380,11 @@ class CloseConfirmDialog(QDialog):
             return
         self._is_closing = True
 
-        if not self.isVisible():
+        self._stop_animations()
+
+        if not self.isVisible() or os.environ.get("QT_QPA_PLATFORM") == "offscreen":
             callback()
             return
-
-        if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
-            self._anim_group.stop()
 
         group = QParallelAnimationGroup(self)
 
@@ -374,13 +408,15 @@ class CloseConfirmDialog(QDialog):
         group.start()
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        if self._is_closing:
+        if (
+            self._is_closing
+            or os.environ.get("QT_QPA_PLATFORM") == "offscreen"
+            or not self.isVisible()
+        ):
+            self._stop_animations()
             if a0:
                 a0.accept()
-            return
-        if not self.isVisible():
-            if a0:
-                a0.accept()
+            super().closeEvent(a0)
             return
         if a0:
             a0.ignore()

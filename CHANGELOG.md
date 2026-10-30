@@ -143,6 +143,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configurable toggle switch (*Visualizzatore audio radiale*) in *Impostazioni → Aspetto* with instant live preview.
 
 ### Fixed
+- **CI Headless Offscreen Segmentation Fault & Close Dialog Lifecycle (`ui/close_dialog.py`, `tests/test_ui_widgets.py`)**:
+  - Resolved CI segmentation fault (exit code 139) occurring in `test_close_dialog_remember_checkbox_alignment_and_animation`.
+  - Replaced native window `grab()` with safe offscreen `QPixmap.render(painter)` in `RememberCheckBox` and `GlassComboBox` popup unit tests, preventing `QOffscreenBackingStore` null-pointer dereferences in headless / offscreen Qt environments.
+  - Implemented safe animation lifecycle management in `CloseConfirmDialog`: automatically stops running entrance/exit parallel animation groups and checkbox variant animations in `hideEvent`, `reject()`, `accept()`, and `closeEvent()`.
+  - In offscreen mode (`QT_QPA_PLATFORM=offscreen`), entrance and exit animations complete synchronously without leaving orphan property animations ticking on deallocated dialogs during pytest teardown.
+  - Added deterministic cleanup (`dlg.close()`, `dlg.deleteLater()`, `qapp.processEvents()`) to all close dialog test fixtures.
 - **System Tray Section Header Alignment**: Corrected the horizontal alignment of disabled section headers (*FINESTRA*, *PREFERENZE*) in `ui/tray_manager.py` by applying `margin-left: -13px; padding-left: 0px;` on `QMenu::item:disabled`, bringing section titles into perfect optical alignment with the icon column.
 - **System Tray Icon Left Padding**: Added explicit `padding-left: 10px;` and `padding-right: 6px;` to `QMenu::icon` in `ui/tray_manager.py`, preventing action icons from touching the left menu border when full-width hover is active.
 - **Color Picker UI & SpinBox Truncation**: Replaced Qt's unlocalized, fixed-width non-native `QColorDialog` with the bespoke `AccentColorPickerDialog`, resolving cut-off spinbox digits (`3:`, `2!`), native window titlebar clash, and archaic Windows 95 layout.

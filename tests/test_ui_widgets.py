@@ -423,7 +423,9 @@ def test_glass_combo_box_rendering_and_layout(qapp):
             assert rects[i].y() + rects[i].height() <= rects[i + 1].y()
 
         # Visual corner transparency test (no white background box)
-        pix = popup.grab()
+        pix = QPixmap(popup.size())
+        pix.fill(Qt.GlobalColor.transparent)
+        popup.render(pix)
         img = pix.toImage()
         assert img.pixelColor(0, 0).alpha() == 0
         # Card interior must remain solid/opaque (never transparent)
@@ -666,32 +668,45 @@ def test_close_confirm_dialog(qapp):
 
     # 1. Tray selection
     dlg = CloseConfirmDialog()
-    dlg.cb_remember.setChecked(True)
-    dlg._on_tray()
-    assert dlg.action == "tray"
-    assert dlg.remember is True
-    dlg.close()
+    try:
+        dlg.cb_remember.setChecked(True)
+        dlg._on_tray()
+        assert dlg.action == "tray"
+        assert dlg.remember is True
+    finally:
+        dlg.close()
+        dlg.deleteLater()
 
     # 2. Quit selection
     dlg2 = CloseConfirmDialog()
-    dlg2.cb_remember.setChecked(False)
-    dlg2._on_quit()
-    assert dlg2.action == "quit"
-    assert dlg2.remember is False
-    dlg2.close()
+    try:
+        dlg2.cb_remember.setChecked(False)
+        dlg2._on_quit()
+        assert dlg2.action == "quit"
+        assert dlg2.remember is False
+    finally:
+        dlg2.close()
+        dlg2.deleteLater()
 
     # 3. Cancel selection
     dlg3 = CloseConfirmDialog()
-    dlg3._on_cancel()
-    assert dlg3.action == "cancel"
-    dlg3.close()
+    try:
+        dlg3._on_cancel()
+        assert dlg3.action == "cancel"
+    finally:
+        dlg3.close()
+        dlg3.deleteLater()
 
     # 4. Entrance animation
     dlg_anim = CloseConfirmDialog()
-    dlg_anim.show()
-    assert dlg_anim._entrance_animated is True
-    assert dlg_anim._anim_group is not None
-    dlg_anim.close()
+    try:
+        dlg_anim.show()
+        assert dlg_anim._entrance_animated is True
+        assert dlg_anim._anim_group is not None
+    finally:
+        dlg_anim.close()
+        dlg_anim.deleteLater()
+        qapp.processEvents()
 
 
 def test_close_dialog_remember_checkbox_alignment_and_animation(qapp):
@@ -700,25 +715,33 @@ def test_close_dialog_remember_checkbox_alignment_and_animation(qapp):
     from ui.close_dialog import CloseConfirmDialog
 
     dlg = CloseConfirmDialog()
-    dlg.show()
-    qapp.processEvents()
-    assert dlg.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-    checkbox_x = dlg.cb_remember.mapTo(dlg, QPoint(0, 0)).x()
-    prompt_x = dlg.prompt_label.mapTo(dlg, QPoint(0, 0)).x()
-    assert checkbox_x == prompt_x
-    dlg.cb_remember.click()
-    assert dlg.cb_remember.isChecked()
-    assert dlg.cb_remember._animation.endValue() == 1.0
-    dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
-    assert dlg.cb_remember._progress == 1.0
-    image = dlg.cb_remember.grab().toImage()
-    check_color = image.pixelColor(8, image.height() // 2)
-    assert check_color.red() > check_color.green()
-    dlg.cb_remember.click()
-    assert not dlg.cb_remember.isChecked()
-    dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
-    assert dlg.cb_remember._progress == 0.0
-    dlg._on_cancel()
+    try:
+        dlg.show()
+        qapp.processEvents()
+        assert dlg.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        checkbox_x = dlg.cb_remember.mapTo(dlg, QPoint(0, 0)).x()
+        prompt_x = dlg.prompt_label.mapTo(dlg, QPoint(0, 0)).x()
+        assert checkbox_x == prompt_x
+        dlg.cb_remember.click()
+        assert dlg.cb_remember.isChecked()
+        assert dlg.cb_remember._animation.endValue() == 1.0
+        dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
+        assert dlg.cb_remember._progress == 1.0
+        pixmap = QPixmap(dlg.cb_remember.size())
+        pixmap.fill(Qt.GlobalColor.transparent)
+        dlg.cb_remember.render(pixmap)
+        image = pixmap.toImage()
+        check_color = image.pixelColor(8, image.height() // 2)
+        assert check_color.red() > check_color.green()
+        dlg.cb_remember.click()
+        assert not dlg.cb_remember.isChecked()
+        dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
+        assert dlg.cb_remember._progress == 0.0
+        dlg._on_cancel()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
 
 
 def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
