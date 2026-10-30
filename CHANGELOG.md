@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configured visualizer toggle to default to disabled (`off`) in `core/constants.py` and `ui/widgets/ambient_cover.py`.
 - **Settings Dialog Typography & Discord ID Alignment (`ui/settings_dialog.py`)**:
   - Removed bold weight from settings field labels ("Tema interfaccia", "Selezione lingua", "Stazione radio", "Canale di default", "ID applicazione Discord") by refining `QLabel#settingsFieldLabel` to `font-weight: 500`, harmonizing typography with comboboxes, switches, and input fields.
-  - Aligned Discord Application ID input width with standard combobox sizing (`200px`) and constrained row height to `30px`, eliminating horizontal blank voids and excessive vertical gaps when toggling Discord Rich Presence.
+  - Aligned Discord Application ID input width with standard combobox sizing and resolved border clipping by adjusting text input height to 30px within a 36px row container, matching the height and vertical rhythm of adjacent toggle switch rows.
 - **Visualizer Idle Resting Halo State (`ui/widgets/ambient_cover.py`)**:
   - Ensured the visualizer wave remains visible as an elegant, gently undulating ambient resting halo around the album cover even when playback is stopped, paused, or awaiting audio data, rather than staying invisible until the first audio chunk arrives.
   - Keeps the 60 FPS animation timer active in calm idle breathing mode (`_phase += 0.02`) when the visualizer is enabled, providing smooth resting contours that dynamically surge and pulse as soon as music playback begins.

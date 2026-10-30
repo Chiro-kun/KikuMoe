@@ -1225,8 +1225,9 @@ class SettingsDialog(QDialog):
         )
         self.txt_discord_client_id.setPlaceholderText("KikuMoe (default)")
         self.txt_discord_client_id.setFixedWidth(combo_w)
+        self.txt_discord_client_id.setFixedHeight(30)
         self.discord_id_row = QWidget()
-        self.discord_id_row.setFixedHeight(30)
+        self.discord_id_row.setFixedHeight(36)
         discord_id_layout = self._make_field_row(
             self.i18n.t("settings_discord_id"), self.txt_discord_client_id
         )
