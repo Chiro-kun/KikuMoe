@@ -414,3 +414,155 @@ def test_tray_menu_hover_cyber_glass_styling(qapp):
 
     apply_theme_palette("cyber_moe")
     tray_mgr.refresh_theme()
+
+
+def test_tray_manager_dynamic_station_formats_and_channels(qapp):
+    from core.constants import KEY_STATION, STATION_GENSOKYO, STATION_LISTENMOE, STATION_TRUCKERSFM
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    format_cb = MagicMock()
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n, on_change_format=format_cb)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # 1. Listen.moe default
+    assert "Vorbis" in tray_mgr._format_actions
+    assert "Opus" in tray_mgr._format_actions
+    assert "MP3" in tray_mgr._format_actions
+    assert tray_mgr._format_actions["Vorbis"].isChecked() is True
+    assert tray_mgr._act_ch.isVisible() is True
+
+    # 2. Switch to TruckersFM
+    parent.settings.setValue(KEY_STATION, STATION_TRUCKERSFM)
+    parent.settings.setValue(KEY_FORMAT, "MP3 320k")
+    tray_mgr.sync_stream_settings(station=STATION_TRUCKERSFM, fmt="MP3 320k")
+
+    assert "MP3 320k" in tray_mgr._format_actions
+    assert "MP3 128k" in tray_mgr._format_actions
+    assert "AAC 64k" in tray_mgr._format_actions
+    assert "Vorbis" not in tray_mgr._format_actions
+    assert tray_mgr._format_actions["MP3 320k"].isChecked() is True
+    assert tray_mgr._format_actions["MP3 128k"].isChecked() is False
+    assert tray_mgr._act_ch.isVisible() is False
+
+    # Trigger format change to MP3 128k
+    tray_mgr._format_actions["MP3 128k"].trigger()
+    assert format_cb.call_count == 1
+    assert format_cb.call_args[0][0] == "MP3 128k"
+
+    # 3. Switch to Gensokyo
+    parent.settings.setValue(KEY_STATION, STATION_GENSOKYO)
+    parent.settings.setValue(KEY_FORMAT, "Opus 64k")
+    tray_mgr.sync_stream_settings(station=STATION_GENSOKYO, fmt="Opus 64k")
+
+    assert "MP3 256k" in tray_mgr._format_actions
+    assert "MP3 128k" in tray_mgr._format_actions
+    assert "Opus 64k" in tray_mgr._format_actions
+    assert tray_mgr._format_actions["Opus 64k"].isChecked() is True
+    assert tray_mgr._format_actions["MP3 256k"].isChecked() is False
+    assert tray_mgr._act_ch.isVisible() is False
+
+    # 4. Switch back to Listen.moe
+    parent.settings.setValue(KEY_STATION, STATION_LISTENMOE)
+    parent.settings.setValue(KEY_FORMAT, "Opus")
+    tray_mgr.sync_stream_settings(station=STATION_LISTENMOE, channel="K-POP", fmt="Opus")
+
+    assert "Vorbis" in tray_mgr._format_actions
+    assert "Opus" in tray_mgr._format_actions
+    assert tray_mgr._format_actions["Opus"].isChecked() is True
+    assert tray_mgr._act_ch.isVisible() is True
+    assert tray_mgr._channel_actions["K-POP"].isChecked() is True
+
+
+def test_tray_manager_linux_native_dbus_layout(qapp, monkeypatch):
+    from PyQt6.QtGui import QColor, QPixmap
+
+    monkeypatch.setenv("KIKUMOE_TEST_LINUX_TRAY", "1")
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    show_cb = MagicMock()
+    play_cb = MagicMock()
+    stop_cb = MagicMock()
+    mute_cb = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_show_window=show_cb,
+        on_toggle_play_pause=play_cb,
+        on_stop_stream=stop_cb,
+        on_toggle_mute=mute_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    menu = tray_mgr._tray.contextMenu()
+    actions = menu.actions()
+
+    # On Linux / DBus: Card action is NOT in menu (avoiding DBusmenu drop)
+    assert tray_mgr._card_action not in actions
+
+    # Native actions ARE in the menu
+    assert tray_mgr._act_info_now in actions
+    assert tray_mgr._act_info_session in actions
+    assert tray_mgr._act_hdr_playback in actions
+    assert tray_mgr._act_play_pause in actions
+    assert tray_mgr._act_stop in actions
+    assert tray_mgr._act_mute in actions
+    assert tray_mgr._act_history in actions
+
+    # Update tooltip and cover
+    tray_mgr.update_tooltip("LISTEN.moe\nRenai Circulation — Kana Hanazawa\n02:15")
+    assert "Renai Circulation — Kana Hanazawa" in tray_mgr._act_info_now.text()
+    assert "LISTEN.MOE • 02:15" in tray_mgr._act_info_session.text()
+
+    # Cover art icon thumbnail set on _act_info_now
+    pm = QPixmap(64, 64)
+    pm.fill(QColor("cyan"))
+    tray_mgr.set_cover_pixmap(pm)
+    assert not tray_mgr._act_info_now.icon().isNull()
+
+    # Triggering info action raises window
+    tray_mgr._act_info_now.trigger()
+    assert show_cb.call_count == 1
+
+    # Playback action triggers
+    tray_mgr._act_play_pause.trigger()
+    assert play_cb.call_count == 1
+    tray_mgr._act_stop.trigger()
+    assert stop_cb.call_count == 1
+    tray_mgr._act_mute.trigger()
+    assert mute_cb.call_count == 1
+
+
+def test_tray_manager_activation_clicks(qapp):
+    from PyQt6.QtWidgets import QSystemTrayIcon
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    show_cb = MagicMock()
+    play_cb = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_show_window=show_cb,
+        on_toggle_play_pause=play_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Left click (Trigger)
+    tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.Trigger)
+    assert show_cb.call_count == 1
+
+    # Double click
+    tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+    assert show_cb.call_count == 2
+
+    # Middle click
+    tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.MiddleClick)
+    assert play_cb.call_count == 1

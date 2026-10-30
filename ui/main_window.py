@@ -2213,6 +2213,16 @@ class ListenMoePlayer(QWidget):
         if clean_id == STATION_LISTENMOE and channel:
             self.settings.setValue(KEY_CHANNEL, channel)
 
+        # Check and adapt format for the newly selected station
+        cfg = get_station_config(clean_id)
+        current_fmt = str(self.settings.value(KEY_FORMAT, ""))
+        formats = cfg.get("formats", [])
+        if formats and current_fmt not in formats:
+            new_fmt = str(cfg.get("default_format", formats[0]))
+            self.settings.setValue(KEY_FORMAT, new_fmt)
+            if hasattr(self, "format_value") and self.format_value:
+                self.format_value.setText(new_fmt)
+
         # 1. Update station cyber-pill
         if hasattr(self, "station_pill") and self.station_pill:
             self.station_pill.update_state(clean_id, target_channel)
@@ -2248,6 +2258,11 @@ class ListenMoePlayer(QWidget):
                 if self.player and self.player.is_playing():
                     self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
                     self.play_stream(is_retry=False)
+
+        try:
+            self.update_tray_texts()
+        except Exception:
+            pass
 
     def _on_channel_switch_changed(self, new_channel: str) -> None:
         try:
@@ -4027,8 +4042,9 @@ class ListenMoePlayer(QWidget):
                 return
             self.tray_mgr.update_tooltip(self._get_tray_tooltip())
             self.tray_mgr.sync_stream_settings(
-                str(self.settings.value(KEY_CHANNEL, "J-POP")),
-                str(self.settings.value(KEY_FORMAT, "Vorbis")),
+                channel=str(self.settings.value(KEY_CHANNEL, "J-POP")),
+                fmt=str(self.settings.value(KEY_FORMAT, "Vorbis")),
+                station=str(self.settings.value(KEY_STATION, DEFAULT_STATION)),
             )
         except Exception:
             pass
@@ -4195,6 +4211,13 @@ class ListenMoePlayer(QWidget):
         try:
             try:
                 self.settings.setValue(key, value)
+            except Exception:
+                pass
+            try:
+                if key == KEY_FORMAT and hasattr(self, "format_value") and self.format_value:
+                    self.format_value.setText(value)
+                elif key == KEY_CHANNEL and hasattr(self, "channel_value") and self.channel_value:
+                    self.channel_value.setText(value)
             except Exception:
                 pass
             try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, QTimer
@@ -31,6 +32,7 @@ from PyQt6.QtWidgets import (
     QWidgetAction,
 )
 
+from core.config import get_station_config
 from core.constants import (
     DEFAULT_STATION,
     KEY_CHANNEL,
@@ -555,6 +557,8 @@ class TrayManager(QObject):
         self._act_show: QAction | None = None
         self._act_ch: QAction | None = None
         self._act_fmt: QAction | None = None
+        self._sub_channel: QMenu | None = None
+        self._sub_format: QMenu | None = None
         self._channel_actions: dict[str, QAction] = {}
         self._format_actions: dict[str, QAction] = {}
         self._grp_channel: QActionGroup | None = None
@@ -609,7 +613,13 @@ class TrayManager(QObject):
                     header_font.setBold(True)
                     header_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
 
-                    # 1. Now Playing Cyber-Glass Header Card
+                    is_win = sys.platform.startswith("win")
+                    force_linux = bool(os.environ.get("KIKUMOE_TEST_LINUX_TRAY", "0") == "1")
+                    show_native_playback = (not is_win) or force_linux
+                    force_card = bool(os.environ.get("KIKUMOE_TRAY_FORCE_CARD", "0") == "1")
+                    show_card = (not show_native_playback) or force_card
+
+                    # 1. Now Playing Cyber-Glass Header Card (shown on Windows / direct Qt menus)
                     self._card = TrayNowPlayingCard(
                         parent=None,
                         menu=menu,
@@ -626,50 +636,71 @@ class TrayManager(QObject):
                     )
                     self._card_action = QWidgetAction(menu)
                     self._card_action.setDefaultWidget(self._card)
-                    menu.addAction(self._card_action)
+                    if show_card:
+                        menu.addAction(self._card_action)
 
-                    # Backward-compatible dummy hidden actions
+                    # Now Playing info actions (visible on Linux / DBus where QWidgetAction drops)
                     self._act_info_now = QAction("", self._parent)
-                    self._act_info_now.setVisible(False)
-                    self._act_info_session = QAction("", self._parent)
-                    self._act_info_session.setVisible(False)
+                    self._act_info_now.setVisible(show_native_playback)
+                    self._act_info_now.triggered.connect(self._handle_show_window)
+                    if show_native_playback:
+                        menu.addAction(self._act_info_now)
 
-                    menu.addSeparator()
+                    self._act_info_session = QAction("", self._parent)
+                    self._act_info_session.setVisible(show_native_playback)
+                    self._act_info_session.triggered.connect(self._handle_show_window)
+                    if show_native_playback:
+                        menu.addAction(self._act_info_session)
+                        menu.addSeparator()
 
                     accent = PALETTE.get("accent", "#EC186C")
                     text_sec = PALETTE.get("text_secondary", "#CBD5E1")
 
-                    # Backward-compatible playback actions (handled by the Now Playing Card widget)
-                    self._act_hdr_playback = QAction("", self._parent)
-                    self._act_hdr_playback.setVisible(False)
+                    # Playback section actions (visible on Linux / DBus; handled by card on Windows)
+                    txt_hdr_pb = self._t("tray_section_playback", "Riproduzione").upper()
+                    self._act_hdr_playback = QAction(txt_hdr_pb, self._parent)
+                    self._act_hdr_playback.setEnabled(False)
+                    self._act_hdr_playback.setFont(header_font)
+                    self._act_hdr_playback.setVisible(show_native_playback)
+                    if show_native_playback:
+                        menu.addAction(self._act_hdr_playback)
+
                     txt_pp = self._t("tray_play_pause", "Play/Pausa")
                     self._act_play_pause = QAction(txt_pp, self._parent)
                     self._act_play_pause.setIcon(get_play_icon(16, accent))
-                    self._act_play_pause.setVisible(False)
+                    self._act_play_pause.setVisible(show_native_playback)
                     if self._on_toggle_play_pause:
                         cb_play = self._on_toggle_play_pause
                         self._act_play_pause.triggered.connect(lambda: cb_play())
+                    if show_native_playback:
+                        menu.addAction(self._act_play_pause)
 
                     self._act_stop = QAction(self._t("tray_stop", "Stop"), self._parent)
                     self._act_stop.setIcon(get_stop_icon(16, accent))
-                    self._act_stop.setVisible(False)
+                    self._act_stop.setVisible(show_native_playback)
                     if self._on_stop_stream:
                         self._act_stop.triggered.connect(self._on_stop_stream)
+                    if show_native_playback:
+                        menu.addAction(self._act_stop)
 
                     self._act_mute = QAction(self._t("tray_mute", "Muto"), self._parent)
                     self._act_mute.setIcon(get_volume_icon(16, text_sec))
-                    self._act_mute.setVisible(False)
+                    self._act_mute.setVisible(show_native_playback)
                     if self._on_toggle_mute:
                         self._act_mute.triggered.connect(self._on_toggle_mute)
+                    if show_native_playback:
+                        menu.addAction(self._act_mute)
 
                     txt_hist = self._t("history_button", "Cronologia brani")
                     self._act_history = QAction(txt_hist, self._parent)
                     self._act_history.setIcon(get_history_icon(16, text_sec))
-                    self._act_history.setVisible(False)
+                    self._act_history.setVisible(show_native_playback)
                     if hasattr(self._parent, "toggle_history_popover"):
                         self._act_history.triggered.connect(self._parent.toggle_history_popover)
+                    if show_native_playback:
+                        menu.addAction(self._act_history)
 
-                    self._sep_playback_end = None
+                    self._sep_playback_end = menu.addSeparator() if show_native_playback else None
 
                     # 2. Sezione: FINESTRA
                     txt_hdr_window = self._t("tray_section_window", "Finestra").upper()
@@ -763,30 +794,12 @@ class TrayManager(QObject):
                     # Sottomenu Canale
                     txt_channel = self._t("tray_channel", "Canale")
                     sub_channel = QMenu(txt_channel, self._parent)
+                    self._sub_channel = sub_channel
                     self._apply_menu_stylesheet(sub_channel, is_submenu=True)
                     grp_channel = QActionGroup(self._parent)
                     grp_channel.setExclusive(True)
                     self._grp_channel = grp_channel
                     self._channel_actions.clear()
-                    try:
-                        current_channel = self._parent.settings.value(KEY_CHANNEL, "J-POP")
-                    except Exception:
-                        current_channel = "J-POP"
-                    for ch in ["J-POP", "K-POP"]:
-                        act = QAction(ch, self._parent)
-                        act.setCheckable(True)
-                        act.setChecked(str(current_channel).strip().upper() == ch.strip().upper())
-                        if self._on_change_channel:
-                            act.triggered.connect(
-                                lambda checked, v=ch: (
-                                    checked
-                                    and self._on_change_channel
-                                    and self._on_change_channel(v)
-                                )
-                            )
-                        grp_channel.addAction(act)
-                        sub_channel.addAction(act)
-                        self._channel_actions[ch] = act
                     act_ch = menu.addMenu(sub_channel)
                     self._act_ch = act_ch
                     if self._act_ch is not None:
@@ -796,31 +809,15 @@ class TrayManager(QObject):
                     except Exception:
                         pass
 
-                    # Sottomenu Formato
+                    # Sottomenu Formato (codec)
                     txt_format = self._t("tray_format", "Formato (codec)")
                     sub_format = QMenu(txt_format, self._parent)
+                    self._sub_format = sub_format
                     self._apply_menu_stylesheet(sub_format, is_submenu=True)
                     grp_format = QActionGroup(self._parent)
                     grp_format.setExclusive(True)
                     self._grp_format = grp_format
                     self._format_actions.clear()
-                    try:
-                        current_format = self._parent.settings.value(KEY_FORMAT, "Vorbis")
-                    except Exception:
-                        current_format = "Vorbis"
-                    for fmt in ["Vorbis", "Opus", "MP3"]:
-                        actf = QAction(fmt, self._parent)
-                        actf.setCheckable(True)
-                        actf.setChecked(str(current_format).strip().upper() == fmt.strip().upper())
-                        if self._on_change_format:
-                            actf.triggered.connect(
-                                lambda checked, v=fmt: (
-                                    checked and self._on_change_format and self._on_change_format(v)
-                                )
-                            )
-                        grp_format.addAction(actf)
-                        sub_format.addAction(actf)
-                        self._format_actions[fmt] = actf
                     act_fmt = menu.addMenu(sub_format)
                     self._act_fmt = act_fmt
                     if self._act_fmt is not None:
@@ -840,6 +837,7 @@ class TrayManager(QObject):
                     menu.addAction(self._act_quit)
 
                     self._tray.setContextMenu(menu)
+                    self._tray.activated.connect(self._on_tray_activated)
                     menu.aboutToShow.connect(self._nudge_menu_left)
                     try:
                         menu.aboutToShow.connect(self.sync_stream_settings)
@@ -868,6 +866,20 @@ class TrayManager(QObject):
                         self._tray.setVisible(False)
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """Handles clicks on tray icon (left/double-click: show, middle-click: play/pause)."""
+        try:
+            if reason in (
+                QSystemTrayIcon.ActivationReason.Trigger,
+                QSystemTrayIcon.ActivationReason.DoubleClick,
+            ):
+                self._handle_show_window()
+            elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
+                if self._on_toggle_play_pause:
+                    self._on_toggle_play_pause()
         except Exception:
             pass
 
@@ -900,12 +912,137 @@ class TrayManager(QObject):
             pass
 
     def set_cover_pixmap(self, pixmap: QPixmap | None) -> None:
-        """Forwards album cover art thumbnail to the Now Playing Card."""
+        """Forwards album cover art thumbnail to the Now Playing Card and Linux action icon."""
         try:
             if self._card is not None:
                 self._card.set_cover_pixmap(pixmap)
+            if self._act_info_now is not None:
+                if pixmap is not None and not pixmap.isNull():
+                    thumb = _make_rounded_pixmap(pixmap, size=24, radius=4)
+                    self._act_info_now.setIcon(QIcon(thumb))
+                else:
+                    self._act_info_now.setIcon(QIcon())
         except Exception:
             pass
+
+    def _rebuild_channel_actions(self, station_id: str, current_channel: str | None = None) -> None:
+        """Rebuilds or synchronizes channel subactions based on station configuration."""
+        if self._sub_channel is None or self._act_ch is None:
+            return
+
+        cfg = get_station_config(station_id)
+        has_channels = bool(cfg.get("has_channels", False))
+        channels = list(cfg.get("channels", []))
+
+        if not has_channels or not channels:
+            self._act_ch.setVisible(False)
+            self._act_ch.setEnabled(False)
+            return
+
+        self._act_ch.setVisible(True)
+        self._act_ch.setEnabled(True)
+
+        if current_channel is None:
+            try:
+                current_channel = str(
+                    self._parent.settings.value(
+                        KEY_CHANNEL, cfg.get("default_channel", channels[0])
+                    )
+                )
+            except Exception:
+                current_channel = str(cfg.get("default_channel", channels[0]))
+
+        if current_channel not in channels:
+            current_channel = str(cfg.get("default_channel", channels[0]))
+
+        target_channel = str(current_channel).strip().upper()
+
+        if list(self._channel_actions.keys()) == channels:
+            for ch_key, act in self._channel_actions.items():
+                should_check = ch_key.strip().upper() == target_channel
+                if act.isChecked() != should_check:
+                    act.blockSignals(True)
+                    act.setChecked(should_check)
+                    act.blockSignals(False)
+            return
+
+        self._sub_channel.clear()
+        if self._grp_channel is not None:
+            for act in list(self._grp_channel.actions()):
+                self._grp_channel.removeAction(act)
+        else:
+            self._grp_channel = QActionGroup(self._parent)
+            self._grp_channel.setExclusive(True)
+        self._channel_actions.clear()
+
+        for ch in channels:
+            act = QAction(ch, self._parent)
+            act.setCheckable(True)
+            act.setChecked(ch.strip().upper() == target_channel)
+            if self._on_change_channel:
+                act.triggered.connect(
+                    lambda checked, ch_name=ch: (
+                        checked and self._on_change_channel and self._on_change_channel(ch_name)
+                    )
+                )
+            self._grp_channel.addAction(act)
+            self._sub_channel.addAction(act)
+            self._channel_actions[ch] = act
+
+    def _rebuild_format_actions(self, station_id: str, current_format: str | None = None) -> None:
+        """Rebuilds or synchronizes format/codec subactions based on station configuration."""
+        if self._sub_format is None:
+            return
+
+        cfg = get_station_config(station_id)
+        formats = list(cfg.get("formats", ["Vorbis", "Opus", "MP3"]))
+        if not formats:
+            formats = ["Vorbis", "Opus", "MP3"]
+
+        if current_format is None:
+            try:
+                current_format = str(
+                    self._parent.settings.value(KEY_FORMAT, cfg.get("default_format", formats[0]))
+                )
+            except Exception:
+                current_format = str(cfg.get("default_format", formats[0]))
+
+        if current_format not in formats:
+            current_format = str(cfg.get("default_format", formats[0]))
+
+        target_fmt = str(current_format).strip().upper()
+
+        if list(self._format_actions.keys()) == formats:
+            for fmt_key, act in self._format_actions.items():
+                should_check = fmt_key.strip().upper() == target_fmt
+                if act.isChecked() != should_check:
+                    act.blockSignals(True)
+                    act.setChecked(should_check)
+                    act.blockSignals(False)
+            return
+
+        self._sub_format.clear()
+        if self._grp_format is not None:
+            for act in list(self._grp_format.actions()):
+                self._grp_format.removeAction(act)
+        else:
+            self._grp_format = QActionGroup(self._parent)
+            self._grp_format.setExclusive(True)
+        self._format_actions.clear()
+
+        for f in formats:
+            act = QAction(f, self._parent)
+            act.setCheckable(True)
+            act.setChecked(f.strip().upper() == target_fmt)
+            if self._on_change_format:
+                act.triggered.connect(
+                    lambda checked, fmt_name=f: (
+                        checked and self._on_change_format and self._on_change_format(fmt_name)
+                    )
+                )
+            self._grp_format.addAction(act)
+            self._sub_format.addAction(act)
+            self._format_actions[f] = act
 
     def sync_stream_settings(
         self,
@@ -915,33 +1052,6 @@ class TrayManager(QObject):
     ) -> None:
         """Synchronizes the checked state of stream/channel/format actions."""
         try:
-            if channel is None:
-                try:
-                    channel = str(self._parent.settings.value(KEY_CHANNEL, "J-POP"))
-                except Exception:
-                    channel = "J-POP"
-            if fmt is None:
-                try:
-                    fmt = str(self._parent.settings.value(KEY_FORMAT, "Vorbis"))
-                except Exception:
-                    fmt = "Vorbis"
-
-            target_channel = str(channel).strip().upper()
-            for ch_key, act in self._channel_actions.items():
-                should_check = ch_key.strip().upper() == target_channel
-                if act.isChecked() != should_check:
-                    act.blockSignals(True)
-                    act.setChecked(should_check)
-                    act.blockSignals(False)
-
-            target_fmt = str(fmt).strip().upper()
-            for fmt_key, actf in self._format_actions.items():
-                should_check = fmt_key.strip().upper() == target_fmt
-                if actf.isChecked() != should_check:
-                    actf.blockSignals(True)
-                    actf.setChecked(should_check)
-                    actf.blockSignals(False)
-
             if station is None:
                 try:
                     station = str(self._parent.settings.value(KEY_STATION, DEFAULT_STATION))
@@ -954,6 +1064,9 @@ class TrayManager(QObject):
                     acts.blockSignals(True)
                     acts.setChecked(should_check)
                     acts.blockSignals(False)
+
+            self._rebuild_channel_actions(target_station, channel)
+            self._rebuild_format_actions(target_station, fmt)
         except Exception:
             pass
 
@@ -1006,11 +1119,25 @@ class TrayManager(QObject):
                     session=info_session,
                 )
 
-            # Update backward-compatible hidden actions
+            # Update backward-compatible and Linux DBus actions
             if self._act_info_now is not None:
-                self._act_info_now.setText(info_now or "")
+                if title and artist:
+                    self._act_info_now.setText(f"{title} — {artist}")
+                elif title:
+                    self._act_info_now.setText(title)
+                elif info_now:
+                    self._act_info_now.setText(info_now)
+                else:
+                    fallback_no_track = self._t("tray_no_track", "Nessun brano in riproduzione")
+                    self._act_info_now.setText(fallback_no_track)
+
             if self._act_info_session is not None:
-                self._act_info_session.setText(info_session or "")
+                cfg = get_station_config(station)
+                st_name = str(cfg.get("name", station)).upper()
+                if info_session:
+                    self._act_info_session.setText(f"{st_name} • {info_session}")
+                else:
+                    self._act_info_session.setText(st_name)
 
         except Exception:
             pass
