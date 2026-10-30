@@ -1220,9 +1220,13 @@ class SettingsDialog(QDialog):
             self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
         )
         play_lay.addWidget(self.chk_discord_rpc)
-        self.txt_discord_client_id = QLineEdit(str(self.settings.value(KEY_DISCORD_CLIENT_ID, "")))
+        self.txt_discord_client_id = QLineEdit(
+            str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
+        )
         self.txt_discord_client_id.setPlaceholderText("KikuMoe (default)")
+        self.txt_discord_client_id.setFixedWidth(combo_w)
         self.discord_id_row = QWidget()
+        self.discord_id_row.setFixedHeight(30)
         discord_id_layout = self._make_field_row(
             self.i18n.t("settings_discord_id"), self.txt_discord_client_id
         )
@@ -1940,7 +1944,7 @@ class SettingsDialog(QDialog):
         QLabel#settingsFieldLabel {{
             color: {PALETTE["text_primary"]};
             font-size: 13px;
-            font-weight: 700;
+            font-weight: 500;
             background: transparent;
             border: none;
             padding-left: 2px;
