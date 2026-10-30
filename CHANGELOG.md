@@ -143,6 +143,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configurable toggle switch (*Visualizzatore audio radiale*) in *Impostazioni → Aspetto* with instant live preview.
 
 ### Fixed
+- **System Tray Cyber-Glass Card on Linux & CI Test Fix (`ui/tray_manager.py`)**:
+  - Ensured the modern Cyber-Glass Now Playing Card rework is enabled on Linux by default, giving Linux desktops the same rich tray card, inline media buttons, and rounded artwork as Windows.
+  - Restricted separate native fallback actions to explicit DBus environments (`KIKUMOE_TEST_LINUX_TRAY=1`), resolving the assertion failure in `test_tray_menu_clean_layout` on Linux CI.
 - **CI Headless Offscreen Segmentation Fault & Close Dialog Lifecycle (`ui/close_dialog.py`, `tests/test_ui_widgets.py`)**:
   - Resolved CI segmentation fault (exit code 139) occurring in `test_close_dialog_remember_checkbox_alignment_and_animation`.
   - Replaced native window `grab()` with safe offscreen `QPixmap.render(painter)` in `RememberCheckBox` and `GlassComboBox` popup unit tests, preventing `QOffscreenBackingStore` null-pointer dereferences in headless / offscreen Qt environments.
