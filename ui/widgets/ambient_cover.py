@@ -980,12 +980,14 @@ class AmbientCoverCard(QWidget):
         pts: List[QPointF] = []
         n = self._num_wave_points
 
-        # Margine verticale disponibile per evitare assolutamente il taglio (clipping) sui bordi
+        # Margine verticale e orizzontale disponibili per evitare clipping sui bordi del widget
         vert_margin = max(12.0, (float(self.height()) - (self._cover_size + 12.0)) / 2.0)
-        # Limite di sicurezza massimo in Y: garantisce respiro ed evita clipping con bloom
         max_allowed_dy = max(6.0, vert_margin - 5.5)
 
-        max_amp_x = max(24.0, self._cover_size * 0.16) * amp_scale
+        horiz_margin = max(12.0, (float(self.width()) - (self._cover_size + 12.0)) / 2.0)
+        max_allowed_dx = max(6.0, horiz_margin - 5.5)
+
+        base_amp_x = min(max_allowed_dx * 0.70, max(20.0, self._cover_size * 0.15)) * amp_scale
         base_amp_y = min(max_allowed_dy * 0.65, max(7.0, self._cover_size * 0.055)) * amp_scale
 
         for i in range(n):
@@ -994,9 +996,11 @@ class AmbientCoverCard(QWidget):
             ambient_ripple = math.sin(self._phase * 2.0 + theta * 3.0 + phase_shift) * (
                 1.0 + 1.8 * self._bass_energy
             )
-            r = self._base_contour[i] + extra_offset
-            dx = (r + mag * max_amp_x + ambient_ripple * 1.2) * self._wave_cos[i]
-            # Esclusione clipping: l'ondulazione in Y resta sempre entro i limiti del widget
+            # Esclusione clipping: l'ondulazione in X e Y resta sempre entro i limiti del widget
+            wave_dx = mag * base_amp_x + ambient_ripple * 1.0
+            total_dx = min(max_allowed_dx, extra_offset + wave_dx)
+            dx = (self._base_contour[i] + total_dx) * self._wave_cos[i]
+
             wave_dy = mag * base_amp_y + ambient_ripple * 0.55
             total_dy = min(max_allowed_dy, extra_offset + wave_dy)
             dy = (self._base_contour[i] + total_dy) * self._wave_sin[i]

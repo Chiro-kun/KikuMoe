@@ -963,6 +963,7 @@ class ListenMoePlayer(QWidget):
                 self._lyrics_original_width = start_width
             if self._lyrics_original_width is not None:
                 target_width = max(start_width, 650)
+            self.ambient_cover.setMinimumWidth(0)
             self.lyrics_panel.setMinimumWidth(0)
             self.lyrics_panel.setMaximumWidth(start_panel)
             self.lyrics_panel.show()
@@ -973,9 +974,10 @@ class ListenMoePlayer(QWidget):
             if self._lyrics_original_width is not None and (start_width == 650 or was_running):
                 target_width = self._lyrics_original_width
             self.lyrics_panel.skeleton.timer.stop()
+            self.ambient_cover.setMinimumWidth(0)
             self.lyrics_panel.setMinimumWidth(0)
 
-        target_cover = self._album_cover_size + 26 if enabled else max(222, target_width - 32)
+        target_cover = self._album_cover_size + 84 if enabled else max(222, target_width - 32)
         target_panel = max(190, target_width - 32 - target_cover - 10) if enabled else 0
         self._lyrics_transition_values = (
             start_width,
@@ -1022,8 +1024,13 @@ class ListenMoePlayer(QWidget):
         self._lyrics_transition_values = None
         if not enabled:
             self.lyrics_panel.hide()
+            self.ambient_cover.setMinimumWidth(0)
             self.ambient_cover.setMaximumWidth(16777215)
             self._lyrics_original_width = None
+        else:
+            cover_w = self._album_cover_size + 84
+            self.ambient_cover.setMinimumWidth(cover_w)
+            self.ambient_cover.setMaximumWidth(cover_w)
         self.lyrics_panel.setMaximumWidth(16777215)
         self.lyrics_panel.setMinimumWidth(190)
         if enabled:

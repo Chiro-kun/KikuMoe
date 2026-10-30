@@ -191,6 +191,21 @@ def test_ambient_cover_radial_visualizer(qapp):
         cover._tick_visualizer()
     assert all(m < 0.01 for m in cover._spectrum_bars)
 
+    # Test horizontal wave path safety boundaries (prevent clipping in lyrics mode)
+    from PyQt6.QtCore import QPointF
+
+    cover_viz = AmbientCoverCard(cover_size=180)
+    cover_viz.resize(264, cover_viz.height())
+    cover_viz._spectrum_bars = [1.0] * 64
+    cover_viz._bass_energy = 1.0
+    center = QPointF(cover_viz.width() / 2.0, cover_viz.height() / 2.0)
+    path = cover_viz._build_wave_path(center, extra_offset=3.0, amp_scale=1.0)
+    bounds = path.boundingRect()
+    assert bounds.left() >= 0.0
+    assert bounds.right() <= cover_viz.width()
+    assert bounds.top() >= 0.0
+    assert bounds.bottom() <= cover_viz.height()
+
 
 def test_settings_dialog_and_toggles(qapp):
     from ui.settings_dialog import AnimatedToggleSwitch, SettingsDialog
@@ -795,7 +810,7 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     assert window.lyrics_button.isCheckable()
     assert window.lyrics_button.toolTip() == window.i18n.t("lyrics_button")
     assert not window.lyrics_button.text()
-    assert window.ambient_cover.width() == window._album_cover_size + 26
+    assert window.ambient_cover.width() == window._album_cover_size + 84
     assert window.lyrics_panel.x() > window.ambient_cover.x()
     assert calls == [("Song", "Artist", 120)]
     assert window.lyrics_panel.skeleton.timer.isActive()
