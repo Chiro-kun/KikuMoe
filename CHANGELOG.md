@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enhanced wave aesthetics with a multi-stop neon cyber gradient across the primary bloom stroke, specular core highlight, resonant echo wave, and translucent radial glow fill, dynamically harmonized with active theme palettes and artwork dominant colors.
   - Resolved vertical wave clipping ("viene tagliato") with dynamic margin-aware boundary safety limits and adjusted album cover sizing (`180px`), completely eliminating boundary chopping while preserving full clearance at minimum window height.
   - Configured visualizer toggle to default to disabled (`off`) in `core/constants.py` and `ui/widgets/ambient_cover.py`.
+- **Fix Color Picker "+ Salva" Button Clipping (`ui/color_picker_dialog.py`)**:
+  - Resolved text clipping on the "+ Salva" slot button by increasing button height from `22px` to `26px` and adding dedicated cyber-glass button styling (`#saveSlotBtn`) with balanced `2px 12px` padding and theme accent hover glow.
+  - Aligned section header and save button vertically with `AlignVCenter` in the saved custom swatches row.
 - **Dynamic Station Codecs, Channels & Linux DBus Native Tray Rework (`ui/tray_manager.py`, `ui/main_window.py`)**:
   - Dynamically rebuilds and checks the active audio format (codec) in the system tray menu according to each station's supported formats (e.g. `MP3 320k`, `MP3 128k`, `AAC 64k` for TruckersFM; `MP3 256k`, `MP3 128k`, `Opus 64k` for Gensokyo Radio; `Vorbis`, `Opus`, `MP3` for LISTEN.moe), fixing missing checkmarks when listening to non-default stations.
   - Automatically adapts channel submenu visibility: displays `J-POP` and `K-POP` channels when listening to multi-channel stations (LISTEN.moe) and cleanly hides the `Canale` submenu for single-stream stations (TruckersFM, Gensokyo Radio, ANISON.FM, Neuro 21).

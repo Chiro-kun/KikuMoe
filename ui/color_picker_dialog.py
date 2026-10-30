@@ -942,16 +942,16 @@ class AccentColorPickerDialog(QDialog):
             "color: #94a3b8; font-size: 10px; font-weight: 800; "
             "letter-spacing: 0.9px; background: transparent;"
         )
-        hdr_saved_row.addWidget(lbl_saved)
+        hdr_saved_row.addWidget(lbl_saved, 0, Qt.AlignmentFlag.AlignVCenter)
         hdr_saved_row.addStretch(1)
 
         self.btn_save_slot = QPushButton(self.i18n.t("color_picker_save_btn"), body)
-        self.btn_save_slot.setObjectName("secondaryGlassBtn")
-        self.btn_save_slot.setFixedHeight(22)
+        self.btn_save_slot.setObjectName("saveSlotBtn")
+        self.btn_save_slot.setFixedHeight(26)
         self.btn_save_slot.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save_slot.setToolTip(self.i18n.t("color_picker_save_tip"))
         self.btn_save_slot.clicked.connect(self._save_current_to_custom_palette)
-        hdr_saved_row.addWidget(self.btn_save_slot)
+        hdr_saved_row.addWidget(self.btn_save_slot, 0, Qt.AlignmentFlag.AlignVCenter)
         body_lay.addLayout(hdr_saved_row)
 
         row_saved = QHBoxLayout()
@@ -1052,6 +1052,7 @@ class AccentColorPickerDialog(QDialog):
 
     def _apply_dialog_styles(self) -> None:
         accent = PALETTE.get("accent", "#EC186C")
+        accent_menu_hover = PALETTE.get("accent_menu_hover", "rgba(236, 24, 108, 0.25)")
         PALETTE.get("bg_dialog", "#121523")
         bg_surface = PALETTE.get("bg_surface", "#171a29")
         bg_footer = PALETTE.get("bg_footer", "#10131f")
@@ -1073,6 +1074,40 @@ class AccentColorPickerDialog(QDialog):
             border-top: 1px solid rgba(255, 255, 255, 0.08);
             border-bottom-left-radius: 12px;
             border-bottom-right-radius: 12px;
+        }}
+        QPushButton#saveSlotBtn {{
+            background-color: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 6px;
+            color: #cbd5e1;
+            padding: 2px 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }}
+        QPushButton#saveSlotBtn:hover {{
+            background-color: {accent_menu_hover};
+            border-color: {accent};
+            color: #ffffff;
+        }}
+        QPushButton#saveSlotBtn:pressed {{
+            background-color: rgba(255, 255, 255, 0.04);
+        }}
+        QPushButton#secondaryGlassBtn {{
+            background-color: rgba(255, 255, 255, 0.07);
+            color: #cbd5e1;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        QPushButton#secondaryGlassBtn:hover {{
+            background-color: {accent_menu_hover};
+            border-color: {accent};
+            color: #ffffff;
+        }}
+        QPushButton#secondaryGlassBtn:pressed {{
+            background-color: rgba(255, 255, 255, 0.04);
         }}
         QPushButton#cancelButton {{
             background-color: rgba(255, 255, 255, 0.05);
