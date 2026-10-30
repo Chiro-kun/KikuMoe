@@ -279,16 +279,16 @@ class SlidingStackedWidget(QStackedWidget):
 
 class BackToPlayerButton(QPushButton):
     """
-    Custom vector '< Player' pill button with anti-aliased chevron icon
-    and 60 FPS click bounce animation.
+    Custom vector '< Player' pill button with anti-aliased chevron icon,
+    smooth hover chevron nudge, and tactile press state without clipping or glitching.
     """
 
     def __init__(self, text: str = "Player", parent: Optional[QWidget] = None):
         super().__init__(text, parent)
         self._hover = False
         self._pressed = False
-        self._scale = 1.0
-        self._anim_step = 0
+        self._chevron_offset = 0.0
+        self._target_offset = 0.0
         self.setFixedSize(88, 28)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -296,41 +296,62 @@ class BackToPlayerButton(QPushButton):
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
 
+    def reset_state(self) -> None:
+        """Resets button to pristine idle state for clean snapshot transitions."""
+        self._hover = False
+        self._pressed = False
+        self._chevron_offset = 0.0
+        self._target_offset = 0.0
+        if self._anim_timer.isActive():
+            self._anim_timer.stop()
+        self.update()
+
     def enterEvent(self, event) -> None:
         self._hover = True
+        self._target_offset = -2.2
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
         self.update()
         super().enterEvent(event)
 
     def leaveEvent(self, a0) -> None:
         self._hover = False
         self._pressed = False
+        self._target_offset = 0.0
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
         self.update()
         super().leaveEvent(a0)
 
     def mousePressEvent(self, e) -> None:
         if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
-            self._anim_step = 1
-            self._scale = 0.88
-            self._anim_timer.start()
+            self._target_offset = -3.2
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
             self.update()
         super().mousePressEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:
         self._pressed = False
+        self._target_offset = -2.2 if self._hover else 0.0
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
         self.update()
         super().mouseReleaseEvent(e)
 
+    def hideEvent(self, a0) -> None:
+        self.reset_state()
+        super().hideEvent(a0)
+
     def _tick_anim(self) -> None:
-        scales = [0.88, 0.94, 1.04, 1.01, 1.0]
-        if 0 < self._anim_step <= len(scales):
-            self._scale = scales[self._anim_step - 1]
-            self._anim_step += 1
-            self.update()
-        else:
-            self._scale = 1.0
+        diff = self._target_offset - self._chevron_offset
+        if abs(diff) < 0.15:
+            self._chevron_offset = self._target_offset
             self._anim_timer.stop()
-            self.update()
+        else:
+            self._chevron_offset += diff * 0.35
+        self.update()
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
@@ -338,12 +359,7 @@ class BackToPlayerButton(QPushButton):
 
         w = float(self.width())
         h = float(self.height())
-        cx = w / 2.0
         cy = h / 2.0
-
-        painter.translate(cx, cy)
-        painter.scale(self._scale, self._scale)
-        painter.translate(-cx, -cy)
 
         if self._hover or self._pressed:
             bg = accent_qcolor(48 if self._pressed else 30)
@@ -368,7 +384,7 @@ class BackToPlayerButton(QPushButton):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         chev = QPainterPath()
-        ix = 16.0
+        ix = 16.0 + self._chevron_offset
         chev.moveTo(QPointF(ix + 2.5, cy - 4.5))
         chev.lineTo(QPointF(ix - 2.5, cy))
         chev.lineTo(QPointF(ix + 2.5, cy + 4.5))
@@ -380,7 +396,7 @@ class BackToPlayerButton(QPushButton):
         painter.setFont(font)
         painter.setPen(fg)
         painter.drawText(
-            QRectF(24.0, 0.0, w - 28.0, h),
+            QRectF(22.0, 0.0, w - 26.0, h),
             Qt.AlignmentFlag.AlignCenter,
             self.text(),
         )
@@ -2133,6 +2149,8 @@ class SettingsDialog(QDialog):
     def accept(self) -> None:
         self._device_enum_timer.stop()
         self._accepted_close = True
+        if hasattr(self, "btn_back"):
+            self.btn_back.reset_state()
         if self._embedded:
             self.accepted.emit()
         else:
@@ -2141,6 +2159,8 @@ class SettingsDialog(QDialog):
     def reject(self) -> None:
         self._device_enum_timer.stop()
         self._restore_persisted_theme()
+        if hasattr(self, "btn_back"):
+            self.btn_back.reset_state()
         if self._embedded:
             self.rejected.emit()
         else:
@@ -2149,6 +2169,8 @@ class SettingsDialog(QDialog):
     def closeEvent(self, a0: Optional[QCloseEvent]) -> None:
         self._is_closed = True
         self._device_enum_timer.stop()
+        if hasattr(self, "btn_back"):
+            self.btn_back.reset_state()
         if not getattr(self, "_accepted_close", False):
             self._restore_persisted_theme()
         self._accepted_close = False
