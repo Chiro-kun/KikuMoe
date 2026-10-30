@@ -894,7 +894,7 @@ class AmbientCoverCard(QWidget):
             self._bass_energy = 0.0
             if not self._fade_timer.isActive():
                 self._viz_timer.stop()
-        elif self._is_playing and not self._viz_timer.isActive():
+        elif not self._viz_timer.isActive():
             self._viz_timer.start()
         self.update()
 
@@ -905,29 +905,34 @@ class AmbientCoverCard(QWidget):
         """Notifica lo stato di riproduzione per sincronizzare l'animazione o il decadimento."""
         self._is_playing = bool(playing)
         self._analyzer.set_playing(playing)
-        if self._is_playing and self._visualizer_enabled:
-            if not self._viz_timer.isActive():
-                self._viz_timer.start()
-        elif not self._is_playing:
-            if not self._viz_timer.isActive() and any(m > 0.005 for m in self._spectrum_bars):
-                self._viz_timer.start()
+        if self._visualizer_enabled and not self._viz_timer.isActive():
+            self._viz_timer.start()
 
     def _tick_visualizer(self) -> None:
-        self._phase += 0.06
-        mags, bass = self._analyzer.get_spectrum(32)
-        # Distribuzione simmetrica lungo il perimetro dell'onda:
-        # Sub-bass/cassa in basso (indice 32), medi ai lati (16 e 48), acuti in alto (0 e 63)
-        bars = [0.0] * self._num_wave_points
-        for i in range(self._num_wave_points):
-            dist_from_bottom = abs(32 - i)
-            band_idx = min(31, dist_from_bottom)
-            bars[i] = mags[band_idx]
-        self._spectrum_bars = bars
-        self._bass_energy = bass
-        if not self._is_playing:
-            if all(m < 0.005 for m in self._spectrum_bars) and self._bass_energy < 0.005:
-                self._spectrum_bars = [0.0] * self._num_wave_points
+        if self._is_playing:
+            self._phase += 0.06
+            mags, bass = self._analyzer.get_spectrum(32)
+            # Distribuzione simmetrica lungo il perimetro dell'onda:
+            # Sub-bass/cassa in basso (indice 32), medi ai lati (16 e 48), acuti in alto (0 e 63)
+            bars = [0.0] * self._num_wave_points
+            for i in range(self._num_wave_points):
+                dist_from_bottom = abs(32 - i)
+                band_idx = min(31, dist_from_bottom)
+                bars[i] = mags[band_idx]
+            self._spectrum_bars = bars
+            self._bass_energy = bass
+        else:
+            # Stato inattivo/riposo: respiro calmo a bassa velocità, decadimento morbido delle barre
+            self._phase += 0.02
+            self._bass_energy *= 0.88
+            if self._bass_energy < 0.001:
                 self._bass_energy = 0.0
+            for i in range(self._num_wave_points):
+                if self._spectrum_bars[i] > 0.001:
+                    self._spectrum_bars[i] *= 0.88
+                else:
+                    self._spectrum_bars[i] = 0.0
+            if not self._visualizer_enabled:
                 if not self._fade_timer.isActive():
                     self._viz_timer.stop()
         self.update()
@@ -1211,9 +1216,7 @@ class AmbientCoverCard(QWidget):
         painter.restore()
 
         # 2. Audio-Reactive Conformal Fluid Neon Wave with Multi-Stop Cyber Gradient
-        if self._visualizer_enabled and (
-            any(m > 0.005 for m in self._spectrum_bars) or self._bass_energy > 0.005
-        ):
+        if self._visualizer_enabled:
             c_high, c_prim, c_sec, c_shim = self._get_wave_gradient_colors(cur_amb)
 
             wave_primary = self._build_wave_path(

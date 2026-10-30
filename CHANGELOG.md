@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enhanced wave aesthetics with a multi-stop neon cyber gradient across the primary bloom stroke, specular core highlight, resonant echo wave, and translucent radial glow fill, dynamically harmonized with active theme palettes and artwork dominant colors.
   - Resolved vertical wave clipping ("viene tagliato") with dynamic margin-aware boundary safety limits and adjusted album cover sizing (`180px`), completely eliminating boundary chopping while preserving full clearance at minimum window height.
   - Configured visualizer toggle to default to disabled (`off`) in `core/constants.py` and `ui/widgets/ambient_cover.py`.
+- **Visualizer Idle Resting Halo State (`ui/widgets/ambient_cover.py`)**:
+  - Ensured the visualizer wave remains visible as an elegant, gently undulating ambient resting halo around the album cover even when playback is stopped, paused, or awaiting audio data, rather than staying invisible until the first audio chunk arrives.
+  - Keeps the 60 FPS animation timer active in calm idle breathing mode (`_phase += 0.02`) when the visualizer is enabled, providing smooth resting contours that dynamically surge and pulse as soon as music playback begins.
 - **Fix Visualizer Wave Clipping with Lyrics Active (`ui/widgets/ambient_cover.py`, `ui/main_window.py`)**:
   - Resolved wave clipping when the lyrics panel is open by adding horizontal margin-aware boundary safety limits (`max_allowed_dx = max(6.0, horiz_margin - 5.5)`) in `_build_wave_path`.
   - Expanded cover container width in lyrics mode from `self._album_cover_size + 26` (206px) to `self._album_cover_size + 84` (264px) in `ui/main_window.py`, providing a comfortable ~36px lateral clearance for full unconstrained wave amplitude.
