@@ -304,7 +304,8 @@ def test_tray_manager_vector_icons_and_theme_refresh(qapp):
     assert not tray_mgr._act_quit.icon().isNull()
 
 
-def test_tray_menu_clean_layout(qapp):
+def test_tray_menu_clean_layout(qapp, monkeypatch):
+    monkeypatch.setenv("KIKUMOE_TRAY_FORCE_CARD", "1")
     parent = DummyParent()
     i18n = MagicMock()
     i18n.t.side_effect = lambda key: key

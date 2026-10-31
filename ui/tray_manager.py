@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from typing import Callable
 
 from PyQt6.QtCore import QObject, QSize, Qt, QTimer
@@ -612,12 +613,13 @@ class TrayManager(QObject):
                     header_font.setBold(True)
                     header_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
 
+                    is_win = sys.platform.startswith("win")
                     force_linux = bool(
                         os.environ.get("KIKUMOE_TEST_LINUX_TRAY", "0") == "1"
                         or os.environ.get("KIKUMOE_LINUX_NATIVE_TRAY", "0") == "1"
                     )
-                    show_native_playback = force_linux
                     force_card = bool(os.environ.get("KIKUMOE_TRAY_FORCE_CARD", "0") == "1")
+                    show_native_playback = ((not is_win) or force_linux) and not force_card
                     show_card = (not show_native_playback) or force_card
 
                     # 1. Now Playing Cyber-Glass Header Card (shown on Windows / direct Qt menus)

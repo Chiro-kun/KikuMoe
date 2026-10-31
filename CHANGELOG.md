@@ -143,9 +143,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Configurable toggle switch (*Visualizzatore audio radiale*) in *Impostazioni → Aspetto* with instant live preview.
 
 ### Fixed
-- **System Tray Cyber-Glass Card on Linux & CI Test Fix (`ui/tray_manager.py`)**:
-  - Ensured the modern Cyber-Glass Now Playing Card rework is enabled on Linux by default, giving Linux desktops the same rich tray card, inline media buttons, and rounded artwork as Windows.
-  - Restricted separate native fallback actions to explicit DBus environments (`KIKUMOE_TEST_LINUX_TRAY=1`), resolving the assertion failure in `test_tray_menu_clean_layout` on Linux CI.
+- **Linux Native DBus Tray Playback Section & Cover Art Thumbnail (`ui/tray_manager.py`, `tests/test_tray_manager.py`)**:
+  - Restored full playback controls (`Play/Pausa`, `Stop`, `Muto`, `Cronologia brani`), live track title, artist, session timer, and album cover art thumbnail icon on Linux desktop environments (KDE Plasma, GNOME, Xfce) where FreeDesktop DBusmenu serializes tray menus and drops custom `QWidgetAction`s.
+  - Fixed empty Linux tray menu where only generic window/preference actions were visible, bringing parity with the rich feature set of the Windows tray rework.
+  - Pinned `KIKUMOE_TRAY_FORCE_CARD=1` in `test_tray_menu_clean_layout` so both card and Linux DBus layouts are thoroughly validated in CI.
 - **CI Headless Offscreen Segmentation Fault & Close Dialog Lifecycle (`ui/close_dialog.py`, `tests/test_ui_widgets.py`)**:
   - Resolved CI segmentation fault (exit code 139) occurring in `test_close_dialog_remember_checkbox_alignment_and_animation`.
   - Replaced native window `grab()` with safe offscreen `QPixmap.render(painter)` in `RememberCheckBox` and `GlassComboBox` popup unit tests, preventing `QOffscreenBackingStore` null-pointer dereferences in headless / offscreen Qt environments.
