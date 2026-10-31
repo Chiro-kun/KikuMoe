@@ -145,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Linux Native DBus Tray Playback Section & Cover Art Thumbnail (`ui/tray_manager.py`, `tests/test_tray_manager.py`)**:
   - Restored full playback controls (`Play/Pausa`, `Stop`, `Muto`, `Cronologia brani`), live track title, artist, session timer, and album cover art thumbnail icon on Linux desktop environments (KDE Plasma, GNOME, Xfce) where FreeDesktop DBusmenu serializes tray menus and drops custom `QWidgetAction`s.
-  - Fixed empty Linux tray menu where only generic window/preference actions were visible, bringing parity with the rich feature set of the Windows tray rework.
+  - Harmonized full vector icon palette with the theme accent color (`accent`) across all tray actions (`Muto`, `Cronologia brani`, `Mostra finestra`, `Impostazioni`, `Info`, `Stazione`, `Canale`, `Codec`), eliminating dull grey icons.
+  - Eliminated redundant separators preceding section headers (`RIPRODUZIONE`, `FINESTRA`, `PREFERENZE`), removing double-spaced gaps and excessive vertical padding across tray menu rows.
   - Pinned `KIKUMOE_TRAY_FORCE_CARD=1` in `test_tray_menu_clean_layout` so both card and Linux DBus layouts are thoroughly validated in CI.
 - **CI Headless Offscreen Segmentation Fault & Close Dialog Lifecycle (`ui/close_dialog.py`, `tests/test_ui_widgets.py`)**:
   - Resolved CI segmentation fault (exit code 139) occurring in `test_close_dialog_remember_checkbox_alignment_and_animation`.

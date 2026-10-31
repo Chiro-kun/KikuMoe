@@ -654,10 +654,8 @@ class TrayManager(QObject):
                     self._act_info_session.triggered.connect(self._handle_show_window)
                     if show_native_playback:
                         menu.addAction(self._act_info_session)
-                        menu.addSeparator()
 
                     accent = PALETTE.get("accent", "#EC186C")
-                    text_sec = PALETTE.get("text_secondary", "#CBD5E1")
 
                     # Playback section actions (visible on Linux / DBus; handled by card on Windows)
                     txt_hdr_pb = self._t("tray_section_playback", "Riproduzione").upper()
@@ -687,7 +685,7 @@ class TrayManager(QObject):
                         menu.addAction(self._act_stop)
 
                     self._act_mute = QAction(self._t("tray_mute", "Muto"), self._parent)
-                    self._act_mute.setIcon(get_volume_icon(16, text_sec))
+                    self._act_mute.setIcon(get_volume_icon(16, accent))
                     self._act_mute.setVisible(show_native_playback)
                     if self._on_toggle_mute:
                         self._act_mute.triggered.connect(self._on_toggle_mute)
@@ -696,14 +694,14 @@ class TrayManager(QObject):
 
                     txt_hist = self._t("history_button", "Cronologia brani")
                     self._act_history = QAction(txt_hist, self._parent)
-                    self._act_history.setIcon(get_history_icon(16, text_sec))
+                    self._act_history.setIcon(get_history_icon(16, accent))
                     self._act_history.setVisible(show_native_playback)
                     if hasattr(self._parent, "toggle_history_popover"):
                         self._act_history.triggered.connect(self._parent.toggle_history_popover)
                     if show_native_playback:
                         menu.addAction(self._act_history)
 
-                    self._sep_playback_end = menu.addSeparator() if show_native_playback else None
+                    self._sep_playback_end = None
 
                     # 2. Sezione: FINESTRA
                     txt_hdr_window = self._t("tray_section_window", "Finestra").upper()
@@ -715,7 +713,7 @@ class TrayManager(QObject):
                     # Mostra finestra
                     txt_show = self._t("tray_show", "Mostra finestra")
                     act_show = QAction(txt_show, self._parent)
-                    act_show.setIcon(get_window_icon(16, text_sec))
+                    act_show.setIcon(get_window_icon(16, accent))
                     act_show.triggered.connect(self._handle_show_window)
                     menu.addAction(act_show)
                     self._act_show = act_show
@@ -723,7 +721,7 @@ class TrayManager(QObject):
                     # Impostazioni
                     txt_settings = self._t("settings_button", "Impostazioni")
                     act_settings = QAction(txt_settings, self._parent)
-                    act_settings.setIcon(get_settings_icon(16, text_sec))
+                    act_settings.setIcon(get_settings_icon(16, accent))
                     if self._on_open_settings:
                         cb_settings = self._on_open_settings
                         act_settings.triggered.connect(lambda: cb_settings())
@@ -733,14 +731,14 @@ class TrayManager(QObject):
                     # Informazioni su KikuMoe...
                     txt_about = self._t("tray_about", "Informazioni su KikuMoe...")
                     act_about = QAction(txt_about, self._parent)
-                    act_about.setIcon(get_info_icon(16, text_sec))
+                    act_about.setIcon(get_info_icon(16, accent))
                     if self._on_about:
                         cb_about = self._on_about
                         act_about.triggered.connect(lambda: cb_about())
                     menu.addAction(act_about)
                     self._act_about = act_about
 
-                    self._sep_window_end = menu.addSeparator()
+                    self._sep_window_end = None
 
                     # 4. Sezione: PREFERENZE
                     txt_hdr_prefs = self._t("tray_section_preferences", "Preferenze").upper()
@@ -788,7 +786,7 @@ class TrayManager(QObject):
                     act_st = menu.addMenu(sub_station)
                     self._act_st = act_st
                     if self._act_st is not None:
-                        self._act_st.setIcon(get_station_icon(16, text_sec))
+                        self._act_st.setIcon(get_station_icon(16, accent))
                     try:
                         sub_station.aboutToShow.connect(self.sync_stream_settings)
                     except Exception:
@@ -806,7 +804,7 @@ class TrayManager(QObject):
                     act_ch = menu.addMenu(sub_channel)
                     self._act_ch = act_ch
                     if self._act_ch is not None:
-                        self._act_ch.setIcon(get_channel_icon(16, text_sec))
+                        self._act_ch.setIcon(get_channel_icon(16, accent))
                     try:
                         sub_channel.aboutToShow.connect(self.sync_stream_settings)
                     except Exception:
@@ -824,7 +822,7 @@ class TrayManager(QObject):
                     act_fmt = menu.addMenu(sub_format)
                     self._act_fmt = act_fmt
                     if self._act_fmt is not None:
-                        self._act_fmt.setIcon(get_codec_icon(16, text_sec))
+                        self._act_fmt.setIcon(get_codec_icon(16, accent))
                     try:
                         sub_format.aboutToShow.connect(self.sync_stream_settings)
                     except Exception:
@@ -1157,7 +1155,6 @@ class TrayManager(QObject):
         """Aggiorna testi e icone vettoriali dei controlli in base allo stato corrente."""
         try:
             accent = PALETTE.get("accent", "#EC186C")
-            text_sec = PALETTE.get("text_secondary", "#CBD5E1")
 
             ui_paused = bool(getattr(self._parent, "_ui_paused", False))
             effective_paused = bool(is_paused or ui_paused)
@@ -1188,7 +1185,7 @@ class TrayManager(QObject):
                 self._act_mute.setIcon(
                     get_volume_icon(16, "#FF4B6E", muted=True)
                     if is_muted
-                    else get_volume_icon(16, text_sec, muted=False)
+                    else get_volume_icon(16, accent, muted=False)
                 )
 
         except Exception:
@@ -1219,7 +1216,7 @@ class TrayManager(QObject):
                     spacing: 0px;
                 }}
                 QMenu::item {{
-                    padding: 7px 28px 7px 6px;
+                    padding: 5px 22px 5px 6px;
                     margin: 0px;
                     border: none;
                     color: {text_pri};
@@ -1246,14 +1243,14 @@ class TrayManager(QObject):
                     color: {accent};
                     background-color: transparent;
                     margin-left: -13px;
-                    padding: 8px 12px 3px 0px;
+                    padding: 5px 12px 2px 0px;
                     font-size: 11px;
                     font-weight: bold;
                 }}
                 QMenu::separator {{
                     height: 1px;
                     background-color: {sep_rgba};
-                    margin: 4px 0px;
+                    margin: 2px 0px;
                 }}
                 """
             )
@@ -1264,7 +1261,6 @@ class TrayManager(QObject):
         """Refreshes menu styling, Now Playing Card, and vector icons with the active theme."""
         try:
             accent = PALETTE.get("accent", "#EC186C")
-            text_sec = PALETTE.get("text_secondary", "#CBD5E1")
 
             if self._tray is not None:
                 menu = self._tray.contextMenu()
@@ -1279,19 +1275,19 @@ class TrayManager(QObject):
             if self._act_stop is not None:
                 self._act_stop.setIcon(get_stop_icon(16, accent))
             if self._act_history is not None:
-                self._act_history.setIcon(get_history_icon(16, text_sec))
+                self._act_history.setIcon(get_history_icon(16, accent))
             if self._act_show is not None:
-                self._act_show.setIcon(get_window_icon(16, text_sec))
+                self._act_show.setIcon(get_window_icon(16, accent))
             if self._act_settings is not None:
-                self._act_settings.setIcon(get_settings_icon(16, text_sec))
+                self._act_settings.setIcon(get_settings_icon(16, accent))
             if self._act_about is not None:
-                self._act_about.setIcon(get_info_icon(16, text_sec))
+                self._act_about.setIcon(get_info_icon(16, accent))
             if self._act_st is not None:
-                self._act_st.setIcon(get_station_icon(16, text_sec))
+                self._act_st.setIcon(get_station_icon(16, accent))
             if self._act_ch is not None:
-                self._act_ch.setIcon(get_channel_icon(16, text_sec))
+                self._act_ch.setIcon(get_channel_icon(16, accent))
             if self._act_fmt is not None:
-                self._act_fmt.setIcon(get_codec_icon(16, text_sec))
+                self._act_fmt.setIcon(get_codec_icon(16, accent))
             if self._act_quit is not None:
                 self._act_quit.setIcon(get_power_quit_icon(16, "#FF4B6E"))
 
