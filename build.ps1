@@ -51,12 +51,15 @@ Write-Host "Installing dependencies via Poetry..." -ForegroundColor Cyan
 Set-Location $projectRoot
 poetry install --with dev
 
+Write-Host "Synchronizing version from version.yml..." -ForegroundColor Cyan
+poetry run python scripts/sync_version.py
+
 $specPath = Join-Path $projectRoot 'kikumoe.spec'
 
 Write-Host "Running: poetry run python -m PyInstaller --noconfirm --clean $specPath" -ForegroundColor Green
 poetry run python -m PyInstaller --noconfirm --clean $specPath
 
-$appVersion = "1.11.0"
+$appVersion = "unknown"
 $versionYml = Join-Path $projectRoot "version.yml"
 if (Test-Path $versionYml) {
     $vMatch = Select-String -Path $versionYml -Pattern 'version:\s*(.+)'

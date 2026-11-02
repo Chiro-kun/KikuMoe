@@ -17,6 +17,9 @@ fi
 echo "Installing dependencies via Poetry..."
 poetry install --only main,build
 
+echo "Synchronizing version from version.yml..."
+poetry run python scripts/sync_version.py
+
 echo "Running: poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec"
 poetry run python -m PyInstaller --noconfirm --clean kikumoe.spec
 
@@ -35,4 +38,4 @@ fi
 
 VERSION="$(sed -nE 's/^version:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' "$PROJECT_ROOT/version.yml" | head -1)"
 echo "Done. Output:"
-echo "  dist/KikuMoe/KikuMoe (v${VERSION:-2.0.0-beta4})"
+echo "  dist/KikuMoe/KikuMoe (v${VERSION:-unknown})"

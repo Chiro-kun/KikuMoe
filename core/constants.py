@@ -82,8 +82,8 @@ def _read_version_from_files() -> str:
     except Exception:
         pass
 
-    # 3) Fallback to default
-    return "2.0.0-beta4"
+    # 3) Fallback if files are missing
+    return "0.0.0-dev"
 
 
 APP_VERSION = _read_version_from_files()

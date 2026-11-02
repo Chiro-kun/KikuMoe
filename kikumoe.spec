@@ -58,7 +58,7 @@ if icon_dir.is_dir():
 
 # Include version.yml if present so the app can read it at runtime in onefile
 version_yml = repo_root / "version.yml"
-app_version = "2.0.0-beta4"
+app_version = "0.0.0-dev"
 if version_yml.exists():
     datas.append((str(version_yml), "."))
     try:
@@ -251,6 +251,17 @@ if _IS_WIN32:
     ico = packaging_win / "KikuMoe.ico"
     ver = packaging_win / "version_info.txt"
     mfst = packaging_win / "KikuMoe.manifest"
+    # Ensure version_info.txt is in sync with app_version (from version.yml)
+    try:
+        import sys
+
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        from scripts.sync_version import sync_version_info
+
+        sync_version_info(app_version, ver)
+    except Exception as e:
+        print(f"Notice: Could not auto-sync version_info.txt in spec: {e}")
     print(f"\n[BUILD DIAGNOSTICS]")
     print(f" - Icon path: {ico} (Exists: {ico.exists()})")
     print(f" - Version path: {ver} (Exists: {ver.exists()})")

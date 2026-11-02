@@ -107,17 +107,20 @@ Strings are accessed everywhere via `self._i18n.t("key")`. A runtime language sw
 
 ## Versioning
 
-The version is defined in `version.yml` at the repository root:
+The single source of truth for the application version is `version.yml` at the repository root:
 
 ```yaml
-version: 1.11.0
+version: 2.0.0-beta4
 ```
 
-To release a new version:
+To release or bump a version, you only need to change **one single file**:
 
-1. Update `version.yml`.
-2. Update `packaging/windows/version_info.txt` (`filevers` and `FileVersion` fields).
-3. Update the output name in `kikumoe.spec` (`name='KikuMoe-X.Y.Z'`), `build.ps1`, and `build.sh`.
+1. Update the version in `version.yml` (e.g. `version: 2.0.0-beta5`), OR run:
+   ```bash
+   poetry run python scripts/sync_version.py 2.0.0-beta5
+   ```
+2. All other files (`pyproject.toml`, `packaging/windows/version_info.txt`, `core/constants.py`, `kikumoe.spec`, `build.sh`, `build.ps1`, CI workflows) automatically read or synchronize from `version.yml`.
+3. Update `CHANGELOG.md` with release notes.
 4. Create the tag: `git tag vX.Y.Z`.
 
 ---
