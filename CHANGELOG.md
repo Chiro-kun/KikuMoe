@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.0.0-beta3] - Unreleased
+## [2.0.0-beta3] - 2026-11-02
 
 ### Added
 - **Audio-Reactive Conformal Fluid Wave Visualizer with Multi-Stop Cyber Gradient**:
