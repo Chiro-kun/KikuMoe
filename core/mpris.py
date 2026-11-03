@@ -68,11 +68,11 @@ class MprisPlayer(ServiceInterface):
 
     @method()
     def Next(self):
-        pass
+        self.bridge.command.emit("next")
 
     @method()
     def Previous(self):
-        pass
+        self.bridge.command.emit("previous")
 
     @method()
     def Pause(self):

@@ -471,3 +471,121 @@ def get_download_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
 
 def get_download_icon(size: int = 16, color: str | None = None) -> QIcon:
     return QIcon(get_download_pixmap(size, color))
+
+
+def get_queue_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate crisp playlist / queue lines icon."""
+    resolved_color = color if color is not None else PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<line x1="8" y1="6" x2="21" y2="6"/>'
+        '<line x1="8" y1="12" x2="21" y2="12"/>'
+        '<line x1="8" y1="18" x2="21" y2="18"/>'
+        '<line x1="3" y1="6" x2="3.01" y2="6"/>'
+        '<line x1="3" y1="12" x2="3.01" y2="12"/>'
+        '<line x1="3" y1="18" x2="3.01" y2="18"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_queue_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_queue_pixmap(size, color))
+
+
+def get_shuffle_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate shuffle arrows icon."""
+    resolved_color = color if color is not None else PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polyline points="16 3 21 3 21 8"/>'
+        '<line x1="4" y1="20" x2="21" y2="3"/>'
+        '<polyline points="21 16 21 21 16 21"/>'
+        '<line x1="15" y1="15" x2="21" y2="21"/>'
+        '<line x1="4" y1="4" x2="9" y2="9"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_shuffle_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_shuffle_pixmap(size, color))
+
+
+def get_repeat_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate repeat loop icon."""
+    resolved_color = color if color is not None else PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polyline points="17 1 21 5 17 9"/>'
+        '<path d="M3 11V9a4 4 0 0 1 4-4h14"/>'
+        '<polyline points="7 23 3 19 7 15"/>'
+        '<path d="M21 13v2a4 4 0 0 1-4 4H3"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_repeat_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_repeat_pixmap(size, color))
+
+
+def get_music_note_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate music note icon."""
+    resolved_color = color if color is not None else PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<path d="M9 18V5l12-2v13"/>'
+        '<circle cx="6" cy="18" r="3"/>'
+        '<circle cx="18" cy="16" r="3"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_music_note_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_music_note_pixmap(size, color))
+
+
+def get_prev_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate previous track icon."""
+    resolved_color = color if color is not None else PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polygon points="19 20 9 12 19 4 19 20"/>'
+        '<line x1="5" y1="19" x2="5" y2="5"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_prev_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_prev_pixmap(size, color))
+
+
+def get_next_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
+    """Generate next track icon."""
+    resolved_color = color if color is not None else PALETTE.get("accent", "#EC186C")
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polygon points="5 4 15 12 5 20 5 4"/>'
+        '<line x1="19" y1="5" x2="19" y2="19"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_next_icon(size: int = 16, color: str | None = None) -> QIcon:
+    return QIcon(get_next_pixmap(size, color))

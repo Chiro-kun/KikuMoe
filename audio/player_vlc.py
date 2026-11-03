@@ -489,7 +489,10 @@ class PlayerVLC:
                 except Exception as e:
                     self.log.debug("[DEBUG] play_url: stop() failed: %s", e)
             self.log.debug("[DEBUG] play_url: creating media")
-            media = self.instance.media_new(url)
+            if os.path.isfile(url):
+                media = self.instance.media_new_path(url)
+            else:
+                media = self.instance.media_new(url)
             if media is None:
                 self.log.error("[BACKEND] PlayerVLC: media_new(%s) returned None", url)
                 self._stopping = False
@@ -599,6 +602,37 @@ class PlayerVLC:
             return st in (vlc.State.Playing, vlc.State.Buffering, vlc.State.Opening)
         except Exception:
             return False
+
+    def seek(self, seconds: float) -> bool:
+        """Seek to target seconds in current track."""
+        if not self.is_ready() or self.player is None:
+            return False
+        try:
+            self.player.set_time(int(max(0.0, float(seconds)) * 1000))
+            return True
+        except Exception as e:
+            self.log.debug("[VLC] seek failed: %s", e)
+            return False
+
+    def get_time(self) -> float | None:
+        """Return current playback position in seconds."""
+        if not self.is_ready() or self.player is None:
+            return None
+        try:
+            ms = self.player.get_time()
+            return max(0.0, float(ms) / 1000.0) if ms >= 0 else 0.0
+        except Exception:
+            return None
+
+    def get_duration(self) -> float | None:
+        """Return track duration in seconds."""
+        if not self.is_ready() or self.player is None:
+            return None
+        try:
+            ms = self.player.get_length()
+            return max(0.0, float(ms) / 1000.0) if ms > 0 else None
+        except Exception:
+            return None
 
     # VLC event handler
     def _handle_event(self, event):

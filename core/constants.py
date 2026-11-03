@@ -144,7 +144,26 @@ STATION_GENSOKYO = "gensokyo"
 STATION_ANISON = "anison"
 STATION_NEURO21 = "neuro21"
 STATION_TRUCKERSFM = "truckersfm"
+STATION_LOCAL = "local"
 DEFAULT_STATION = STATION_LISTENMOE
+
+# Local Music Playback
+SUPPORTED_AUDIO_EXTENSIONS = (
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".m4a",
+    ".aac",
+    ".wav",
+)
+KEY_LOCAL_SHUFFLE = "local_shuffle"
+KEY_LOCAL_REPEAT_MODE = "local_repeat_mode"
+KEY_LOCAL_LAST_DIR = "local_last_dir"
+KEY_LOCAL_SAVED_TRACKS = "local_saved_tracks"
+REPEAT_OFF = 0
+REPEAT_ALL = 1
+REPEAT_ONE = 2
 
 # Theme & Custom Accent Engine (Phase 8)
 KEY_THEME = "theme"

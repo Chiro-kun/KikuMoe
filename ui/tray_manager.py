@@ -41,6 +41,7 @@ from core.constants import (
     STATION_ANISON,
     STATION_GENSOKYO,
     STATION_LISTENMOE,
+    STATION_LOCAL,
     STATION_NEURO21,
     STATION_TRUCKERSFM,
 )
@@ -767,6 +768,7 @@ class TrayManager(QObject):
                         ("ANISON.FM", STATION_ANISON),
                         ("Neuro 21", STATION_NEURO21),
                         ("TruckersFM", STATION_TRUCKERSFM),
+                        (self._t("station_local", "Musica locale"), STATION_LOCAL),
                     ]
                     for name, s_id in station_items:
                         acts = QAction(name, self._parent)

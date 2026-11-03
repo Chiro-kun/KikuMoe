@@ -106,6 +106,18 @@ STATIONS: dict[str, dict[str, Any]] = {
         "fallback_metadata_url": "https://live.truckers.fm/status-json.xsl",
         "homepage": "https://truckers.fm/",
     },
+    "local": {
+        "id": "local",
+        "name": "Musica Locale",
+        "icon": "radio_local.png",
+        "has_channels": False,
+        "channels": [],
+        "formats": ["Originale"],
+        "default_channel": "",
+        "default_format": "Originale",
+        "streams": {},
+        "homepage": "",
+    },
 }
 
 

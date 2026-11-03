@@ -586,6 +586,37 @@ class PlayerMPV:
         except Exception:
             return False
 
+    def seek(self, seconds: float) -> bool:
+        """Seek to target seconds in current track."""
+        if not self.is_ready() or self._player is None:
+            return False
+        try:
+            self._player.seek(max(0.0, float(seconds)), "absolute")
+            return True
+        except Exception as e:
+            self.log.debug("[MPV] seek failed: %s", e)
+            return False
+
+    def get_time(self) -> float | None:
+        """Return current playback position in seconds."""
+        if not self.is_ready() or self._player is None:
+            return None
+        try:
+            pos = getattr(self._player, "time_pos", None)
+            return float(pos) if pos is not None else 0.0
+        except Exception:
+            return None
+
+    def get_duration(self) -> float | None:
+        """Return track duration in seconds."""
+        if not self.is_ready() or self._player is None:
+            return None
+        try:
+            dur = getattr(self._player, "duration", None)
+            return float(dur) if dur is not None and dur > 0 else None
+        except Exception:
+            return None
+
     def get_version(self) -> str | None:
         if mpv is None or not self.is_ready():
             return None

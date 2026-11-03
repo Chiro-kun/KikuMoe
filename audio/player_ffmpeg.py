@@ -93,6 +93,10 @@ class PlayerFFmpeg:
         self._paused: bool = False
         self._init_error: str | None = None
         self._audio_tap: Callable[[bytes], None] | None = None
+        self._current_seek_offset: float = 0.0
+        self._bytes_streamed: int = 0
+        self._stream_sample_rate: int = 48000
+        self._is_local_file: bool = False
         self.log = get_logger("PlayerFFmpeg")
         self._ffmpeg_bin = _find_ffmpeg_bin()
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.11.0")
@@ -253,12 +257,12 @@ class PlayerFFmpeg:
         return None
 
     def _sanitize_stream_url(self, raw: str) -> str:
-        """Estrae e sanifica un URL di streaming, rimuovendo in modo aggressivo
-        apici/backtick e punteggiatura finale.
-        Usa una classe di caratteri consentiti per l'URL (coerente con la UI)
-        per evitare di catturare simboli indesiderati.
-        """
+        """Estrae e sanifica un URL di streaming o preserva un percorso file locale esistente."""
         try:
+            # Se raw è un file locale esistente, preserva il percorso assoluto
+            if raw and os.path.isfile(raw):
+                return str(Path(raw).resolve())
+
             s = raw or ""
             # Rimuovi globalmente caratteri di apici/backtick e spazi superflui
             s = re.sub(r"[`'\"“”‘’]+", "", s)
@@ -327,6 +331,9 @@ class PlayerFFmpeg:
             # Reset state safely (azzera PRIMA di creare il thread)
             with self._state_lock:
                 self._current_stream = safe_url
+                self._is_local_file = os.path.isfile(safe_url)
+                self._current_seek_offset = 0.0
+                self._bytes_streamed = 0
                 self._stop_requested = False
                 self._stop_event.clear()
                 self._playing = True
@@ -458,6 +465,42 @@ class PlayerFFmpeg:
 
     def is_paused(self) -> bool:
         return bool(self._paused)
+
+    def seek(self, seconds: float) -> bool:
+        """Seek to target timestamp in seconds for local audio playback."""
+        if not self.is_ready() or not self._is_local_file:
+            return False
+        with self._state_lock:
+            cur_stream = self._current_stream
+            if not cur_stream or not self._playing:
+                return False
+            self._current_seek_offset = max(0.0, float(seconds))
+            self._bytes_streamed = 0
+
+        self.stop()
+        with self._state_lock:
+            self._current_stream = cur_stream
+            self._stop_requested = False
+            self._stop_event.clear()
+            self._playing = True
+
+        self._stream_thread = threading.Thread(target=self._stream_worker, args=(cur_stream,))
+        self._stream_thread.daemon = True
+        self._stream_thread.start()
+        return True
+
+    def get_time(self) -> float | None:
+        """Return current playback position in seconds."""
+        if not self._playing:
+            return 0.0
+        bytes_per_sec = self._stream_sample_rate * 2 * 2
+        if bytes_per_sec > 0:
+            return self._current_seek_offset + (self._bytes_streamed / bytes_per_sec)
+        return self._current_seek_offset
+
+    def get_duration(self) -> float | None:
+        """Return track duration if known."""
+        return None
 
     def get_version(self) -> str | None:
         """Return ffmpeg version string if available."""
@@ -710,6 +753,7 @@ class PlayerFFmpeg:
 
         try:
             stream.write(chunk_to_write, exception_on_underflow=False)
+            self._bytes_streamed += len(chunk_to_write)
         except Exception as e:
             self.log.debug("[DEBUG] _write_audio_chunk: error writing chunk: %s", e)
 
@@ -731,6 +775,7 @@ class PlayerFFmpeg:
                 try:
                     device_idx = self._get_output_device_index()
                     self._audio_stream, stream_rate = self._open_pyaudio_stream(device_idx)
+                    self._stream_sample_rate = stream_rate
                     try:
                         if self._audio_stream is not None and hasattr(
                             self._audio_stream, "start_stream"
@@ -760,21 +805,26 @@ class PlayerFFmpeg:
                 "[DEBUG] _stream_worker: sanitized url: %r from raw: %r", safe_url, raw_url
             )
 
-            # Costruisci lista di URL candidati con fallback automatici (solo endpoint HTTPS)
-            candidates: list[str] = [safe_url]
-            try:
-                u = safe_url.lower()
-                if "/kpop/" in u:
-                    candidates.append("https://listen.moe/kpop/stream")
-                    candidates.append("https://listen.moe/kpop/stream.m3u")
-                else:
-                    candidates.append("https://listen.moe/stream")
-                    candidates.append("https://listen.moe/stream.m3u")
-            except Exception:
-                pass
+            is_local = os.path.isfile(safe_url)
+            if is_local:
+                candidates = [safe_url]
+            else:
+                candidates = [safe_url]
+                try:
+                    u = safe_url.lower()
+                    if "/kpop/" in u:
+                        candidates.append("https://listen.moe/kpop/stream")
+                        candidates.append("https://listen.moe/kpop/stream.m3u")
+                    else:
+                        candidates.append("https://listen.moe/stream")
+                        candidates.append("https://listen.moe/stream.m3u")
+                except Exception:
+                    pass
 
-            # Rimuovi eventuali endpoint non-HTTPS per prevenire stream in chiaro
-            candidates = [c for c in candidates if c.lower().startswith("https://")] or [safe_url]
+                # Rimuovi eventuali endpoint non-HTTPS per prevenire stream in chiaro
+                candidates = [c for c in candidates if c.lower().startswith("https://")] or [
+                    safe_url
+                ]
 
             # Tenta in sequenza ogni URL candidato finché non si ricevono dati
             started_streaming = False
@@ -802,16 +852,14 @@ class PlayerFFmpeg:
                     ffmpeg_bin,
                     "-hide_banner",
                     "-nostdin",
-                    # Network/HTTP options for robust streaming
-                    "-rw_timeout",
-                    "15000000",
-                    "-user_agent",
-                    self._user_agent,
                 ]
-                # Add reconnect options to handle stream switches gracefully
-                try:
+                if not is_local:
                     ffmpeg_cmd.extend(
                         [
+                            "-rw_timeout",
+                            "15000000",
+                            "-user_agent",
+                            self._user_agent,
                             "-reconnect",
                             "1",
                             "-reconnect_streamed",
@@ -824,8 +872,9 @@ class PlayerFFmpeg:
                             "1",
                         ]
                     )
-                except Exception:
-                    pass
+                else:
+                    if self._current_seek_offset > 0:
+                        ffmpeg_cmd.extend(["-ss", f"{self._current_seek_offset:.3f}"])
 
                 # Apply MP3-specific headers (some servers expect audio/mpeg Accept)
                 if is_mp3:

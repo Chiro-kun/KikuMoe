@@ -163,7 +163,51 @@ class MiniIconButton(QPushButton):
 
 
 class MiniTrackProgress(QProgressBar):
-    """A smooth track with rounded ends, including the filled portion."""
+    """A smooth track with rounded ends, including the filled portion and optional seeking."""
+
+    seek_requested = pyqtSignal(float)
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._seekable = False
+        self._is_dragging = False
+
+    def set_seekable(self, seekable: bool) -> None:
+        self._seekable = bool(seekable)
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor if self._seekable else Qt.CursorShape.ArrowCursor
+        )
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if self._seekable and event.button() == Qt.MouseButton.LeftButton:
+            w = max(1.0, float(self.width()))
+            ratio = max(0.0, min(1.0, float(event.position().x()) / w))
+            self._is_dragging = True
+            self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
+            self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._seekable and self._is_dragging:
+            w = max(1.0, float(self.width()))
+            ratio = max(0.0, min(1.0, float(event.position().x()) / w))
+            self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
+            self.update()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._seekable and self._is_dragging and event.button() == Qt.MouseButton.LeftButton:
+            self._is_dragging = False
+            w = max(1.0, float(self.width()))
+            ratio = max(0.0, min(1.0, float(event.position().x()) / w))
+            self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)

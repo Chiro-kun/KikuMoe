@@ -79,8 +79,8 @@ class WindowsMediaBridge(QObject):
             controls.is_play_enabled = True
             controls.is_pause_enabled = True
             controls.is_stop_enabled = True
-            controls.is_next_enabled = False
-            controls.is_previous_enabled = False
+            controls.is_next_enabled = True
+            controls.is_previous_enabled = True
             controls.is_enabled = True
             self._token = controls.add_button_pressed(self._on_button)
             self.controls = controls
@@ -99,11 +99,19 @@ class WindowsMediaBridge(QObject):
         if self._modules is None or self.controls is None:
             return
         media = self._modules[1]
-        actions = {
-            media.SystemMediaTransportControlsButton.PLAY: "play",
-            media.SystemMediaTransportControlsButton.PAUSE: "pause",
-            media.SystemMediaTransportControlsButton.STOP: "stop",
-        }
+        btn_enum = getattr(media, "SystemMediaTransportControlsButton", None)
+        actions = {}
+        if btn_enum is not None:
+            for attr, cmd in (
+                ("PLAY", "play"),
+                ("PAUSE", "pause"),
+                ("STOP", "stop"),
+                ("NEXT", "next"),
+                ("PREVIOUS", "previous"),
+            ):
+                val = getattr(btn_enum, attr, None)
+                if val is not None:
+                    actions[val] = cmd
         action = actions.get(args.button)
         if action:
             try:

@@ -369,6 +369,134 @@ class ForceStopButton(AnimatedVectorButton):
         painter.end()
 
 
+class PrevButton(AnimatedVectorButton):
+    """36x36px circular Previous Track button."""
+
+    def __init__(self, parent: Optional[QWidget] = None, size: int = 36):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w / 2.0, h / 2.0
+        r = (w / 2.0) - 2.0
+        self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
+
+        if not self.isEnabled():
+            bg = QColor(255, 255, 255, 6)
+            border = QColor(255, 255, 255, 12)
+            col = QColor(255, 255, 255, 40)
+        elif self._hover or self._pressed:
+            bg = accent_qcolor(45 if self._pressed else 30)
+            border = accent_qcolor(150)
+            col = QColor("#ffffff")
+        else:
+            bg = QColor(255, 255, 255, 12)
+            border = QColor(255, 255, 255, 24)
+            col = QColor("#b0b7cc")
+
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.0))
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(col)
+        painter.drawRoundedRect(QRectF(cx - 6.0, cy - 5.0, 2.0, 10.0), 1.0, 1.0)
+        tri = QPolygonF(
+            [
+                QPointF(cx - 4.0, cy),
+                QPointF(cx + 5.0, cy - 5.0),
+                QPointF(cx + 5.0, cy + 5.0),
+            ]
+        )
+        painter.drawPolygon(tri)
+        painter.end()
+
+
+class NextButton(AnimatedVectorButton):
+    """36x36px circular Next Track button."""
+
+    def __init__(self, parent: Optional[QWidget] = None, size: int = 36):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w / 2.0, h / 2.0
+        r = (w / 2.0) - 2.0
+        self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
+
+        if not self.isEnabled():
+            bg = QColor(255, 255, 255, 6)
+            border = QColor(255, 255, 255, 12)
+            col = QColor(255, 255, 255, 40)
+        elif self._hover or self._pressed:
+            bg = accent_qcolor(45 if self._pressed else 30)
+            border = accent_qcolor(150)
+            col = QColor("#ffffff")
+        else:
+            bg = QColor(255, 255, 255, 12)
+            border = QColor(255, 255, 255, 24)
+            col = QColor("#b0b7cc")
+
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.0))
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(col)
+        tri = QPolygonF(
+            [
+                QPointF(cx + 4.0, cy),
+                QPointF(cx - 5.0, cy - 5.0),
+                QPointF(cx - 5.0, cy + 5.0),
+            ]
+        )
+        painter.drawPolygon(tri)
+        painter.drawRoundedRect(QRectF(cx + 4.0, cy - 5.0, 2.0, 10.0), 1.0, 1.0)
+        painter.end()
+
+
+class QueueButton(AnimatedVectorButton):
+    """36x36px circular Local Queue / Playlist button."""
+
+    def __init__(self, parent: Optional[QWidget] = None, size: int = 36):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = float(self.width()), float(self.height())
+        cx, cy = w / 2.0, h / 2.0
+        r = (w / 2.0) - 2.0
+        self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
+
+        if self._hover or self._pressed:
+            bg = accent_qcolor(45 if self._pressed else 30)
+            border = accent_qcolor(150)
+            col = QColor("#ffffff")
+        else:
+            bg = QColor(255, 255, 255, 12)
+            border = QColor(255, 255, 255, 24)
+            col = QColor("#b0b7cc")
+
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.0))
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(col)
+        for y_off in (-4.0, 0.0, 4.0):
+            painter.drawEllipse(QPointF(cx - 5.0, cy + y_off), 1.0, 1.0)
+            painter.drawRoundedRect(QRectF(cx - 2.5, cy + y_off - 1.0, 8.0, 2.0), 1.0, 1.0)
+        painter.end()
+
+
 class SleepButton(AnimatedVectorButton):
     """
     42px circular button (or 88px pill when countdown is active):
@@ -599,6 +727,9 @@ class PlaybackControls(QFrame):
     play_clicked = pyqtSignal()
     pause_resume_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
+    prev_clicked = pyqtSignal()
+    next_clicked = pyqtSignal()
+    queue_clicked = pyqtSignal()
     force_stop_clicked = pyqtSignal()
     sleep_toggle_clicked = pyqtSignal()
     volume_changed = pyqtSignal(int)
@@ -633,9 +764,21 @@ class PlaybackControls(QFrame):
         self.btn_stop.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.btn_stop.customContextMenuRequested.connect(self._show_stop_context_menu)
 
+        self.btn_prev = PrevButton(size=36)
+        self.btn_prev.setToolTip("Previous Track (F5)")
+        self.btn_prev.clicked.connect(self.prev_clicked.emit)
+
         self.hero_play = HeroPlayButton(size=62)
         self.hero_play.setToolTip("Play / Pause (Space)")
         self.hero_play.clicked.connect(self._on_hero_clicked)
+
+        self.btn_next = NextButton(size=36)
+        self.btn_next.setToolTip("Next Track (F6)")
+        self.btn_next.clicked.connect(self.next_clicked.emit)
+
+        self.btn_queue = QueueButton(size=36)
+        self.btn_queue.setToolTip("Queue / Playlist (Q)")
+        self.btn_queue.clicked.connect(self.queue_clicked.emit)
 
         self.btn_sleep = SleepButton()
         self.btn_sleep.setToolTip("Sleep Timer")
@@ -653,9 +796,12 @@ class PlaybackControls(QFrame):
         transport_row.addStretch(1)
         transport_row.addWidget(self.btn_force_stop)
         transport_row.addWidget(self.btn_stop)
-        transport_row.addSpacing(6)
+        transport_row.addWidget(self.btn_prev)
+        transport_row.addSpacing(2)
         transport_row.addWidget(self.hero_play)
-        transport_row.addSpacing(6)
+        transport_row.addSpacing(2)
+        transport_row.addWidget(self.btn_next)
+        transport_row.addWidget(self.btn_queue)
         transport_row.addWidget(self.btn_sleep)
         transport_row.addWidget(self.btn_autoplay)
         transport_row.addStretch(1)
@@ -778,8 +924,17 @@ class PlaybackControls(QFrame):
         self.btn_autoplay.update()
         self.autoplay_toggled.emit(checked)
 
+    def set_nav_enabled(self, prev_enabled: bool, next_enabled: bool) -> None:
+        self.btn_prev.setEnabled(prev_enabled)
+        self.btn_next.setEnabled(next_enabled)
+        self.btn_prev.update()
+        self.btn_next.update()
+
     def refresh_theme(self) -> None:
         self.hero_play.refresh_theme()
+        self.btn_prev.update()
+        self.btn_next.update()
+        self.btn_queue.update()
         self.btn_stop.update()
         self.btn_force_stop.update()
         self.btn_sleep.update()

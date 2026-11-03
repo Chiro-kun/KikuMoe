@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Dict, Optional, Set, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Union
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -104,11 +104,15 @@ from core.constants import (
     KEY_WINDOW_GEOMETRY,
     ORG_NAME,
     STATION_LISTENMOE,
+    STATION_LOCAL,
+    SUPPORTED_AUDIO_EXTENSIONS,
     UPDATE_CHANNEL_BETA,
     UPDATE_CHANNEL_STABLE,
 )
 from core.discord_presence import DiscordPresence, activity_payload
 from core.i18n import I18n
+from core.local_metadata import LocalTrackInfo
+from core.local_playlist import LocalPlaylistManager
 from core.logger import get_logger
 from core.lyrics import LyricsProvider
 from core.media_state import MediaState
@@ -134,6 +138,7 @@ from ui.close_dialog import CloseConfirmDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
 from ui.history_popover import SongHistoryPopover
+from ui.local_queue_dialog import LocalQueueDialog
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
 from ui.themes.cyber_moe import (
     PALETTE,
@@ -176,6 +181,8 @@ _MIN_WINDOW_HEIGHT = 700
 
 # Custom Progress Bar with Scrubber Playhead, Gradient Fill & 60 FPS Play/Buffer Animation
 class SmoothProgressBar(QWidget):
+    seek_requested = pyqtSignal(float)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._value = 0
@@ -185,6 +192,8 @@ class SmoothProgressBar(QWidget):
         self._buffering_indeterminate = False
         self._buffering_percent = 0
         self._live_mode = False
+        self._seekable = False
+        self._is_dragging = False
         self._launch_progress = 1.0
         self._pulse_ring = 1.0
         self._shimmer_phase = 0.0
@@ -269,6 +278,51 @@ class SmoothProgressBar(QWidget):
 
     def is_live_mode(self) -> bool:
         return bool(self._live_mode)
+
+    def set_seekable(self, seekable: bool) -> None:
+        self._seekable = bool(seekable)
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor if self._seekable else Qt.CursorShape.ArrowCursor
+        )
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if self._seekable and event.button() == Qt.MouseButton.LeftButton:
+            margin_x = 7.0
+            usable_w = max(1.0, float(self.width()) - 2 * margin_x)
+            pos_x = float(event.position().x()) - margin_x
+            ratio = max(0.0, min(1.0, pos_x / usable_w))
+            self._is_dragging = True
+            target_val = int(ratio * self._max)
+            self.setValue(target_val)
+            self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._seekable and self._is_dragging:
+            margin_x = 7.0
+            usable_w = max(1.0, float(self.width()) - 2 * margin_x)
+            pos_x = float(event.position().x()) - margin_x
+            ratio = max(0.0, min(1.0, pos_x / usable_w))
+            target_val = int(ratio * self._max)
+            self.setValue(target_val)
+            self.update()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._seekable and self._is_dragging and event.button() == Qt.MouseButton.LeftButton:
+            self._is_dragging = False
+            margin_x = 7.0
+            usable_w = max(1.0, float(self.width()) - 2 * margin_x)
+            pos_x = float(event.position().x()) - margin_x
+            ratio = max(0.0, min(1.0, pos_x / usable_w))
+            self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mouseReleaseEvent(event)
 
     def _tick_anim(self) -> None:
         still_running = False
@@ -489,6 +543,11 @@ class ListenMoePlayer(QWidget):
         self._about_dialog: Optional[AboutDialog] = None
         self.history_mgr = SongHistoryManager(max_entries=100, parent=self)
         self._history_popover: Optional[SongHistoryPopover] = None
+        self.local_playlist = LocalPlaylistManager(self)
+        self._queue_dialog: Optional[LocalQueueDialog] = None
+        self.local_playlist.track_changed.connect(self._on_local_track_changed)
+        self.local_playlist.playback_ended.connect(self._on_local_playback_ended)
+        self.setAcceptDrops(True)
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -898,6 +957,7 @@ class ListenMoePlayer(QWidget):
         self.song_progress = SmoothProgressBar()
         self.song_progress.setVisible(True)
         self.song_progress.setObjectName("songProgressBar")
+        self.song_progress.seek_requested.connect(self._on_seek_requested)
         prog_box.addWidget(self.song_progress)
 
         time_row = QHBoxLayout()
@@ -1078,6 +1138,12 @@ class ListenMoePlayer(QWidget):
     def _update_lyrics_position(self):
         if not self.lyrics_button.isChecked() or self._ui_paused:
             return
+        if self._is_local_mode():
+            if hasattr(self, "player") and self.player:
+                t = getattr(self.player, "get_time", lambda: 0.0)()
+                if t is not None and t >= 0:
+                    self.lyrics_panel.set_position(float(t))
+            return
         epoch = self._current_start_epoch
         duration = self._current_duration_seconds
         if epoch is None or duration is None:
@@ -1108,6 +1174,9 @@ class ListenMoePlayer(QWidget):
         self.playback_controls.play_clicked.connect(self.play_stream)
         self.playback_controls.pause_resume_clicked.connect(self.pause_resume)
         self.playback_controls.stop_clicked.connect(self.stop_stream)
+        self.playback_controls.prev_clicked.connect(self.play_previous_track)
+        self.playback_controls.next_clicked.connect(self.play_next_track)
+        self.playback_controls.queue_clicked.connect(self.show_local_queue_dialog)
         self.playback_controls.force_stop_clicked.connect(self.force_stop_all)
         self.playback_controls.sleep_toggle_clicked.connect(self._on_sleep_toggle_clicked)
         self.playback_controls.volume_changed.connect(self.change_volume)
@@ -1355,6 +1424,7 @@ class ListenMoePlayer(QWidget):
             on_status_text=self._on_ws_closed_text,
             initial_station=init_station,
             initial_channel=init_channel,
+            playlist_manager=self.local_playlist,
         )
         self.ws = getattr(self.station_mgr, "_active_provider", None)
         self.station_mgr.start()
@@ -1469,6 +1539,7 @@ class ListenMoePlayer(QWidget):
         self.mini_hud.restore_requested.connect(self.toggle_mini_hud)
         self.mini_hud.play_requested.connect(self._tray_toggle_play_pause)
         self.mini_hud.pin_changed.connect(self._set_mini_always_on_top)
+        self.mini_hud.track_progress.seek_requested.connect(self._on_seek_requested)
         self.mini_hud.volume.setValue(self.volume_slider.value())
         self.mini_hud.volume.valueChanged.connect(self.volume_slider.setValue)
         self.volume_slider.valueChanged.connect(self.mini_hud.volume.setValue)
@@ -1515,11 +1586,23 @@ class ListenMoePlayer(QWidget):
         self.mini_hud.title.set_text(self._current_title or "–")
         self.mini_hud.artist.set_text(self._current_artist or "")
         duration = self._current_duration_seconds
-        epoch = self._current_start_epoch
-        elapsed = None
-        if epoch is not None and duration is not None:
-            now_synced = time.time() + self._clock_sync_offset
-            elapsed = (duration - (epoch - now_synced)) if duration > 0 else (now_synced - epoch)
+        if self._is_local_mode():
+            curr_t = 0.0
+            if hasattr(self, "player") and self.player:
+                t = getattr(self.player, "get_time", lambda: 0.0)()
+                if t is not None:
+                    curr_t = float(t)
+            elapsed = curr_t
+            self.mini_hud.track_progress.set_seekable(True)
+        else:
+            self.mini_hud.track_progress.set_seekable(False)
+            epoch = self._current_start_epoch
+            elapsed = None
+            if epoch is not None and duration is not None:
+                now_synced = time.time() + self._clock_sync_offset
+                elapsed = (
+                    (duration - (epoch - now_synced)) if duration > 0 else (now_synced - epoch)
+                )
         title = (self._current_title or "").strip()
         live = (duration is None or duration <= 0) and title not in (
             "",
@@ -1643,7 +1726,14 @@ class ListenMoePlayer(QWidget):
             duration = max(0, self._current_duration_seconds or 0)
             epoch = self._current_start_epoch
             position = 0.0
-            if epoch is not None and duration > 0:
+            if getattr(self, "_is_local_mode", lambda: False)():
+                curr_t = 0.0
+                if player:
+                    t = getattr(player, "get_time", lambda: 0.0)()
+                    if t is not None:
+                        curr_t = float(t)
+                position = curr_t
+            elif epoch is not None and duration > 0:
                 position = max(
                     0.0,
                     min(
@@ -1692,6 +1782,10 @@ class ListenMoePlayer(QWidget):
             self._tray_toggle_play_pause()
         elif command == "stop":
             self.stop_stream()
+        elif command == "next":
+            self.play_next_track()
+        elif command == "previous":
+            self.play_previous_track()
         elif command == "mute":
             self.toggle_mute_shortcut()
         elif command == "volume_up":
@@ -1752,6 +1846,15 @@ class ListenMoePlayer(QWidget):
             QShortcut(QKeySequence("Space"), self).activated.connect(self.pause_resume)
             QShortcut(QKeySequence("S"), self).activated.connect(self.stop_stream)
             QShortcut(QKeySequence("M"), self).activated.connect(self.toggle_mute_shortcut)
+            QShortcut(QKeySequence(Qt.Key.Key_MediaNext), self).activated.connect(
+                self.play_next_track
+            )
+            QShortcut(QKeySequence(Qt.Key.Key_MediaPrevious), self).activated.connect(
+                self.play_previous_track
+            )
+            QShortcut(QKeySequence("F6"), self).activated.connect(self.play_next_track)
+            QShortcut(QKeySequence("F5"), self).activated.connect(self.play_previous_track)
+            QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(self.show_local_queue_dialog)
         except Exception:
             pass
 
@@ -2003,6 +2106,8 @@ class ListenMoePlayer(QWidget):
                             )
                         except Exception:
                             pass
+                    elif self._is_local_mode():
+                        self.play_next_track()
                     elif not getattr(self, "_retry_pending", False):
                         self._retry_pending = True
                         self.schedule_play.emit(1000)
@@ -2245,6 +2350,19 @@ class ListenMoePlayer(QWidget):
         if hasattr(self, "station_pill") and self.station_pill:
             self.station_pill.update_state(clean_id, target_channel)
 
+        is_local = clean_id == STATION_LOCAL
+        if hasattr(self, "song_progress"):
+            self.song_progress.set_seekable(is_local)
+        if hasattr(self, "playback_controls"):
+            has_prev = is_local and (
+                self.local_playlist.current_index > 0 or self.local_playlist.repeat_mode == 1
+            )
+            has_next = is_local and (
+                self.local_playlist.current_index < len(self.local_playlist.tracks) - 1
+                or self.local_playlist.repeat_mode == 1
+            )
+            self.playback_controls.set_nav_enabled(has_prev, has_next)
+
         # 2. Update station manager and switch playback if playing
         if hasattr(self, "station_mgr"):
             changed = self.station_mgr.set_station(clean_id)
@@ -2264,9 +2382,14 @@ class ListenMoePlayer(QWidget):
                 self._current_cover_ref = None
                 cfg = get_station_config(clean_id)
                 if hasattr(self, "stream_tag_label") and self.stream_tag_label:
+                    tag_suffix = "PLAYLIST" if clean_id == STATION_LOCAL else "STREAM"
                     self.stream_tag_label.setText(
-                        f"{str(cfg.get('name', clean_id)).upper()} · STREAM"
+                        f"{str(cfg.get('name', clean_id)).upper()} · {tag_suffix}"
                     )
+                if clean_id == STATION_LOCAL:
+                    curr_track = self.local_playlist.get_current_track()
+                    if curr_track:
+                        self._on_local_track_changed(curr_track)
                 icon_file = cfg.get("icon")
                 if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
                     icon_path = os.path.join(self._icon_dir, icon_file)
@@ -2377,6 +2500,21 @@ class ListenMoePlayer(QWidget):
             import time
 
             self._update_lyrics_position()
+
+            if self._is_local_mode():
+                curr_t = 0.0
+                if hasattr(self, "player") and self.player:
+                    t = getattr(self.player, "get_time", lambda: 0.0)()
+                    if t is not None:
+                        curr_t = float(t)
+                dur = getattr(self, "_current_duration_seconds", None) or 0
+                if dur > 0:
+                    self.song_progress.setValue(int(min(curr_t, dur) * 1000))
+                current_int_sec = int(curr_t)
+                if current_int_sec != getattr(self, "_last_integer_second", -1):
+                    self._last_integer_second = current_int_sec
+                    self.update_now_playing_label()
+                return
 
             now = time.time()
             epoch = getattr(self, "_current_start_epoch", None)
@@ -2875,6 +3013,19 @@ class ListenMoePlayer(QWidget):
 
     def _request_album_cover(self, cover_ref: Optional[str]) -> None:
         try:
+            if cover_ref and (cover_ref.startswith("file://") or os.path.isfile(cover_ref)):
+                local_file = (
+                    urllib.request.url2pathname(urllib.parse.urlsplit(cover_ref).path)
+                    if cover_ref.startswith("file://")
+                    else cover_ref
+                )
+                if os.path.isfile(local_file):
+                    self._current_cover_url = cover_ref
+                    pix = QPixmap(local_file)
+                    if not pix.isNull():
+                        self._set_album_cover_pixmap(pix)
+                        return
+
             cover_url = self._normalize_album_cover_url(cover_ref)
             if cover_url == self._current_cover_url:
                 return
@@ -3024,6 +3175,8 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, "ambient_cover"):
                 self.ambient_cover.set_cover(pixmap)
+            if hasattr(self, "mini_hud") and self.mini_hud is not None:
+                self.mini_hud.set_cover_pixmap(pixmap)
             if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
                 self.tray_mgr.set_cover_pixmap(pixmap)
             if hasattr(self, "_content_widget") and isinstance(
@@ -3924,6 +4077,10 @@ class ListenMoePlayer(QWidget):
     def get_selected_stream_url(self) -> str:
         """Restituisce l'URL dello stream in base a stazione, canale e formato."""
         try:
+            if hasattr(self, "station_mgr") and self.station_mgr:
+                url = self.station_mgr.get_stream_url()
+                if url:
+                    return str(url)
             station = getattr(self, "_current_radio_provider", None) or str(
                 self.settings.value(KEY_STATION, DEFAULT_STATION)
             )
@@ -4431,7 +4588,7 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
                 ok = self.player.play_url(safe_url)
-                if not ok:
+                if not ok and not self._is_local_mode():
                     # Fallback: prova formato alternativo per lo stesso canale
                     try:
                         channel = self.settings.value(KEY_CHANNEL, "J-POP")
@@ -4751,3 +4908,223 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
         except Exception:
             pass
+
+    # ------------------- Local Music & Drag-and-Drop -------------------
+
+    def _is_local_mode(self) -> bool:
+        """Returns True if the currently selected station is Local Music."""
+        if hasattr(self, "station_mgr") and self.station_mgr:
+            return bool(self.station_mgr.current_station_id == STATION_LOCAL)
+        return (
+            str(self.settings.value(KEY_STATION, DEFAULT_STATION)).lower().strip() == STATION_LOCAL
+        )
+
+    def play_next_track(self) -> None:
+        """Advances to the next track in the local queue and starts playback."""
+        if not self._is_local_mode():
+            return
+        next_track = self.local_playlist.next_track()
+        if next_track:
+            self.log.info(f"[UI] Next local track: {next_track.title} by {next_track.artist}")
+            self.play_stream(is_retry=False)
+        else:
+            self.log.info("[UI] Next track reached end of playlist.")
+            self.stop_stream()
+
+    def play_previous_track(self) -> None:
+        """Returns to previous track (or restarts current track if >3s in)."""
+        if not self._is_local_mode():
+            return
+        curr_time = 0.0
+        if hasattr(self, "player") and self.player:
+            t = getattr(self.player, "get_time", lambda: 0.0)()
+            if t is not None:
+                curr_time = float(t)
+        if curr_time > 3.0:
+            try:
+                self.player.seek(0.0)
+                self.song_progress.setValue(0)
+                if hasattr(self, "lyrics_panel") and self.lyrics_panel:
+                    self.lyrics_panel.set_position(0.0)
+                return
+            except Exception:
+                pass
+
+        prev_track = self.local_playlist.previous_track()
+        if prev_track:
+            self.log.info(f"[UI] Previous local track: {prev_track.title} by {prev_track.artist}")
+            self.play_stream(is_retry=False)
+        else:
+            self.log.info("[UI] Previous track reached start of playlist.")
+
+    def show_local_queue_dialog(self) -> None:
+        """Opens or brings to front the frameless Local Queue manager dialog."""
+        if self._queue_dialog is None:
+            self._queue_dialog = LocalQueueDialog(self.local_playlist, self)
+            self._queue_dialog.play_track_requested.connect(self._on_queue_play_track_requested)
+        if self._queue_dialog.isVisible():
+            self._queue_dialog.activateWindow()
+            self._queue_dialog.raise_()
+        else:
+            self._queue_dialog.show()
+            self._queue_dialog.activateWindow()
+            self._queue_dialog.raise_()
+
+    def _on_queue_play_track_requested(self, index: int) -> None:
+        """Plays the track selected in the queue dialog."""
+        if self.local_playlist.set_current_index(index):
+            if (
+                hasattr(self, "station_mgr")
+                and self.station_mgr.current_station_id != STATION_LOCAL
+            ):
+                self.set_radio_provider(STATION_LOCAL)
+            self.play_stream(is_retry=False)
+
+    def _on_seek_requested(self, ratio: float) -> None:
+        """Performs immediate audio seek and syncs progress UI and lyrics."""
+        if not self._is_local_mode():
+            return
+        track = self.local_playlist.get_current_track()
+        if not track or track.duration_seconds <= 0:
+            return
+        target_sec = max(0.0, min(track.duration_seconds, ratio * track.duration_seconds))
+        if hasattr(self, "player") and self.player:
+            try:
+                self.player.seek(target_sec)
+                self.log.info(f"[UI] Local seek to {target_sec:.2f}s ({ratio * 100:.1f}%)")
+            except Exception as e:
+                self.log.warning(f"[UI] Seek failed: {e}")
+        self.song_progress.setValue(int(target_sec * 1000))
+        if hasattr(self, "lyrics_panel") and self.lyrics_panel:
+            self.lyrics_panel.set_position(target_sec)
+        if hasattr(self, "song_elapsed_label"):
+            self.song_elapsed_label.setText(self._format_mmss(int(target_sec)))
+        if hasattr(self, "song_time_label"):
+            rem = max(0, int(track.duration_seconds - target_sec))
+            self.song_time_label.setText(f"-{self._format_mmss(rem)}")
+
+    def _on_local_track_changed(self, track: Optional[LocalTrackInfo]) -> None:
+        """Updates UI display, cover art, and lyrics cascade when local track changes."""
+        if not self._is_local_mode():
+            return
+        if not track:
+            self._current_title = "–"
+            self._current_artist = (
+                self.i18n.t("queue_empty") if hasattr(self.i18n, "t") else "Coda vuota"
+            )
+            self._current_duration_seconds = None
+            self._current_start_epoch = None
+            self._current_cover_ref = None
+            self.song_progress.setValue(0)
+            self.song_progress.set_seekable(False)
+            self.playback_controls.set_nav_enabled(False, False)
+            self.label_refresh.emit()
+            return
+
+        self._current_title = track.display_title()
+        self._current_artist = track.display_artist()
+        self._current_duration_seconds = (
+            int(track.duration_seconds) if track.duration_seconds > 0 else None
+        )
+        self._current_start_epoch = time.time()
+        self.song_progress.set_seekable(True)
+        self.song_progress.set_live_mode(False)
+        if self._current_duration_seconds and self._current_duration_seconds > 0:
+            self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
+        self.song_progress.setValue(0)
+
+        # Update deck navigation buttons
+        has_prev = self.local_playlist.current_index > 0 or self.local_playlist.repeat_mode == 1
+        has_next = (
+            self.local_playlist.current_index < len(self.local_playlist.tracks) - 1
+            or self.local_playlist.repeat_mode == 1
+        )
+        self.playback_controls.set_nav_enabled(has_prev, has_next)
+
+        # Update album art
+        if track.cover_bytes:
+            pix = QPixmap()
+            pix.loadFromData(track.cover_bytes)
+            if not pix.isNull():
+                self._set_album_cover_pixmap(pix)
+        else:
+            cfg = get_station_config(STATION_LOCAL)
+            icon_file = cfg.get("icon", "kikumoe_local.png")
+            icon_path = os.path.join(self._icon_dir, icon_file)
+            if os.path.isfile(icon_path):
+                self._set_album_cover_pixmap(QPixmap(icon_path))
+            else:
+                self._set_album_cover_pixmap(None)
+
+        # 3-level lyrics cascade
+        if self.lyrics_button.isChecked():
+            if track.lyrics:
+                parsed = self.lyrics_provider.parse_lrc(track.lyrics)
+                badge = "LOCAL LRC" if parsed else self.i18n.t("lyrics_plain")
+                rec = {
+                    "trackName": track.title,
+                    "artistName": track.artist,
+                    "albumName": track.album,
+                    "duration": track.duration_seconds,
+                    "instrumental": False,
+                    "plainLyrics": track.lyrics,
+                    "syncedLyrics": track.lyrics if parsed else "",
+                }
+                self._lyrics_track = (track.title, track.artist)
+                self.lyrics_panel.show_record(rec, badge, "")
+                self.lyrics_panel.set_position(0.0)
+            else:
+                self._refresh_lyrics()
+
+        self.label_refresh.emit()
+        self._sync_mini_hud()
+        self.update_tray_texts()
+
+    def _on_local_playback_ended(self) -> None:
+        """Invoked when local playlist finishes all tracks without repeat."""
+        self.log.info("[UI] Local playlist ended.")
+        self.stop_stream()
+
+    def dragEnterEvent(self, event) -> None:
+        """Accepts audio files or folders dragged directly onto the player."""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                p = url.toLocalFile()
+                if os.path.isdir(p):
+                    event.acceptProposedAction()
+                    return
+                ext = os.path.splitext(p)[1].lower()
+                if ext in SUPPORTED_AUDIO_EXTENSIONS:
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        """Appends dropped audio files/folders, switches to Local station, and starts playback."""
+        if event.mimeData().hasUrls():
+            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+            if paths:
+                files_to_add: List[str] = []
+                for p in paths:
+                    if os.path.isdir(p):
+                        for root, _, files in os.walk(p):
+                            for f in files:
+                                if os.path.splitext(f)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                                    files_to_add.append(os.path.join(root, f))
+                    elif os.path.isfile(p):
+                        if os.path.splitext(p)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                            files_to_add.append(p)
+                if files_to_add:
+                    was_empty = len(self.local_playlist.tracks) == 0
+                    added = self.local_playlist.add_files(files_to_add)
+                    if added > 0:
+                        event.acceptProposedAction()
+                        if (
+                            hasattr(self, "station_mgr")
+                            and self.station_mgr.current_station_id != STATION_LOCAL
+                        ):
+                            self.set_radio_provider(STATION_LOCAL)
+                        if was_empty or not (hasattr(self, "player") and self.player.is_playing()):
+                            self.play_stream(is_retry=False)
+                        return
+        super().dropEvent(event)
