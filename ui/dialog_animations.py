@@ -90,6 +90,10 @@ class CyberMoeDialogAnimationMixin:
             or os.environ.get("QT_QPA_PLATFORM") == "offscreen"
         ):
             self._entrance_animated = False
+            self._is_closing = False
+            if isinstance(self, QDialog):
+                self.setWindowOpacity(1.0)
+                self.hide()
             callback()
             return
 
@@ -109,6 +113,10 @@ class CyberMoeDialogAnimationMixin:
 
         def _finish() -> None:
             self._entrance_animated = False
+            self._is_closing = False
+            if isinstance(self, QDialog):
+                self.setWindowOpacity(1.0)
+                self.hide()
             callback()
 
         group.finished.connect(_finish)
@@ -117,7 +125,9 @@ class CyberMoeDialogAnimationMixin:
 
     def showEvent(self, a0: QShowEvent | None) -> None:
         super().showEvent(a0)  # type: ignore[misc]
+        self._stop_dialog_animations()
         self._is_closing = False
+        self._entrance_animated = False
         self._animate_dialog_entrance()
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
@@ -133,7 +143,7 @@ class CyberMoeDialogAnimationMixin:
             return
         if a0:
             a0.ignore()
-        self._animate_dialog_exit(super().close)  # type: ignore[misc]
+        self._animate_dialog_exit(super().reject)  # type: ignore[misc]
 
     def accept(self) -> None:
         self._animate_dialog_exit(super().accept)  # type: ignore[misc]

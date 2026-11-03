@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -5039,7 +5039,7 @@ class ListenMoePlayer(QWidget):
         if self._queue_dialog is None:
             self._queue_dialog = LocalQueueDialog(self.local_playlist, self)
             self._queue_dialog.play_track_requested.connect(self._on_queue_play_track_requested)
-        if self._queue_dialog.isVisible():
+        if self._queue_dialog.isVisible() and not getattr(self._queue_dialog, "_is_closing", False):
             self._queue_dialog.activateWindow()
             self._queue_dialog.raise_()
         else:
@@ -5063,7 +5063,9 @@ class ListenMoePlayer(QWidget):
             from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
 
             if self._local_prompt_dialog is not None:
-                if self._local_prompt_dialog.isVisible():
+                if self._local_prompt_dialog.isVisible() and not getattr(
+                    self._local_prompt_dialog, "_is_closing", False
+                ):
                     self._local_prompt_dialog.activateWindow()
                     self._local_prompt_dialog.raise_()
                     return
@@ -5076,6 +5078,12 @@ class ListenMoePlayer(QWidget):
                 i18n=self.i18n,
             )
             self._local_prompt_dialog = dlg
+
+            def _on_prompt_closed(*_args: Any) -> None:
+                if self._local_prompt_dialog is dlg:
+                    self._local_prompt_dialog = None
+
+            dlg.finished.connect(_on_prompt_closed)
             dlg.tracks_loaded.connect(self._on_local_prompt_tracks_loaded)
             dlg.open_queue_requested.connect(self.show_local_queue_dialog)
             dlg.show()
