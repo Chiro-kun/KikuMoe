@@ -298,9 +298,11 @@ class UpdateDialog(QDialog):
             path = Path(self._downloaded_file_path)
             if _IS_WIN32 and path.suffix.lower() == ".exe":
                 try:
-                    os.startfile(str(path))
-                    self.close()
-                    return
+                    startfile = getattr(os, "startfile", None)
+                    if callable(startfile):
+                        startfile(str(path))
+                        self.close()
+                        return
                 except Exception:
                     pass
             # Open containing directory
