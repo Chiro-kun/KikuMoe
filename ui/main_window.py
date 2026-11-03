@@ -545,6 +545,7 @@ class ListenMoePlayer(QWidget):
         self._history_popover: Optional[SongHistoryPopover] = None
         self.local_playlist = LocalPlaylistManager(self)
         self._queue_dialog: Optional[LocalQueueDialog] = None
+        self._local_prompt_dialog: Optional[QDialog] = None
         self.local_playlist.track_changed.connect(self._on_local_track_changed)
         self.local_playlist.playback_ended.connect(self._on_local_playback_ended)
         self.setAcceptDrops(True)
@@ -911,13 +912,9 @@ class ListenMoePlayer(QWidget):
 
         self.track_menu_btn = TrackMenuChevronButton(self.now_playing_title)
         self.track_menu_btn.setToolTip(self.i18n.t("search_menu_tooltip"))
-        self.track_menu_btn.clicked.connect(
-            lambda: self._show_track_context_menu(from_chevron=True)
-        )
+        self.track_menu_btn.clicked.connect(self._on_track_labels_clicked)
         self.now_playing_title.attach_chevron_button(self.track_menu_btn)
-        self.now_playing_title.clicked.connect(
-            lambda: self._show_track_context_menu(from_chevron=True)
-        )
+        self.now_playing_title.clicked.connect(self._on_track_labels_clicked)
 
         self.now_playing_title.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
@@ -936,11 +933,10 @@ class ListenMoePlayer(QWidget):
         )
         self.now_playing_artist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.now_playing_artist.customContextMenuRequested.connect(self._show_track_context_menu)
-        self.now_playing_artist.clicked.connect(
-            lambda: self._show_track_context_menu(from_chevron=True)
-        )
+        self.now_playing_artist.clicked.connect(self._on_track_labels_clicked)
 
         self.track_hover_group = TrackHoverGroup(self.now_playing_title, self.now_playing_artist)
+        self.track_hover_group.clicked.connect(self._on_track_labels_clicked)
         self.track_menu_btn.pressed.connect(self.track_hover_group.animate_click)
         track_box.addWidget(self.track_hover_group)
         self._layout.addLayout(track_box)
@@ -1835,6 +1831,27 @@ class ListenMoePlayer(QWidget):
             # Check for OTA updates in background after startup
             QTimer.singleShot(3500, self._check_startup_updates)
 
+            # If starting in local mode with empty queue, set up empty state and prompt
+            if self._is_local_mode() and self.local_playlist.is_empty():
+                self._current_title = "–"
+                self._current_artist = self.i18n.t("queue_empty_hint")
+                if hasattr(self, "now_playing_title"):
+                    self.now_playing_title.setText(self._current_title)
+                    self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+                if hasattr(self, "now_playing_artist"):
+                    self.now_playing_artist.setText(self._current_artist)
+                    self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                if hasattr(self, "ambient_cover"):
+                    self.ambient_cover.set_cover(None)
+                if hasattr(self, "song_progress"):
+                    self.song_progress.setValue(0)
+                    self.song_progress.set_seekable(True)
+                if hasattr(self, "time_label"):
+                    self.time_label.setText("00:00 / 00:00")
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_nav_enabled(False, False)
+                QTimer.singleShot(400, self.prompt_select_local_music)
+
             # Global Keyboard Shortcuts (Class scope)
             QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._vol_up)
             QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._vol_down)
@@ -2388,11 +2405,15 @@ class ListenMoePlayer(QWidget):
                         f"{str(cfg.get('name', clean_id)).upper()} · {tag_suffix}"
                     )
 
-                icon_file = cfg.get("icon")
-                if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
-                    icon_path = os.path.join(self._icon_dir, icon_file)
-                    if os.path.isfile(icon_path):
-                        self.ambient_cover.set_cover(QPixmap(icon_path))
+                if clean_id != STATION_LOCAL:
+                    icon_file = cfg.get("icon")
+                    if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
+                        icon_path = os.path.join(self._icon_dir, icon_file)
+                        if os.path.isfile(icon_path):
+                            self.ambient_cover.set_cover(QPixmap(icon_path))
+                else:
+                    if hasattr(self, "ambient_cover"):
+                        self.ambient_cover.set_cover(None)
 
                 if clean_id == STATION_LOCAL:
                     curr_track = self.local_playlist.get_current_track()
@@ -2411,8 +2432,12 @@ class ListenMoePlayer(QWidget):
                         self._current_artist = self.i18n.t("queue_empty_hint")
                         if hasattr(self, "now_playing_title"):
                             self.now_playing_title.setText(self._current_title)
+                            self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
                         if hasattr(self, "now_playing_artist"):
                             self.now_playing_artist.setText(self._current_artist)
+                            self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                        if hasattr(self, "ambient_cover"):
+                            self.ambient_cover.set_cover(None)
                         self._current_start_epoch = None
                         self._current_duration_seconds = 0
                         if hasattr(self, "song_progress"):
@@ -2421,7 +2446,7 @@ class ListenMoePlayer(QWidget):
                             self.time_label.setText("00:00 / 00:00")
                         self.status_changed.emit(self.i18n.t("station_local"))
                         # Prompt the user to select local music!
-                        QTimer.singleShot(150, self.prompt_select_local_music)
+                        QTimer.singleShot(100, self.prompt_select_local_music)
                 else:
                     if self.player and self.player.is_playing():
                         self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
@@ -3564,11 +3589,22 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _on_track_labels_clicked(self) -> None:
+        """Handler for click on track title, artist, or hover group."""
+        if self._is_local_mode() and self.local_playlist.is_empty():
+            self.prompt_select_local_music()
+            return
+        self._show_track_context_menu(from_chevron=True)
+
     def _show_track_context_menu(
         self, pos: Optional[QPoint] = None, from_chevron: bool = False
     ) -> None:
         """Display context menu with Quick Search & Clipboard actions for current track."""
         try:
+            if self._is_local_mode() and self.local_playlist.is_empty():
+                self.prompt_select_local_music()
+                return
+
             title = (getattr(self, "_current_title", "") or "").strip()
             artist = (getattr(self, "_current_artist", "") or "").strip()
 
@@ -5026,14 +5062,25 @@ class ListenMoePlayer(QWidget):
         try:
             from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
 
+            if self._local_prompt_dialog is not None:
+                if self._local_prompt_dialog.isVisible():
+                    self._local_prompt_dialog.activateWindow()
+                    self._local_prompt_dialog.raise_()
+                    return
+                self._local_prompt_dialog.deleteLater()
+                self._local_prompt_dialog = None
+
             dlg = LocalMusicPromptDialog(
                 self.local_playlist,
                 parent=self,
                 i18n=self.i18n,
             )
+            self._local_prompt_dialog = dlg
             dlg.tracks_loaded.connect(self._on_local_prompt_tracks_loaded)
             dlg.open_queue_requested.connect(self.show_local_queue_dialog)
-            dlg.exec()
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
         except Exception as e:
             self.log.warning(f"[UI] Failed showing local prompt dialog: {e}")
 
@@ -5075,20 +5122,29 @@ class ListenMoePlayer(QWidget):
             return
         if not track:
             self._current_title = "–"
-            self._current_artist = (
-                self.i18n.t("queue_empty") if hasattr(self.i18n, "t") else "Coda vuota"
-            )
+            self._current_artist = self.i18n.t("queue_empty_hint")
             self._current_duration_seconds = None
             self._current_start_epoch = None
             self._current_cover_ref = None
             self.song_progress.setValue(0)
             self.song_progress.set_seekable(False)
             self.playback_controls.set_nav_enabled(False, False)
+            self._set_album_cover_pixmap(None)
+            if hasattr(self, "now_playing_title"):
+                self.now_playing_title.setText(self._current_title)
+                self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+            if hasattr(self, "now_playing_artist"):
+                self.now_playing_artist.setText(self._current_artist)
+                self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
             self.label_refresh.emit()
             return
 
         self._current_title = track.display_title()
         self._current_artist = track.display_artist()
+        if hasattr(self, "now_playing_title"):
+            self.now_playing_title.setToolTip(self.i18n.t("search_menu_tooltip"))
+        if hasattr(self, "now_playing_artist"):
+            self.now_playing_artist.setToolTip(self.i18n.t("search_menu_tooltip"))
         self._current_duration_seconds = (
             int(track.duration_seconds) if track.duration_seconds > 0 else None
         )
@@ -5113,14 +5169,10 @@ class ListenMoePlayer(QWidget):
             pix.loadFromData(track.cover_bytes)
             if not pix.isNull():
                 self._set_album_cover_pixmap(pix)
-        else:
-            cfg = get_station_config(STATION_LOCAL)
-            icon_file = cfg.get("icon", "kikumoe_local.png")
-            icon_path = os.path.join(self._icon_dir, icon_file)
-            if os.path.isfile(icon_path):
-                self._set_album_cover_pixmap(QPixmap(icon_path))
             else:
                 self._set_album_cover_pixmap(None)
+        else:
+            self._set_album_cover_pixmap(None)
 
         # 3-level lyrics cascade
         if self.lyrics_button.isChecked():

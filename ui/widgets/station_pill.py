@@ -442,7 +442,8 @@ class StationGlassPopover(QWidget):
     def _on_select(self, station_id: str, channel: str) -> None:
         if self._is_closing:
             return
-        self.animate_close()
+        self._is_closing = True
+        self.close()
         self.station_selected.emit(station_id, channel)
 
     def show_at(self, center_x: int, y: int) -> None:

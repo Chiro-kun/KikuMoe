@@ -254,3 +254,49 @@ def test_simple_station_row_mouse_transparency():
     assert row._icon_lbl.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) is True
     assert row._title_lbl.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) is True
 
+
+def test_track_label_click_in_local_empty_mode():
+    from PyQt6.QtCore import QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.ambient_cover import AnimatedTrackLabel, TrackHoverGroup
+
+    _app = QApplication.instance() or QApplication([])
+
+    title = AnimatedTrackLabel("–", interactive=True)
+    artist = AnimatedTrackLabel("Coda vuota", interactive=True)
+    title.resize(200, 26)
+    artist.resize(200, 26)
+    group = TrackHoverGroup(title, artist)
+
+    title_clicked = []
+    artist_clicked = []
+    group_clicked = []
+
+    title.clicked.connect(lambda: title_clicked.append(True))
+    artist.clicked.connect(lambda: artist_clicked.append(True))
+    group.clicked.connect(lambda: group_clicked.append(True))
+
+    # Simulate mouse press on artist label inside capsule
+    capsule = artist.get_capsule_rect()
+    pt = capsule.center() if capsule is not None else QPointF(10.0, 10.0)
+    press_ev = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        pt,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    artist.mousePressEvent(press_ev)
+    assert len(artist_clicked) == 1
+
+    # Simulate mouse press on title label (rect is None because "–", should still emit)
+    title.mousePressEvent(press_ev)
+    assert len(title_clicked) == 1
+
+    # Simulate mouse press on hover group
+    group.mousePressEvent(press_ev)
+    assert len(group_clicked) == 1
+
+

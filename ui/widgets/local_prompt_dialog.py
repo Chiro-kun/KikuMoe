@@ -6,7 +6,6 @@ allowing quick selection of music directories, audio files, or opening the queue
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -14,7 +13,6 @@ from PyQt6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QFont,
-    QPixmap,
 )
 from PyQt6.QtWidgets import (
     QDialog,
@@ -102,18 +100,7 @@ class LocalMusicPromptDialog(QDialog):
         icon_badge = QLabel()
         icon_badge.setFixedSize(54, 54)
         icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_pm = self._load_local_icon()
-        if not icon_pm.isNull():
-            icon_badge.setPixmap(
-                icon_pm.scaled(
-                    36,
-                    36,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-        else:
-            icon_badge.setPixmap(get_music_note_icon(32).pixmap(32, 32))
+        icon_badge.setPixmap(get_music_note_icon(28).pixmap(28, 28))
         icon_badge.setStyleSheet(
             f"background-color: rgba(236, 24, 108, 0.12);"
             f"border: 1px solid {PALETTE['accent']};"
@@ -219,14 +206,6 @@ class LocalMusicPromptDialog(QDialog):
         body_layout.addLayout(btn_box)
         frame_layout.addWidget(body, 1)
         outer_layout.addWidget(self._content_frame)
-
-    def _load_local_icon(self) -> QPixmap:
-        icon_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "icons", "radio_local.png"
-        )
-        if os.path.isfile(icon_path):
-            return QPixmap(icon_path)
-        return QPixmap()
 
     def _on_select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(

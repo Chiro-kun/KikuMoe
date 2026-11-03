@@ -43,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Local Music Selector Prompt Dialog (`ui/widgets/local_prompt_dialog.py`)**:
-  - Modal prompt displayed when switching to "Musica Locale" or pressing Play with an empty queue, offering quick options to select a music folder, select audio files, open the queue manager, or drag-and-drop audio directly.
+  - Modal prompt displayed when switching to "Musica Locale", clicking the empty queue track label ("Coda vuota · Seleziona cartella o trascina file"), or pressing Play with an empty queue, offering quick options to select a music folder, select audio files, open the queue manager, or drag-and-drop audio directly.
+  - Automatic non-blocking prompt trigger on startup when KikuMoe opens with "Musica Locale" as the active station and the queue is empty.
 - **Empty-State Queue View (`ui/local_queue_dialog.py`)**:
   - Added an interactive empty state card in the queue dialog with direct *Aggiungi Cartella…* and *Aggiungi File…* action buttons when no tracks are loaded.
 
@@ -54,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Fixed station switching bug where web radio stream remained playing when switching to local music with an empty queue**: switching to local music now immediately stops the active radio stream backend and updates metadata labels to show an empty queue status.
+- **Fixed empty queue prompt trigger and click responsiveness**: clicking anywhere on the track title, artist label ("Coda vuota…"), or hover container immediately displays the local music selection prompt.
+- **Restored default album placeholder artwork**: removed forced station icon from album artwork area when playing local tracks without embedded covers or when the queue is empty, preserving the default vinyl disc placeholder.
 - Fixed cross-platform `os.startfile` compatibility on Linux by safely resolving `getattr(os, "startfile", None)`.
 - Resolved MP4/M4A data atom offset calculation in binary metadata parser to avoid title string truncation.
 

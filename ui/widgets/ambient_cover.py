@@ -517,7 +517,13 @@ class AnimatedTrackLabel(QLabel):
             and ev.button() == Qt.MouseButton.LeftButton
         ):
             rect = self.get_capsule_rect()
-            if rect is not None and rect.contains(ev.position()):
+            if rect is not None:
+                if rect.contains(ev.position()):
+                    if self._hover_group is not None:
+                        self._hover_group.animate_click()
+                    self.clicked.emit()
+                    return
+            else:
                 if self._hover_group is not None:
                     self._hover_group.animate_click()
                 self.clicked.emit()
@@ -658,6 +664,8 @@ class AnimatedTrackLabel(QLabel):
 class TrackHoverGroup(QWidget):
     """Paint one connected, animated highlight behind the track metadata."""
 
+    clicked = pyqtSignal()
+
     def __init__(self, title: AnimatedTrackLabel, artist: AnimatedTrackLabel):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -765,6 +773,12 @@ class TrackHoverGroup(QWidget):
         if a0 is not None:
             self.set_hovered(self._shape().contains(a0.position()))
         super().mouseMoveEvent(a0)
+
+    def mousePressEvent(self, a0: Optional[QMouseEvent]) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self.animate_click()
+            self.clicked.emit()
+        super().mousePressEvent(a0)
 
     def leaveEvent(self, a0: object) -> None:
         QTimer.singleShot(0, self.refresh_pointer)
