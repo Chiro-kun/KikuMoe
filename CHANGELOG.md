@@ -10,10 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0-beta4] - Unreleased
 
 ### Added
+- **Local Music Playback, Queue Manager & 3-Level Lyrics Cascade**:
+  - **Zero-Dependency Binary Metadata Parser (`core/local_metadata.py`)**:
+    - Implemented a pure Python binary parser using `struct`, `io`, and `pathlib` with zero external C/binary dependencies, extracting exact track metadata, durations, and album cover art.
+    - Supported formats: MP3 (ID3v2.3/ID3v2.4 `TIT2`, `TPE1`, `TALB`, `APIC` image extraction, `USLT` lyrics), FLAC (`STREAMINFO` block, duration calculation, and Vorbis comments `METADATA_BLOCK_PICTURE`), OGG / Opus headers and comments, WAV (RIFF headers and duration), and M4A / AAC container atoms (`mvhd`, `ilst`, `©nam`, `©ART`, `©alb`, `covr`, `©lyr`).
+  - **3-Level Synchronized & Plain Lyrics Cascade**:
+    - Level 1: Automatic discovery of companion sidecar `.lrc` files in the same directory (e.g. `Song.mp3` with `Song.lrc`).
+    - Level 2: Embedded lyrics tags directly inside audio files (`USLT`, Vorbis `LYRICS`, and MP4 `©lyr`).
+    - Level 3: Seamless automatic fallback to online LRCLIB search by track title and artist when local lyrics are unavailable.
+    - Real-time animated lyric synchronization in `LyricsPanel` driven by the audio player's millisecond-accurate playhead position.
+  - **Zero-Latency Seeking & Audio Backend Integration (`PlayerFFmpeg`, `PlayerMPV`, `PlayerVLC`)**:
+    - Implemented `seek(seconds)` on all three audio backends: keyframe-accurate stream offset (`-ss`) for FFmpeg, absolute seek commands for MPV, and `libvlc_media_player_set_time` for VLC.
+    - Enhanced `SmoothProgressBar` and `MiniHud` with interactive, draggable scrubber playheads emitting `seek_requested(ratio)`.
+  - **Local Playlist Manager (`core/local_playlist.py`)**:
+    - Thread-safe playlist queue with sequential navigation, shuffle mode, repeat modes (`Repeat Off`, `Repeat All`, `Repeat One`), track reordering, and session persistence in `QSettings`.
+  - **Cyber-Glass Local Queue Manager Dialog (`ui/local_queue_dialog.py`)**:
+    - Frameless modal dialog featuring real-time search filtering across title, artist, and album, track queue statistics pill, double-click playback, right-click context menu (*Riproduci ora*, *Apri percorso file*, *Rimuovi*), and direct file/folder drag-and-drop.
+    - Added dedicated transport deck controls in `PlaybackControls`: Previous Track (`btn_prev`), Next Track (`btn_next`), and Local Queue (`btn_queue`).
+    - Keyboard shortcuts: `F5` / `MediaPrevious` for previous track, `F6` / `MediaNext` for next track, and `Ctrl+L` for the Local Queue dialog.
+    - Direct Drag & Drop: dropping audio files or folders directly onto the main player window instantly enqueues them, switches station to `STATION_LOCAL`, and initiates playback.
+    - Windows SMTC and Linux MPRIS hardware multimedia keys and system tray integration.
+- **Dual-Channel In-App OTA Updates via GitHub Releases API (`core/updater.py`, `ui/update_dialog.py`)**:
+  - Implemented dual-channel update checks with user selection in *Settings → Info* / *General*: **Stabile** (`stable`, tracking official final releases) and **Beta** (`beta`, preview releases and beta builds), with smart initial detection based on current SemVer.
+  - Robust SemVer parser handling major, minor, patch, pre-release tags (`-betaX`), and build metadata with strict semantic ordering.
+  - Asynchronous background worker (`UpdateCheckWorker`) with rate-limit protection, timestamp caching (24h cooldown), and configurable automatic startup checks.
+  - Frameless Cyber-Glass Update Dialog (`UpdateDialog`) rendering formatted GitHub Markdown release notes, release date, asset download size, and real-time download progress bar (`AssetDownloadWorker`).
+  - Automatic post-download execution: launches the downloaded Windows setup/installer executable or marks Linux AppImages as executable upon completion.
+- **Centralized Single-Source-of-Truth Versioning System (`version.yml`)**:
+  - Centralized application versioning into a single root file `version.yml`, eliminating version divergence across metadata files.
+  - Created automated sync utility `scripts/sync_version.py` that synchronizes version strings into `pyproject.toml`, `core/constants.py`, `assets/version_info.txt`, `kikumoe.spec`, and CI/CD pipelines.
+  - Added CLI flags `--check` and `--dry-run` with automated test validation in `tests/test_version.py`.
 
 ### Changed
+- Refactored `StationManager` and `get_stream_url()` to seamlessly resolve local track file paths when in `STATION_LOCAL` mode.
+- Enhanced Windows SMTC and Linux MPRIS bridges to report exact local track position timestamps and track durations.
 
 ### Fixed
+- Fixed cross-platform `os.startfile` compatibility on Linux by safely resolving `getattr(os, "startfile", None)`.
+- Resolved MP4/M4A data atom offset calculation in binary metadata parser to avoid title string truncation.
 
 ---
 
