@@ -283,9 +283,21 @@ class _BrandTitleLabel(QLabel):
         font.setWeight(QFont.Weight.ExtraBold)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
         self._brand_font = font
+        self.setFont(font)
+        self._update_geometry()
+
+    def _update_geometry(self) -> None:
         fm = QFontMetricsF(self._brand_font)
+        text = self.text() or ""
         tight = fm.tightBoundingRect(text)
-        self.setFixedWidth(int(tight.width()) + 4)
+        advance = fm.horizontalAdvance(text)
+        self.setFixedWidth(int(max(tight.width(), advance)) + 4)
+        self.updateGeometry()
+
+    def setText(self, text: str | None) -> None:
+        super().setText(text or "")
+        self._update_geometry()
+        self.update()
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
@@ -314,10 +326,22 @@ class _VersionBadgeLabel(QLabel):
         font.setPixelSize(10)
         font.setWeight(QFont.Weight.Bold)
         self._badge_font = font
+        self.setFont(font)
+        self._update_geometry()
+
+    def _update_geometry(self) -> None:
         fm = QFontMetricsF(self._badge_font)
+        text = self.text() or ""
         tight = fm.tightBoundingRect(text)
-        pill_w = int(tight.width()) + 16
-        self.setFixedWidth(max(66, pill_w))
+        advance = fm.horizontalAdvance(text)
+        pill_w = int(max(tight.width(), advance)) + 20
+        self.setFixedWidth(max(56, pill_w))
+        self.updateGeometry()
+
+    def setText(self, text: str | None) -> None:
+        super().setText(text or "")
+        self._update_geometry()
+        self.update()
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
@@ -433,6 +457,10 @@ class CustomTitleBar(QFrame):
 
     def set_icon(self, icon: QIcon | None) -> None:
         self._icon_label.set_icon(icon)
+
+    def set_badge_text(self, text: str) -> None:
+        """Set the text displayed in the version/pill badge and update its width dynamically."""
+        self._ver_badge.setText(text)
 
     def set_dialog_title(self, title: str | None) -> None:
         """Set a custom window/dialog title. If None, revert to brand mark and version badge."""

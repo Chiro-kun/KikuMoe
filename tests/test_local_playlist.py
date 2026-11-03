@@ -226,12 +226,36 @@ def test_local_prompt_dialog_creation_and_signals():
     assert dlg.btn_folder is not None
     assert dlg.btn_files is not None
     assert dlg.btn_queue is not None
+    assert dlg._title_bar._ver_badge.text() == "MUSICA LOCALE"
+    assert dlg._title_bar._ver_badge.width() >= 90  # dynamically sized to prevent text overflow
 
     opened = []
     dlg.open_queue_requested.connect(lambda: opened.append(True))
     dlg._on_open_queue()
     assert len(opened) == 1
     dlg.close()
+
+
+def test_version_badge_dynamic_sizing():
+    from PyQt6.QtGui import QFontMetricsF
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.custom_titlebar import _VersionBadgeLabel
+
+    _app = QApplication.instance() or QApplication([])
+
+    badge = _VersionBadgeLabel("v2.0")
+    w1 = badge.width()
+
+    badge.setText("MUSICA LOCALE")
+    w2 = badge.width()
+    fm = QFontMetricsF(badge._badge_font)
+    text_w = fm.horizontalAdvance("MUSICA LOCALE")
+    assert w2 > w1
+    assert w2 >= int(text_w) + 16  # Must fully contain the text with side padding
+
+    badge.setText("A")
+    assert badge.width() == 56  # Minimum width constraint respected
 
 
 def test_config_get_station_stream_url_local():
@@ -298,5 +322,3 @@ def test_track_label_click_in_local_empty_mode():
     # Simulate mouse press on hover group
     group.mousePressEvent(press_ev)
     assert len(group_clicked) == 1
-
-

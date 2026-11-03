@@ -61,7 +61,7 @@ class LocalMusicPromptDialog(QDialog):
         self._title_bar = CustomTitleBar(self, icon=app_icon)
         self._title_bar._btn_min.setVisible(False)
         self._title_bar._btn_max.setVisible(False)
-        self._title_bar._ver_badge.setText(self.i18n.t("local_prompt_title").upper())
+        self._title_bar.set_badge_text(self.i18n.t("local_prompt_title").upper())
 
         self._init_ui()
         apply_windows_titlebar_dark_mode(self, True)

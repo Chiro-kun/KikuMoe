@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced Windows SMTC and Linux MPRIS bridges to report exact local track position timestamps and track durations.
 
 ### Fixed
+- **Fixed title bar badge pill text overflow**: updated `_VersionBadgeLabel` and `_BrandTitleLabel` in `ui/custom_titlebar.py` to dynamically recompute pill width based on exact font metrics on `setText()`, resolving text spilling out of the "MUSICA LOCALE" title bar pill in `LocalMusicPromptDialog` and other custom dialogs.
 - **Fixed station switching bug where web radio stream remained playing when switching to local music with an empty queue**: switching to local music now immediately stops the active radio stream backend and updates metadata labels to show an empty queue status.
 - **Fixed empty queue prompt trigger and click responsiveness**: clicking anywhere on the track title, artist label ("Coda vuota…"), or hover container immediately displays the local music selection prompt.
 - **Restored default album placeholder artwork**: removed forced station icon from album artwork area when playing local tracks without embedded covers or when the queue is empty, preserving the default vinyl disc placeholder.
