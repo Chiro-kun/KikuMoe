@@ -162,3 +162,13 @@ DEFAULT_ACCENT_COLOR = "#ec186c"
 # Audio visualizer (Conformal Fluid Wave)
 KEY_VISUALIZER_ENABLED = "visualizer_enabled"
 DEFAULT_VISUALIZER_ENABLED = False
+
+# OTA Updates (GitHub Releases)
+KEY_UPDATE_CHECK_ON_STARTUP = "update_check_on_startup"
+KEY_UPDATE_CHANNEL = "update_channel"
+KEY_UPDATE_LAST_CHECK = "update_last_check"
+KEY_UPDATE_IGNORED_VERSION = "update_ignored_version"
+UPDATE_CHANNEL_STABLE = "stable"
+UPDATE_CHANNEL_BETA = "beta"
+DEFAULT_UPDATE_CHECK_ON_STARTUP = True
+URL_GITHUB_API_RELEASES = "https://api.github.com/repos/Chiro-kun/KikuMoe/releases"

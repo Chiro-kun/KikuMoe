@@ -95,11 +95,17 @@ from core.constants import (
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_UPDATE_CHANNEL,
+    KEY_UPDATE_CHECK_ON_STARTUP,
+    KEY_UPDATE_IGNORED_VERSION,
+    KEY_UPDATE_LAST_CHECK,
     KEY_VISUALIZER_ENABLED,
     KEY_VOLUME,
     KEY_WINDOW_GEOMETRY,
     ORG_NAME,
     STATION_LISTENMOE,
+    UPDATE_CHANNEL_BETA,
+    UPDATE_CHANNEL_STABLE,
 )
 from core.discord_presence import DiscordPresence, activity_payload
 from core.i18n import I18n
@@ -114,6 +120,7 @@ from core.quick_search import (
 )
 from core.song_history import SongHistoryManager
 from core.ssl_compat import get_ssl_context
+from core.updater import UpdateCheckWorker
 from network.image_cache import (
     ALLOWED_COVER_HOSTS,
     get_cached_pixmap,
@@ -136,6 +143,7 @@ from ui.themes.cyber_moe import (
     resolve_theme_and_accent,
 )
 from ui.tray_manager import TrayManager
+from ui.update_dialog import UpdateDialog
 from ui.vector_icons import (
     get_apple_music_icon,
     get_copy_icon,
@@ -1730,6 +1738,9 @@ class ListenMoePlayer(QWidget):
             # Pre-warm embedded settings panel during idle so first-open is instant 60 FPS
             QTimer.singleShot(150, self._prewarm_settings)
 
+            # Check for OTA updates in background after startup
+            QTimer.singleShot(3500, self._check_startup_updates)
+
             # Global Keyboard Shortcuts (Class scope)
             QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._vol_up)
             QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._vol_down)
@@ -3287,6 +3298,45 @@ class ListenMoePlayer(QWidget):
             self._view_stack._render_snapshot(dlg)
         except Exception as e:
             self.log.debug("[UI] _prewarm_settings exception: %s", e)
+
+    def _check_startup_updates(self) -> None:
+        """Background asynchronous OTA update check on startup."""
+        try:
+            enabled = self.settings.value(KEY_UPDATE_CHECK_ON_STARTUP, "true") == "true"
+            if not enabled:
+                return
+
+            last_check = float(self.settings.value(KEY_UPDATE_LAST_CHECK, 0.0) or 0.0)
+            now = time.time()
+            # Check at most once every 12 hours on startup to respect GitHub rate limits
+            if now - last_check < 43200:
+                return
+
+            self.settings.setValue(KEY_UPDATE_LAST_CHECK, now)
+            default_channel = (
+                UPDATE_CHANNEL_BETA
+                if ("-" in APP_VERSION or "beta" in APP_VERSION.lower())
+                else UPDATE_CHANNEL_STABLE
+            )
+            channel = str(self.settings.value(KEY_UPDATE_CHANNEL, default_channel)).strip().lower()
+            ignored_ver = str(self.settings.value(KEY_UPDATE_IGNORED_VERSION, "") or "").strip()
+
+            self._startup_update_worker = UpdateCheckWorker(
+                current_version=APP_VERSION,
+                channel=channel,
+                ignored_version=ignored_ver,
+                parent=self,
+            )
+
+            def _on_update_found(release):
+                if not getattr(self, "_is_shutting_down", False) and self.isVisible():
+                    dlg = UpdateDialog(release, parent=self, i18n=self.i18n)
+                    dlg.show()
+
+            self._startup_update_worker.update_available.connect(_on_update_found)
+            self._startup_update_worker.start()
+        except Exception as e:
+            self.log.debug("[UPDATER] Startup update check error: %s", e)
 
     def toggle_history_popover(self) -> None:
         """Open or close the session song history popover card."""

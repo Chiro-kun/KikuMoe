@@ -66,6 +66,7 @@ from PyQt6.QtWidgets import (
 from core.config import get_station_config
 from core.constants import (
     APP_SETTINGS,
+    APP_VERSION,
     DEFAULT_ACCENT_COLOR,
     DEFAULT_STATION,
     DEFAULT_THEME,
@@ -91,6 +92,8 @@ from core.constants import (
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_UPDATE_CHANNEL,
+    KEY_UPDATE_CHECK_ON_STARTUP,
     KEY_VISUALIZER_ENABLED,
     ORG_NAME,
     STATION_ANISON,
@@ -98,9 +101,12 @@ from core.constants import (
     STATION_LISTENMOE,
     STATION_NEURO21,
     STATION_TRUCKERSFM,
+    UPDATE_CHANNEL_BETA,
+    UPDATE_CHANNEL_STABLE,
 )
 from core.i18n import I18n
 from core.logger import PORTAUDIO_LOCK, silence_stderr
+from core.updater import UpdateCheckWorker
 from ui.about_dialog import AboutWidget
 from ui.color_picker_dialog import AccentColorPickerDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
@@ -117,6 +123,8 @@ from ui.themes.cyber_moe import (
     resolve_theme_and_accent,
     surface_qcolor,
 )
+from ui.update_dialog import UpdateDialog
+from ui.vector_icons import get_update_icon
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
@@ -1467,6 +1475,54 @@ class SettingsDialog(QDialog):
         dev_lay.addWidget(self.chk_dev_show_dev)
 
         sys_layout.addWidget(card_dev)
+
+        card_updates, updates_lay = self._make_card(self.i18n.t("updates_section"))
+
+        self.chk_update_startup = AnimatedToggleSwitch(self.i18n.t("updates_startup_check"))
+        self.chk_update_startup.setToolTip(self.i18n.t("updates_startup_check_tip"))
+        self.chk_update_startup.setChecked(
+            self.settings.value(KEY_UPDATE_CHECK_ON_STARTUP, "true") == "true"
+        )
+        updates_lay.addWidget(self.chk_update_startup)
+
+        self.cmb_update_channel = GlassComboBox()
+        self.cmb_update_channel.addItem(
+            self.i18n.t("updates_channel_stable"), userData=UPDATE_CHANNEL_STABLE
+        )
+        self.cmb_update_channel.addItem(
+            self.i18n.t("updates_channel_beta"), userData=UPDATE_CHANNEL_BETA
+        )
+        default_channel = (
+            UPDATE_CHANNEL_BETA
+            if ("-" in APP_VERSION or "beta" in APP_VERSION.lower())
+            else UPDATE_CHANNEL_STABLE
+        )
+        saved_channel = (
+            str(self.settings.value(KEY_UPDATE_CHANNEL, default_channel)).strip().lower()
+        )
+        if saved_channel == UPDATE_CHANNEL_STABLE:
+            self.cmb_update_channel.setCurrentIndex(0)
+        else:
+            self.cmb_update_channel.setCurrentIndex(1)
+        self.cmb_update_channel.setFixedWidth(combo_w)
+        updates_lay.addLayout(
+            self._make_field_row(self.i18n.t("updates_channel_label"), self.cmb_update_channel)
+        )
+
+        btn_update_row = QHBoxLayout()
+        btn_update_row.setContentsMargins(0, 4, 0, 0)
+        btn_update_row.setSpacing(6)
+        self.btn_check_updates = QPushButton(self.i18n.t("updates_check_now"))
+        self.btn_check_updates.setObjectName("secondaryGlassBtn")
+        self.btn_check_updates.setIcon(get_update_icon(14))
+        self.btn_check_updates.setFixedHeight(30)
+        self.btn_check_updates.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_check_updates.clicked.connect(self._on_check_updates)
+        btn_update_row.addWidget(self.btn_check_updates)
+        btn_update_row.addStretch(1)
+        updates_lay.addLayout(btn_update_row)
+
+        sys_layout.addWidget(card_updates)
         sys_layout.addStretch(1)
         self._add_settings_page(page_sys)
 
@@ -2063,6 +2119,38 @@ class SettingsDialog(QDialog):
         if chosen:
             self.txt_vlc_path.setText(chosen)
 
+    def _on_check_updates(self) -> None:
+        self.btn_check_updates.setEnabled(False)
+        self.btn_check_updates.setText(self.i18n.t("updates_checking"))
+
+        channel = self.cmb_update_channel.currentData() or UPDATE_CHANNEL_BETA
+        self._update_worker = UpdateCheckWorker(
+            current_version=APP_VERSION,
+            channel=channel,
+            parent=self,
+        )
+
+        def _on_found(release):
+            self.btn_check_updates.setEnabled(True)
+            self.btn_check_updates.setText(self.i18n.t("updates_check_now"))
+            dlg = UpdateDialog(release, parent=self.window(), i18n=self.i18n)
+            dlg.exec()
+
+        def _on_up_to_date(_v):
+            self.btn_check_updates.setEnabled(True)
+            self.btn_check_updates.setText(self.i18n.t("updates_check_now"))
+            self._show_apply_toast("updates_up_to_date")
+
+        def _on_failed(err):
+            self.btn_check_updates.setEnabled(True)
+            self.btn_check_updates.setText(self.i18n.t("updates_check_now"))
+            self._show_apply_toast("updates_error")
+
+        self._update_worker.update_available.connect(_on_found)
+        self._update_worker.up_to_date.connect(_on_up_to_date)
+        self._update_worker.check_failed.connect(_on_failed)
+        self._update_worker.start()
+
     def _on_apply(self):
         """Salva i valori senza chiudere il pannello."""
         values = self._settings_values()
@@ -2103,6 +2191,14 @@ class SettingsDialog(QDialog):
             "tray_notifications": self.chk_tray_notifications.isChecked(),
             "audio_backend": self.cmb_audio_backend.currentData() or "auto",
             "audio_device": self.cmb_audio_device.currentData(),
+            "update_startup": (
+                self.chk_update_startup.isChecked() if hasattr(self, "chk_update_startup") else True
+            ),
+            "update_channel": (
+                self.cmb_update_channel.currentData()
+                if hasattr(self, "cmb_update_channel")
+                else UPDATE_CHANNEL_BETA
+            ),
         }
 
     def _position_apply_toast(self) -> None:
@@ -2237,6 +2333,16 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             KEY_TRAY_NOTIFICATIONS, "true" if self.chk_tray_notifications.isChecked() else "false"
         )
+        if hasattr(self, "chk_update_startup"):
+            self.settings.setValue(
+                KEY_UPDATE_CHECK_ON_STARTUP,
+                "true" if self.chk_update_startup.isChecked() else "false",
+            )
+        if hasattr(self, "cmb_update_channel"):
+            self.settings.setValue(
+                KEY_UPDATE_CHANNEL,
+                self.cmb_update_channel.currentData() or UPDATE_CHANNEL_STABLE,
+            )
         try:
             self.settings.setValue(
                 KEY_AUDIO_BACKEND, self.cmb_audio_backend.currentData() or "auto"
