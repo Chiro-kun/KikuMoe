@@ -136,6 +136,8 @@ def get_station_stream_url(
     Gracefully falls back to station defaults if the requested format or channel
     is missing or invalid.
     """
+    if (station_id or "").lower().strip() == "local":
+        return ""
     station = get_station_config(station_id)
     streams = station.get("streams", {})
 

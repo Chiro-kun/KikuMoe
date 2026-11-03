@@ -13,6 +13,7 @@ from pathlib import Path
 from PyQt6.QtCore import QPoint, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
+    QFont,
     QPainter,
     QPen,
 )
@@ -248,6 +249,61 @@ class LocalQueueDialog(QDialog):
         self.setAcceptDrops(True)
         layout.addWidget(self.list_widget, 1)
 
+        # Empty Queue Placeholder Card
+        self.empty_widget = QFrame()
+        self.empty_widget.setObjectName("emptyQueueFrame")
+        self.empty_widget.setStyleSheet(
+            f"QFrame#emptyQueueFrame {{"
+            f"  background-color: {PALETTE['bg_subtle']};"
+            f"  border: 1px dashed {PALETTE['border_card']};"
+            "  border-radius: 10px;"
+            "}"
+        )
+        empty_layout = QVBoxLayout(self.empty_widget)
+        empty_layout.setContentsMargins(24, 24, 24, 24)
+        empty_layout.setSpacing(12)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        empty_icon = QLabel()
+        empty_icon.setPixmap(get_music_note_icon(32).pixmap(32, 32))
+        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_icon, 0, Qt.AlignmentFlag.AlignCenter)
+
+        empty_title = QLabel(self.i18n.t("local_prompt_title"))
+        font_em_title = QFont()
+        font_em_title.setPointSize(12)
+        font_em_title.setBold(True)
+        empty_title.setFont(font_em_title)
+        empty_title.setStyleSheet(f"color: {PALETTE['text_primary']};")
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_title)
+
+        empty_desc = QLabel(self.i18n.t("local_queue_empty"))
+        empty_desc.setWordWrap(True)
+        empty_desc.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 11px;")
+        empty_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_desc)
+
+        empty_btns = QHBoxLayout()
+        empty_btns.setSpacing(10)
+        empty_btns.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        btn_em_folder = QPushButton(self.i18n.t("local_add_folder"))
+        btn_em_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_em_folder.setStyleSheet(self._button_style(True))
+        btn_em_folder.clicked.connect(self._on_add_folder_clicked)
+        empty_btns.addWidget(btn_em_folder)
+
+        btn_em_files = QPushButton(self.i18n.t("local_add_files"))
+        btn_em_files.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_em_files.setStyleSheet(self._button_style(False))
+        btn_em_files.clicked.connect(self._on_add_files_clicked)
+        empty_btns.addWidget(btn_em_files)
+
+        empty_layout.addLayout(empty_btns)
+        layout.addWidget(self.empty_widget, 1)
+        self.empty_widget.setVisible(False)
+
         # Bottom Deck: Stats + Shuffle/Repeat/Clear
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(8)
@@ -360,6 +416,12 @@ class LocalQueueDialog(QDialog):
         tot_sec = int(self.playlist_mgr.total_duration_seconds())
         tot_str = _format_mmss(tot_sec)
         self.stats_lbl.setText(self.i18n.t("local_tracks_summary", count=count, duration=tot_str))
+
+        # Toggle empty-state vs list widget
+        is_empty = count == 0
+        if hasattr(self, "empty_widget"):
+            self.empty_widget.setVisible(is_empty)
+        self.list_widget.setVisible(not is_empty)
 
     def _on_search_changed(self, text: str) -> None:
         self._refresh_queue()

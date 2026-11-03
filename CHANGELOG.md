@@ -41,11 +41,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Created automated sync utility `scripts/sync_version.py` that synchronizes version strings into `pyproject.toml`, `core/constants.py`, `assets/version_info.txt`, `kikumoe.spec`, and CI/CD pipelines.
   - Added CLI flags `--check` and `--dry-run` with automated test validation in `tests/test_version.py`.
 
+### Added
+- **Local Music Selector Prompt Dialog (`ui/widgets/local_prompt_dialog.py`)**:
+  - Modal prompt displayed when switching to "Musica Locale" or pressing Play with an empty queue, offering quick options to select a music folder, select audio files, open the queue manager, or drag-and-drop audio directly.
+- **Empty-State Queue View (`ui/local_queue_dialog.py`)**:
+  - Added an interactive empty state card in the queue dialog with direct *Aggiungi Cartella…* and *Aggiungi File…* action buttons when no tracks are loaded.
+
 ### Changed
-- Refactored `StationManager` and `get_stream_url()` to seamlessly resolve local track file paths when in `STATION_LOCAL` mode.
+- Refactored `StationManager` and `get_selected_stream_url()` to return empty string for `STATION_LOCAL` when the queue is empty instead of falling back to default web radio stream.
+- Enhanced `SimpleStationRow` and `StationRowWithChannels` with mouse transparency on text/icon labels to ensure 100% reliable click detection across the entire row.
 - Enhanced Windows SMTC and Linux MPRIS bridges to report exact local track position timestamps and track durations.
 
 ### Fixed
+- **Fixed station switching bug where web radio stream remained playing when switching to local music with an empty queue**: switching to local music now immediately stops the active radio stream backend and updates metadata labels to show an empty queue status.
 - Fixed cross-platform `os.startfile` compatibility on Linux by safely resolving `getattr(os, "startfile", None)`.
 - Resolved MP4/M4A data atom offset calculation in binary metadata parser to avoid title string truncation.
 

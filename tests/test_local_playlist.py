@@ -186,3 +186,71 @@ def test_local_queue_dialog_creation_and_search():
     dlg.search_box.clear()
     assert dlg.list_widget.count() == 2
     dlg.close()
+
+
+def test_local_queue_empty_state_toggle():
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.local_queue_dialog import LocalQueueDialog
+
+    _app = QApplication.instance() or QApplication([])
+
+    mgr = LocalPlaylistManager()
+    mgr.clear()
+
+    dlg = LocalQueueDialog(mgr)
+    dlg.show()
+    assert not dlg.empty_widget.isHidden()
+    assert dlg.list_widget.isHidden()
+
+    mgr._tracks = [
+        LocalTrackInfo(file_path="t1.mp3", title="T1"),
+    ]
+    dlg._refresh_queue()
+    assert dlg.empty_widget.isHidden()
+    assert not dlg.list_widget.isHidden()
+    dlg.close()
+
+
+def test_local_prompt_dialog_creation_and_signals():
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+    _app = QApplication.instance() or QApplication([])
+
+    mgr = LocalPlaylistManager()
+    dlg = LocalMusicPromptDialog(mgr)
+
+    assert dlg.playlist_mgr is mgr
+    assert dlg.btn_folder is not None
+    assert dlg.btn_files is not None
+    assert dlg.btn_queue is not None
+
+    opened = []
+    dlg.open_queue_requested.connect(lambda: opened.append(True))
+    dlg._on_open_queue()
+    assert len(opened) == 1
+    dlg.close()
+
+
+def test_config_get_station_stream_url_local():
+    from core.config import get_station_stream_url
+
+    assert get_station_stream_url("local") == ""
+    assert get_station_stream_url("LOCAL", "J-POP", "Vorbis") == ""
+
+
+def test_simple_station_row_mouse_transparency():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QPixmap
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.station_pill import SimpleStationRow
+
+    _app = QApplication.instance() or QApplication([])
+    row = SimpleStationRow("local", "Musica Locale", QPixmap(16, 16), False)
+
+    assert row._icon_lbl.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) is True
+    assert row._title_lbl.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) is True
+

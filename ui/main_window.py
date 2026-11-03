@@ -2373,7 +2373,8 @@ class ListenMoePlayer(QWidget):
             station_or_chan_changed = changed or (
                 clean_id == STATION_LISTENMOE and target_channel != old_channel
             )
-            if station_or_chan_changed:
+            is_empty_local = clean_id == STATION_LOCAL and self.local_playlist.is_empty()
+            if station_or_chan_changed or is_empty_local:
                 if self.lyrics_button.isChecked():
                     self.lyrics_provider.cancel()
                     self._lyrics_track = None
@@ -2386,19 +2387,45 @@ class ListenMoePlayer(QWidget):
                     self.stream_tag_label.setText(
                         f"{str(cfg.get('name', clean_id)).upper()} · {tag_suffix}"
                     )
-                if clean_id == STATION_LOCAL:
-                    curr_track = self.local_playlist.get_current_track()
-                    if curr_track:
-                        self._on_local_track_changed(curr_track)
+
                 icon_file = cfg.get("icon")
                 if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
                     icon_path = os.path.join(self._icon_dir, icon_file)
                     if os.path.isfile(icon_path):
                         self.ambient_cover.set_cover(QPixmap(icon_path))
 
-                if self.player and self.player.is_playing():
-                    self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
-                    self.play_stream(is_retry=False)
+                if clean_id == STATION_LOCAL:
+                    curr_track = self.local_playlist.get_current_track()
+                    if curr_track:
+                        self._on_local_track_changed(curr_track)
+                        if self.player and self.player.is_playing():
+                            self.log.info(
+                                f"[UI] Station changed to '{clean_id}' ({target_channel})"
+                            )
+                            self.play_stream(is_retry=False)
+                    else:
+                        # Queue is empty: stop previous radio stream immediately!
+                        if hasattr(self, "player") and self.player and self.player.is_playing():
+                            self.stop_stream(reset_session=False)
+                        self._current_title = "–"
+                        self._current_artist = self.i18n.t("queue_empty_hint")
+                        if hasattr(self, "now_playing_title"):
+                            self.now_playing_title.setText(self._current_title)
+                        if hasattr(self, "now_playing_artist"):
+                            self.now_playing_artist.setText(self._current_artist)
+                        self._current_start_epoch = None
+                        self._current_duration_seconds = 0
+                        if hasattr(self, "song_progress"):
+                            self.song_progress.setValue(0)
+                        if hasattr(self, "time_label"):
+                            self.time_label.setText("00:00 / 00:00")
+                        self.status_changed.emit(self.i18n.t("station_local"))
+                        # Prompt the user to select local music!
+                        QTimer.singleShot(150, self.prompt_select_local_music)
+                else:
+                    if self.player and self.player.is_playing():
+                        self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
+                        self.play_stream(is_retry=False)
 
         try:
             self.update_tray_texts()
@@ -4077,6 +4104,13 @@ class ListenMoePlayer(QWidget):
     def get_selected_stream_url(self) -> str:
         """Restituisce l'URL dello stream in base a stazione, canale e formato."""
         try:
+            if self._is_local_mode():
+                if hasattr(self, "local_playlist") and self.local_playlist:
+                    curr = self.local_playlist.get_current_track()
+                    if curr and curr.file_path:
+                        return str(curr.file_path)
+                return ""
+
             if hasattr(self, "station_mgr") and self.station_mgr:
                 url = self.station_mgr.get_stream_url()
                 if url:
@@ -4530,6 +4564,13 @@ class ListenMoePlayer(QWidget):
                     url = self.get_selected_stream_url()
                 except Exception:
                     url = None
+                if self._is_local_mode() and (not url or self.local_playlist.is_empty()):
+                    if hasattr(self, "player") and self.player and self.player.is_playing():
+                        self.player.stop()
+                    self._refresh_play_button_text(False)
+                    self.status_changed.emit(self.i18n.t("queue_empty_hint"))
+                    QTimer.singleShot(100, self.prompt_select_local_music)
+                    return
                 if not hasattr(self, "player") or self.player is None or not url:
                     try:
                         self.log.info("[UI] play_stream aborted: no player backend or url")
@@ -4979,6 +5020,31 @@ class ListenMoePlayer(QWidget):
             ):
                 self.set_radio_provider(STATION_LOCAL)
             self.play_stream(is_retry=False)
+
+    def prompt_select_local_music(self) -> None:
+        """Opens prompt dialog to pick local folder, files, or manage queue."""
+        try:
+            from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+            dlg = LocalMusicPromptDialog(
+                self.local_playlist,
+                parent=self,
+                i18n=self.i18n,
+            )
+            dlg.tracks_loaded.connect(self._on_local_prompt_tracks_loaded)
+            dlg.open_queue_requested.connect(self.show_local_queue_dialog)
+            dlg.exec()
+        except Exception as e:
+            self.log.warning(f"[UI] Failed showing local prompt dialog: {e}")
+
+    def _on_local_prompt_tracks_loaded(self, count: int) -> None:
+        try:
+            curr = self.local_playlist.get_current_track()
+            if curr:
+                self._on_local_track_changed(curr)
+                self.play_stream(is_retry=False)
+        except Exception as e:
+            self.log.warning(f"[UI] Error starting playback after loading tracks: {e}")
 
     def _on_seek_requested(self, ratio: float) -> None:
         """Performs immediate audio seek and syncs progress UI and lyrics."""

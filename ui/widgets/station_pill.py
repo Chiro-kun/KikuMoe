@@ -177,12 +177,14 @@ class StationRowWithChannels(QWidget):
         left_layout.setSpacing(8)
 
         icon_lbl = QLabel()
+        icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         icon_lbl.setFixedSize(16, 16)
         icon_lbl.setScaledContents(True)
         icon_lbl.setPixmap(icon_pm)
         icon_lbl.setStyleSheet("background: transparent; border: none;")
 
         title_lbl = QLabel(name)
+        title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         font = QFont()
         font.setPointSize(9)
         font.setBold(self.is_current_station)
@@ -263,6 +265,7 @@ class SimpleStationRow(QPushButton):
 
         # Icon
         self._icon_lbl = QLabel()
+        self._icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._icon_lbl.setFixedSize(16, 16)
         self._icon_lbl.setScaledContents(True)
         self._icon_lbl.setPixmap(icon_pm)
@@ -270,6 +273,7 @@ class SimpleStationRow(QPushButton):
 
         # Title
         self._title_lbl = QLabel(title)
+        self._title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         font = QFont()
         font.setPointSize(9)
         font.setBold(is_selected)
