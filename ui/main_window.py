@@ -1833,7 +1833,7 @@ class ListenMoePlayer(QWidget):
 
             # If starting in local mode with empty queue, set up empty state and prompt
             if self._is_local_mode() and self.local_playlist.is_empty():
-                self._current_title = "–"
+                self._current_title = self.i18n.t("station_local")
                 self._current_artist = self.i18n.t("queue_empty_hint")
                 if hasattr(self, "now_playing_title"):
                     self.now_playing_title.setText(self._current_title)
@@ -2428,7 +2428,7 @@ class ListenMoePlayer(QWidget):
                         # Queue is empty: stop previous radio stream immediately!
                         if hasattr(self, "player") and self.player and self.player.is_playing():
                             self.stop_stream(reset_session=False)
-                        self._current_title = "–"
+                        self._current_title = self.i18n.t("station_local")
                         self._current_artist = self.i18n.t("queue_empty_hint")
                         if hasattr(self, "now_playing_title"):
                             self.now_playing_title.setText(self._current_title)
@@ -5121,7 +5121,7 @@ class ListenMoePlayer(QWidget):
         if not self._is_local_mode():
             return
         if not track:
-            self._current_title = "–"
+            self._current_title = self.i18n.t("station_local")
             self._current_artist = self.i18n.t("queue_empty_hint")
             self._current_duration_seconds = None
             self._current_start_epoch = None
@@ -5142,8 +5142,10 @@ class ListenMoePlayer(QWidget):
         self._current_title = track.display_title()
         self._current_artist = track.display_artist()
         if hasattr(self, "now_playing_title"):
+            self.now_playing_title.setText(self._current_title)
             self.now_playing_title.setToolTip(self.i18n.t("search_menu_tooltip"))
         if hasattr(self, "now_playing_artist"):
+            self.now_playing_artist.setText(self._current_artist)
             self.now_playing_artist.setToolTip(self.i18n.t("search_menu_tooltip"))
         self._current_duration_seconds = (
             int(track.duration_seconds) if track.duration_seconds > 0 else None

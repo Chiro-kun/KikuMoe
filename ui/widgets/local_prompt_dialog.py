@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
@@ -30,12 +30,13 @@ from core.local_playlist import (
     LocalPlaylistManager,
 )
 from ui.custom_titlebar import CustomTitleBar
+from ui.dialog_animations import CyberMoeDialogAnimationMixin
 from ui.themes.cyber_moe import PALETTE
-from ui.vector_icons import get_music_note_icon
+from ui.vector_icons import get_folder_icon, get_music_note_icon, get_queue_icon
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 
-class LocalMusicPromptDialog(QDialog):
+class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
     """Frameless Cyber-Moe modal prompting user to select local music files or folder."""
 
     tracks_loaded = pyqtSignal(int)
@@ -134,9 +135,11 @@ class LocalMusicPromptDialog(QDialog):
         btn_box.setSpacing(8)
 
         # Folder button (Primary)
-        self.btn_folder = QPushButton(self.i18n.t("local_select_folder"))
+        self.btn_folder = QPushButton(f"  {self.i18n.t('local_select_folder')}")
         self.btn_folder.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_folder.setFixedHeight(36)
+        self.btn_folder.setIcon(get_folder_icon(16, "#FFFFFF"))
+        self.btn_folder.setIconSize(QSize(16, 16))
         self.btn_folder.setStyleSheet(
             f"QPushButton {{"
             f"  background-color: {PALETTE['accent']};"
@@ -158,9 +161,11 @@ class LocalMusicPromptDialog(QDialog):
         btn_box.addWidget(self.btn_folder)
 
         # Files button (Secondary)
-        self.btn_files = QPushButton(self.i18n.t("local_select_files"))
+        self.btn_files = QPushButton(f"  {self.i18n.t('local_select_files')}")
         self.btn_files.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_files.setFixedHeight(34)
+        self.btn_files.setIcon(get_music_note_icon(16, PALETTE["accent"]))
+        self.btn_files.setIconSize(QSize(16, 16))
         self.btn_files.setStyleSheet(
             "QPushButton {"
             "  background-color: rgba(255, 255, 255, 0.08);"
@@ -184,9 +189,11 @@ class LocalMusicPromptDialog(QDialog):
         btn_box.addWidget(self.btn_files)
 
         # Open Queue Manager (Tertiary / Ghost)
-        self.btn_queue = QPushButton(self.i18n.t("local_open_queue"))
+        self.btn_queue = QPushButton(f"  {self.i18n.t('local_open_queue')}")
         self.btn_queue.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_queue.setFixedHeight(28)
+        self.btn_queue.setIcon(get_queue_icon(14, PALETTE["text_muted"]))
+        self.btn_queue.setIconSize(QSize(14, 14))
         self.btn_queue.setStyleSheet(
             "QPushButton {"
             "  background: transparent;"

@@ -46,6 +46,7 @@ from core.constants import (
 )
 from core.i18n import I18n
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
+from ui.dialog_animations import CyberMoeDialogAnimationMixin
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
@@ -807,7 +808,7 @@ class AboutWidget(QWidget):
         return card, lay, hdr
 
 
-class AboutDialog(QDialog):
+class AboutDialog(CyberMoeDialogAnimationMixin, QDialog):
     """
     Dedicated Cyber-Moe modal/modeless dialog for Credits & Info.
     Can be summoned from the system tray or keyboard shortcuts.

@@ -277,9 +277,9 @@ I18N: Dict[str, Dict[str, str]] = {
             "Nessun brano presente nella coda locale.\n"
             "Seleziona una cartella o dei file per iniziare l'ascolto."
         ),
-        "local_select_folder": "📁 Seleziona Cartella…",
-        "local_select_files": "🎵 Seleziona File…",
-        "local_open_queue": "📑 Gestisci Coda",
+        "local_select_folder": "Seleziona Cartella…",
+        "local_select_files": "Seleziona File…",
+        "local_open_queue": "Gestisci Coda",
         "queue_empty_hint": "Coda vuota · Seleziona cartella o trascina file",
         "local_queue_title": "Coda Locale",
         "local_queue_empty": "Trascina file o cartelle audio qui per iniziare l'ascolto",
@@ -568,9 +568,9 @@ I18N: Dict[str, Dict[str, str]] = {
         "local_prompt_subtitle": (
             "Your local queue is empty.\nSelect a folder or audio files to start listening."
         ),
-        "local_select_folder": "📁 Select Folder…",
-        "local_select_files": "🎵 Select Files…",
-        "local_open_queue": "📑 Open Queue Manager",
+        "local_select_folder": "Select Folder…",
+        "local_select_files": "Select Files…",
+        "local_open_queue": "Open Queue Manager",
         "queue_empty_hint": "Queue empty · Select folder or drop files",
         "local_queue_title": "Local Queue",
         "local_queue_empty": "Drag audio files or folders here to start listening",

@@ -38,8 +38,10 @@ from core.local_metadata import LocalTrackInfo
 from core.local_playlist import LocalPlaylistManager
 from core.now_playing import _format_mmss
 from ui.custom_titlebar import CustomTitleBar
+from ui.dialog_animations import CyberMoeDialogAnimationMixin
 from ui.themes.cyber_moe import PALETTE
 from ui.vector_icons import (
+    get_folder_icon,
     get_music_note_icon,
     get_repeat_icon,
     get_shuffle_icon,
@@ -117,7 +119,7 @@ class TrackItemWidget(QWidget):
         layout.addWidget(self.dur_lbl)
 
 
-class LocalQueueDialog(QDialog):
+class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
     """Cyber-Glass modal dialog managing the local audio playback queue."""
 
     play_track_requested = pyqtSignal(int)
@@ -216,6 +218,7 @@ class LocalQueueDialog(QDialog):
 
         self.btn_add_folder = QPushButton(self.i18n.t("local_add_folder"))
         self.btn_add_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_folder.setIcon(get_folder_icon(14))
         self.btn_add_folder.setStyleSheet(self._button_style(False))
         self.btn_add_folder.clicked.connect(self._on_add_folder_clicked)
         top_row.addWidget(self.btn_add_folder)
@@ -290,12 +293,14 @@ class LocalQueueDialog(QDialog):
 
         btn_em_folder = QPushButton(self.i18n.t("local_add_folder"))
         btn_em_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_em_folder.setIcon(get_folder_icon(14, "#FFFFFF"))
         btn_em_folder.setStyleSheet(self._button_style(True))
         btn_em_folder.clicked.connect(self._on_add_folder_clicked)
         empty_btns.addWidget(btn_em_folder)
 
         btn_em_files = QPushButton(self.i18n.t("local_add_files"))
         btn_em_files.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_em_files.setIcon(get_music_note_icon(14, PALETTE["accent"]))
         btn_em_files.setStyleSheet(self._button_style(False))
         btn_em_files.clicked.connect(self._on_add_files_clicked)
         empty_btns.addWidget(btn_em_files)

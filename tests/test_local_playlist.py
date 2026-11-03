@@ -226,6 +226,9 @@ def test_local_prompt_dialog_creation_and_signals():
     assert dlg.btn_folder is not None
     assert dlg.btn_files is not None
     assert dlg.btn_queue is not None
+    assert not dlg.btn_folder.icon().isNull()
+    assert not dlg.btn_files.icon().isNull()
+    assert not dlg.btn_queue.icon().isNull()
     assert dlg._title_bar._ver_badge.text() == "MUSICA LOCALE"
     assert dlg._title_bar._ver_badge.width() >= 90  # dynamically sized to prevent text overflow
 
@@ -233,6 +236,30 @@ def test_local_prompt_dialog_creation_and_signals():
     dlg.open_queue_requested.connect(lambda: opened.append(True))
     dlg._on_open_queue()
     assert len(opened) == 1
+    dlg.close()
+
+
+def test_dialog_entrance_and_exit_animations():
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+    _app = QApplication.instance() or QApplication([])
+    mgr = LocalPlaylistManager()
+    dlg = LocalMusicPromptDialog(mgr)
+
+    dlg.show()
+    assert hasattr(dlg, "_animate_dialog_entrance")
+    assert hasattr(dlg, "_animate_dialog_exit")
+    assert dlg._entrance_animated is True
+
+    # Test exit callback execution
+    closed = []
+    dlg._animate_dialog_exit(lambda: closed.append(True))
+    if dlg._anim_group is not None:
+        dlg._anim_group.setCurrentTime(dlg._anim_group.totalDuration())
+    _app.processEvents()
+    assert len(closed) == 1
     dlg.close()
 
 

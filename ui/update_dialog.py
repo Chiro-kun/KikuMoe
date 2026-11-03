@@ -35,6 +35,7 @@ from core.constants import (
 from core.i18n import I18n
 from core.updater import AssetDownloadWorker, ReleaseAsset, ReleaseInfo
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
+from ui.dialog_animations import CyberMoeDialogAnimationMixin
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
 from ui.vector_icons import (
     get_download_icon,
@@ -46,7 +47,7 @@ from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 _IS_WIN32 = sys.platform == "win32"
 
 
-class UpdateDialog(QDialog):
+class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
     """Frameless Cyber-Glass modal dialog presenting an available update."""
 
     def __init__(
@@ -357,8 +358,20 @@ class UpdateDialog(QDialog):
         self.btn_action.setText(self.i18n.t("updates_download"))
 
     def closeEvent(self, event) -> None:
-        if self._download_worker and self._download_worker.isRunning():
-            self._download_worker.cancel()
-        if self.cb_ignore.isChecked():
-            self.settings.setValue(KEY_UPDATE_IGNORED_VERSION, self.release.tag_name)
-        super().closeEvent(event)
+        if (
+            getattr(self, "_is_closing", False)
+            or os.environ.get("QT_QPA_PLATFORM") == "offscreen"
+            or not self.isVisible()
+        ):
+            self._stop_dialog_animations()
+            if self._download_worker and self._download_worker.isRunning():
+                self._download_worker.cancel()
+            if hasattr(self, "cb_ignore") and self.cb_ignore.isChecked():
+                self.settings.setValue(KEY_UPDATE_IGNORED_VERSION, self.release.tag_name)
+            if event:
+                event.accept()
+            super().closeEvent(event)
+            return
+        if event:
+            event.ignore()
+        self._animate_dialog_exit(super().close)
