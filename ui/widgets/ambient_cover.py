@@ -176,11 +176,11 @@ class FullBleedCanvas(QWidget):
             painter.drawPixmap(0, 0, scaled, x_off, y_off, int(w), int(h))
 
             overlay = QLinearGradient(0, 0, 0, h)
-            overlay.setColorAt(0.0, surface_qcolor(90, "bg_canvas"))
-            overlay.setColorAt(0.22, surface_qcolor(130, "bg_canvas"))
-            overlay.setColorAt(0.55, surface_qcolor(175, "bg_canvas"))
-            overlay.setColorAt(0.80, surface_qcolor(220, "bg_canvas"))
-            overlay.setColorAt(1.0, surface_qcolor(245, "bg_canvas"))
+            overlay.setColorAt(0.0, surface_qcolor(80, "bg_canvas"))
+            overlay.setColorAt(0.22, surface_qcolor(115, "bg_canvas"))
+            overlay.setColorAt(0.55, surface_qcolor(155, "bg_canvas"))
+            overlay.setColorAt(0.80, surface_qcolor(198, "bg_canvas"))
+            overlay.setColorAt(1.0, surface_qcolor(226, "bg_canvas"))
             painter.fillRect(self.rect(), overlay)
         else:
             g1 = QRadialGradient(QPointF(w * 0.5, h * 0.28), w * 0.70)
@@ -436,6 +436,16 @@ class AnimatedTrackLabel(QLabel):
 
     def set_text_color(self, color: str) -> None:
         self._text_color = QColor(color)
+        self.update()
+
+    def set_font_size(self, font_px: int) -> None:
+        size = max(10, int(font_px))
+        if self._font_px == size:
+            return
+        self._font_px = size
+        self.setFixedHeight(max(22, size + 8))
+        self._update_chevron_position()
+        self.updateGeometry()
         self.update()
 
     def attach_chevron_button(self, btn: QWidget) -> None:

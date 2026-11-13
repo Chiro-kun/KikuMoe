@@ -964,6 +964,86 @@ def test_set_album_cover_updates_full_bleed_ambient_backdrop(qapp, tmp_path, mon
         player.deleteLater()
 
 
+def test_fullscreen_centered_responsive_stage(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint, QSettings
+
+    from ui import main_window
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(main_window.ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        main_window.ListenMoePlayer,
+        "_init_system_media",
+        lambda self: setattr(self, "system_media", None),
+    )
+
+    player = main_window.ListenMoePlayer()
+    try:
+        player.show()
+        player.resize(405, 700)
+        qapp.processEvents()
+
+        assert player._album_cover_size == 180
+        assert player._stage_column.width() == player._player_stage.width()
+
+        # Simulate widescreen / 1080p fullscreen geometry
+        player.resize(1920, 1080)
+        qapp.processEvents()
+
+        assert player._album_cover_size == 300
+        assert player.now_playing_title._font_px >= 20
+        assert player._stage_column.width() == 760
+        stage_center = player._stage_column.mapTo(
+            player, QPoint(player._stage_column.width() // 2, 0)
+        ).x()
+        assert abs(stage_center - player.width() // 2) <= 2
+
+        stage_top = player._stage_column.mapTo(player, QPoint(0, 0)).y()
+        stage_bottom = player._stage_column.mapTo(
+            player, QPoint(0, player._stage_column.height())
+        ).y()
+        assert stage_top > 60
+        assert player.height() - stage_bottom > 20
+
+        # Opening lyrics in widescreen smoothly animates the centered stage container 760 -> 980
+        from PyQt6.QtTest import QTest
+
+        monkeypatch.setattr(player.lyrics_provider, "search", lambda *args: None)
+        player.lyrics_button.click()
+        qapp.processEvents()
+        player._animate_lyrics_transition(0.5)
+        qapp.processEvents()
+        assert 760 < player._stage_column.width() < 980
+        QTest.qWait(350)
+        assert player._stage_column.width() == 980
+
+        # Closing lyrics smoothly contracts back 980 -> 760
+        player.lyrics_button.click()
+        qapp.processEvents()
+        player._animate_lyrics_transition(0.5)
+        qapp.processEvents()
+        assert 760 < player._stage_column.width() < 980
+        QTest.qWait(350)
+        assert player._stage_column.width() == 760
+
+        # Restoring compact size reverts cover & typography back cleanly
+        player.resize(405, 700)
+        qapp.processEvents()
+        assert player._album_cover_size == 180
+        assert player.now_playing_title._font_px == 16
+        assert player._stage_column.width() == player._player_stage.width()
+    finally:
+        player.deleteLater()
+
+
 def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatch):
     from PyQt6.QtTest import QTest
 

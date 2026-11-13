@@ -782,9 +782,18 @@ class ListenMoePlayer(QWidget):
 
         self._view_stack = SlidingStackedWidget()
         self._player_stage = QWidget()
-        self._layout = QVBoxLayout(self._player_stage)
+        self._player_stage_outer = QVBoxLayout(self._player_stage)
+        self._player_stage_outer.setContentsMargins(0, 0, 0, 0)
+        self._player_stage_outer.setSpacing(0)
+        self._player_stage_outer.addStretch(1)
+
+        self._stage_column = QWidget()
+        self._stage_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._layout = QVBoxLayout(self._stage_column)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(7)
+        self._player_stage_outer.addWidget(self._stage_column)
+        self._player_stage_outer.addStretch(1)
         self._view_stack.addWidget(self._player_stage)
 
         self._canvas_outer_layout.addWidget(self._body_container, 1)
@@ -1068,11 +1077,21 @@ class ListenMoePlayer(QWidget):
             self.ambient_cover.setMinimumWidth(0)
             self.lyrics_panel.setMinimumWidth(0)
 
-        target_cover = self._album_cover_size + 84 if enabled else max(222, target_width - 32)
-        target_panel = max(190, target_width - 32 - target_cover - 10) if enabled else 0
+        stage_max_w = 980 if enabled else 760
+        stage_avail_w = min(target_width - 32, stage_max_w)
+        start_stage_w = (
+            self._stage_column.width()
+            if hasattr(self, "_stage_column") and self._stage_column.width() > 0
+            else min(start_width - 32, 760 if enabled else 980)
+        )
+        end_stage_w = stage_avail_w
+        target_cover = self._album_cover_size + 84 if enabled else max(222, stage_avail_w)
+        target_panel = max(190, stage_avail_w - target_cover - 10) if enabled else 0
         self._lyrics_transition_values = (
             start_width,
             target_width,
+            start_stage_w,
+            end_stage_w,
             start_cover,
             target_cover,
             start_panel,
@@ -1092,6 +1111,8 @@ class ListenMoePlayer(QWidget):
         (
             start_width,
             end_width,
+            start_stage_w,
+            end_stage_w,
             start_cover,
             end_cover,
             start_panel,
@@ -1100,13 +1121,24 @@ class ListenMoePlayer(QWidget):
             end_op,
             _,
         ) = values
+        cur_win_w = (
+            round(start_width + (end_width - start_width) * progress)
+            if start_width != end_width
+            else self.width()
+        )
+        cur_stage_w = round(start_stage_w + (end_stage_w - start_stage_w) * progress)
+        outer = getattr(self, "_player_stage_outer", None)
+        if outer is not None:
+            avail_w = max(340, cur_win_w - 32)
+            side_pad = max(0, (avail_w - cur_stage_w) // 2)
+            outer.setContentsMargins(side_pad, 0, side_pad, 0)
         self.ambient_cover.setMaximumWidth(
             round(start_cover + (end_cover - start_cover) * progress)
         )
         self.lyrics_panel.setMaximumWidth(round(start_panel + (end_panel - start_panel) * progress))
         self._lyrics_effect.setOpacity(start_op + (end_op - start_op) * progress)
         if start_width != end_width:
-            self.resize(round(start_width + (end_width - start_width) * progress), self.height())
+            self.resize(cur_win_w, self.height())
 
     def _finish_lyrics_transition(self):
         if not self._lyrics_transition_values:
@@ -1126,6 +1158,7 @@ class ListenMoePlayer(QWidget):
         self.lyrics_panel.setMinimumWidth(190)
         if enabled:
             self.lyrics_panel._schedule_recenter()
+        self._update_responsive_stage()
 
     def _refresh_lyrics(self, force=False):
         if not self.lyrics_button.isChecked():
@@ -1841,6 +1874,7 @@ class ListenMoePlayer(QWidget):
             min_h = max(effective_min_h, self.minimumSizeHint().height())
             if self.height() < min_h:
                 self.resize(max(380, self.width()), min_h)
+            self._update_responsive_stage()
             self.backend_status_refresh.connect(self.update_vlc_status_label)
 
             # Autoplay
@@ -2163,6 +2197,75 @@ class ListenMoePlayer(QWidget):
                     event.accept()
                     return
             super().changeEvent(event)
+            if event.type() == QEvent.Type.WindowStateChange:
+                self._update_responsive_stage()
+        except Exception:
+            pass
+
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._update_responsive_stage()
+
+    def _update_responsive_stage(self) -> None:
+        """Keep the player compact at default size and frame a centered hero stage in fullscreen."""
+        try:
+            if getattr(self, "_mini_mode", False):
+                return
+            if getattr(self, "_lyrics_transition_values", None) is not None:
+                return
+            outer = getattr(self, "_player_stage_outer", None)
+            if outer is None:
+                return
+
+            avail_w = max(340, self.width() - 32)
+            lyrics_panel = getattr(self, "lyrics_panel", None)
+            lyrics_open = lyrics_panel is not None and not lyrics_panel.isHidden()
+            max_col_w = 980 if lyrics_open else 760
+            side_pad = max(0, (avail_w - max_col_w) // 2)
+            outer.setContentsMargins(side_pad, 0, side_pad, 0)
+
+            if self.width() < 680 and self.height() < 780:
+                target_cover = 180
+            else:
+                avail_h = max(500, self.height() - CustomTitleBar.HEIGHT - 56)
+                sleep_w = getattr(self, "sleep_timer_widget", None)
+                sleep_open = sleep_w is not None and sleep_w.isVisible()
+                reserved_v = 340 if sleep_open else 240
+                target_cover = max(
+                    180,
+                    min(
+                        300,
+                        round(min(avail_w * 0.24, max(180, avail_h - reserved_v) * 0.56)),
+                    ),
+                )
+
+            if hasattr(self, "_layout"):
+                target_spacing = 11 if target_cover >= 240 else 7
+                if self._layout.spacing() != target_spacing:
+                    self._layout.setSpacing(target_spacing)
+
+            if target_cover != getattr(self, "_album_cover_size", 180):
+                self._album_cover_size = target_cover
+                ambient = getattr(self, "ambient_cover", None)
+                if ambient is not None:
+                    ambient.set_cover_size(target_cover)
+                    transition = getattr(self, "_lyrics_transition", None)
+                    is_animating = (
+                        transition is not None
+                        and transition.state() == QVariantAnimation.State.Running
+                    )
+                    if lyrics_open and not is_animating:
+                        cover_w = target_cover + 84
+                        ambient.setMinimumWidth(cover_w)
+                        ambient.setMaximumWidth(cover_w)
+
+            t = max(0.0, min(1.0, (target_cover - 180) / 120.0))
+            title_lbl = getattr(self, "now_playing_title", None)
+            if title_lbl is not None and hasattr(title_lbl, "set_font_size"):
+                title_lbl.set_font_size(round(16 + 5 * t))
+            artist_lbl = getattr(self, "now_playing_artist", None)
+            if artist_lbl is not None and hasattr(artist_lbl, "set_font_size"):
+                artist_lbl.set_font_size(round(13 + 2 * t))
         except Exception:
             pass
 
@@ -2576,6 +2679,7 @@ class ListenMoePlayer(QWidget):
                 self.setMinimumSize(380, effective_min_h)
                 for wid in (
                     self.sleep_timer_widget,
+                    getattr(self, "_stage_column", None),
                     getattr(self, "_player_stage", None),
                     getattr(self, "_view_stack", None),
                     getattr(self, "_body_container", None),
@@ -2587,8 +2691,11 @@ class ListenMoePlayer(QWidget):
                         if wid_layout is not None:
                             wid_layout.activate()
                         wid.updateGeometry()
-                target_h = max(effective_min_h, self.minimumSizeHint().height())
-                self.resize(self.width(), target_h)
+                if self.isMaximized() or self.isFullScreen():
+                    self._update_responsive_stage()
+                else:
+                    target_h = max(effective_min_h, self.minimumSizeHint().height())
+                    self.resize(self.width(), target_h)
         except Exception:
             pass
 
