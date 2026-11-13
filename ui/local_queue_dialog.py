@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.constants import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE
-from core.i18n import I18n
+from core.i18n import I18n, resolve_i18n
 from core.local_metadata import LocalTrackInfo
 from core.local_playlist import LocalPlaylistManager
 from core.now_playing import _format_mmss
@@ -132,12 +132,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
     ) -> None:
         super().__init__(parent)
         self.playlist_mgr = playlist_manager
-        if i18n is not None:
-            self.i18n = i18n
-        elif parent is not None and hasattr(parent, "i18n"):
-            self.i18n = getattr(parent, "i18n")
-        else:
-            self.i18n = I18n("it")
+        self.i18n = resolve_i18n(i18n, parent)
 
         self.setObjectName("localQueueDialog")
         self.setWindowFlags(
@@ -175,7 +170,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         frame_layout.setSpacing(0)
 
         # 1. Custom TitleBar
-        self.titlebar = CustomTitleBar(self)
+        self.titlebar = CustomTitleBar(self, i18n=self.i18n)
         self.titlebar.set_title(self.i18n.t("local_queue_title"))
         self.titlebar._btn_min.setVisible(False)
         self.titlebar._btn_max.setVisible(False)
@@ -192,7 +187,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         top_row.setSpacing(8)
 
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Cerca traccia o artista…")
+        self.search_box.setPlaceholderText(self.i18n.t("local_search_placeholder"))
         self.search_box.setStyleSheet(
             f"QLineEdit {{"
             "  background-color: rgba(255, 255, 255, 0.06);"
@@ -272,38 +267,38 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_icon, 0, Qt.AlignmentFlag.AlignCenter)
 
-        empty_title = QLabel(self.i18n.t("local_prompt_title"))
+        self.empty_title = QLabel(self.i18n.t("local_prompt_title"))
         font_em_title = QFont()
         font_em_title.setPointSize(12)
         font_em_title.setBold(True)
-        empty_title.setFont(font_em_title)
-        empty_title.setStyleSheet(f"color: {PALETTE['text_primary']};")
-        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(empty_title)
+        self.empty_title.setFont(font_em_title)
+        self.empty_title.setStyleSheet(f"color: {PALETTE['text_primary']};")
+        self.empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self.empty_title)
 
-        empty_desc = QLabel(self.i18n.t("local_queue_empty"))
-        empty_desc.setWordWrap(True)
-        empty_desc.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 11px;")
-        empty_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(empty_desc)
+        self.empty_desc = QLabel(self.i18n.t("local_queue_empty"))
+        self.empty_desc.setWordWrap(True)
+        self.empty_desc.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 11px;")
+        self.empty_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self.empty_desc)
 
         empty_btns = QHBoxLayout()
         empty_btns.setSpacing(10)
         empty_btns.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        btn_em_folder = QPushButton(self.i18n.t("local_add_folder"))
-        btn_em_folder.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_em_folder.setIcon(get_folder_icon(14, "#FFFFFF"))
-        btn_em_folder.setStyleSheet(self._button_style(True))
-        btn_em_folder.clicked.connect(self._on_add_folder_clicked)
-        empty_btns.addWidget(btn_em_folder)
+        self.btn_em_folder = QPushButton(self.i18n.t("local_add_folder"))
+        self.btn_em_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_em_folder.setIcon(get_folder_icon(14, "#FFFFFF"))
+        self.btn_em_folder.setStyleSheet(self._button_style(True))
+        self.btn_em_folder.clicked.connect(self._on_add_folder_clicked)
+        empty_btns.addWidget(self.btn_em_folder)
 
-        btn_em_files = QPushButton(self.i18n.t("local_add_files"))
-        btn_em_files.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_em_files.setIcon(get_music_note_icon(14, PALETTE["accent"]))
-        btn_em_files.setStyleSheet(self._button_style(False))
-        btn_em_files.clicked.connect(self._on_add_files_clicked)
-        empty_btns.addWidget(btn_em_files)
+        self.btn_em_files = QPushButton(self.i18n.t("local_add_files"))
+        self.btn_em_files.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_em_files.setIcon(get_music_note_icon(14, PALETTE["accent"]))
+        self.btn_em_files.setStyleSheet(self._button_style(False))
+        self.btn_em_files.clicked.connect(self._on_add_files_clicked)
+        empty_btns.addWidget(self.btn_em_files)
 
         empty_layout.addLayout(empty_btns)
         layout.addWidget(self.empty_widget, 1)
@@ -313,7 +308,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(8)
 
-        self.stats_lbl = QLabel("0 brani")
+        self.stats_lbl = QLabel(self.i18n.t("local_tracks_zero"))
         self.stats_lbl.setStyleSheet(
             f"color: {PALETTE['text_muted']}; font-size: 11px; font-weight: 600;"
         )
@@ -451,8 +446,26 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             self.playlist_mgr.play_index(actual_idx)
             self.play_track_requested.emit(actual_idx)
 
+    def retranslate(self, i18n: I18n | None = None) -> None:
+        """Update dialog labels, placeholders, and buttons to the active language."""
+        if i18n is not None:
+            self.i18n = i18n
+        self.titlebar.set_title(self.i18n.t("local_queue_title"))
+        self.titlebar.retranslate(self.i18n)
+        self.search_box.setPlaceholderText(self.i18n.t("local_search_placeholder"))
+        self.btn_add_files.setText(self.i18n.t("local_add_files"))
+        self.btn_add_folder.setText(self.i18n.t("local_add_folder"))
+        self.empty_title.setText(self.i18n.t("local_prompt_title"))
+        self.empty_desc.setText(self.i18n.t("local_queue_empty"))
+        self.btn_em_folder.setText(self.i18n.t("local_add_folder"))
+        self.btn_em_files.setText(self.i18n.t("local_add_files"))
+        self.btn_shuffle.setText(self.i18n.t("local_shuffle"))
+        self.btn_clear.setText(self.i18n.t("local_clear_queue"))
+        self._update_repeat_text()
+        self._refresh_queue()
+
     def _on_add_files_clicked(self) -> None:
-        filters = "Audio Files (*.mp3 *.flac *.ogg *.opus *.m4a *.aac *.wav);;All Files (*.*)"
+        filters = self.i18n.t("local_audio_files_filter")
         files, _ = QFileDialog.getOpenFileNames(
             self,
             self.i18n.t("local_add_files"),

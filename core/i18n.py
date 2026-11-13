@@ -1,6 +1,11 @@
-from typing import Dict
+from __future__ import annotations
 
-I18N: Dict[str, Dict[str, str]] = {
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+I18N: dict[str, dict[str, str]] = {
     "it": {
         "lyrics_button": "Testo",
         "lyrics_loading": "Cerco il testo…",
@@ -296,6 +301,55 @@ I18N: Dict[str, Dict[str, str]] = {
         "local_tracks_summary": "{count} brani · {duration}",
         "local_prev_track": "Brano precedente",
         "local_next_track": "Brano successivo",
+        "local_search_placeholder": "Cerca traccia o artista…",
+        "local_audio_files_filter": (
+            "File audio (*.mp3 *.flac *.ogg *.opus *.m4a *.aac *.wav);;Tutti i file (*.*)"
+        ),
+        "local_tracks_zero": "0 brani",
+        # Controlli finestra & riproduzione
+        "window_minimize": "Minimizza",
+        "window_maximize": "Ingrandisci",
+        "window_restore": "Ripristina",
+        "window_close": "Chiudi",
+        "tt_force_stop": "Riavvio forzato audio",
+        "tt_force_stop_menu": "Ferma / Riavvia audio",
+        "tt_stop_shortcut": "Stop (S)",
+        "tt_prev_track": "Brano precedente (F5)",
+        "tt_play_pause": "Riproduci / Pausa (Spazio)",
+        "tt_next_track": "Brano successivo (F6)",
+        "tt_queue": "Coda / Playlist (Q)",
+        "tt_sleep_timer": "Sleep Timer",
+        "tt_autoplay": "Autoplay",
+        "tt_mute_toggle": "Muto / Riattiva audio (M)",
+        "sleep_custom_minutes_tip": "Minuti personalizzati",
+        "station_switch_tooltip": "Cambia stazione radio",
+        "history_unknown_track": "Brano sconosciuto",
+        "about_badge": "INFO & CREDITI",
+        "backend_ok": "Backend audio OK",
+        "dev_console_log_files_filter": (
+            "File di log (*.log);;File di testo (*.txt);;Tutti i file (*)"
+        ),
+        # Aggiornamenti (dettagli dialog)
+        "updates_release_notes": "Note di rilascio:",
+        "updates_no_release_notes": "Nessuna nota di rilascio dettagliata disponibile.",
+        "updates_package_info": "Pacchetto: {name} ({size_mb} MB)",
+        "updates_available_github": "Disponibile su GitHub Releases",
+        "updates_launch_installer": "Avvia Installer",
+        "updates_download_error": "Errore download: {error}",
+        # Impostazioni (sezioni & controlli mancanti)
+        "settings_radio_prefs_section": "PREFERENZE RADIO",
+        "settings_visualizer": "Visualizzatore audio radiale",
+        "settings_visualizer_tip": (
+            "Mostra un alone audio-reattivo attorno alla copertina dell'album"
+        ),
+        "settings_playback_section": "COMPORTAMENTO RIPRODUZIONE",
+        "settings_discord_id_placeholder": "KikuMoe (predefinito)",
+        "settings_audio_engine_section": "MOTORE AUDIO & USCITA",
+        "settings_network_libvlc_section": "BUFFER DI RETE & LIBVLC",
+        "settings_vlc_path_placeholder": "Auto / PATH di sistema",
+        "settings_tray_section": "SYSTEM TRAY",
+        "settings_dev_console_section": "CONSOLE SVILUPPATORE",
+        "settings_back_to_player": "Player",
     },
     "en": {
         "lyrics_button": "Lyrics",
@@ -587,6 +641,51 @@ I18N: Dict[str, Dict[str, str]] = {
         "local_tracks_summary": "{count} tracks · {duration}",
         "local_prev_track": "Previous track",
         "local_next_track": "Next track",
+        "local_search_placeholder": "Search track or artist…",
+        "local_audio_files_filter": (
+            "Audio Files (*.mp3 *.flac *.ogg *.opus *.m4a *.aac *.wav);;All Files (*.*)"
+        ),
+        "local_tracks_zero": "0 tracks",
+        # Window & playback controls
+        "window_minimize": "Minimize",
+        "window_maximize": "Maximize",
+        "window_restore": "Restore",
+        "window_close": "Close",
+        "tt_force_stop": "Force Reset Audio",
+        "tt_force_stop_menu": "Force Stop / Reset Audio",
+        "tt_stop_shortcut": "Stop (S)",
+        "tt_prev_track": "Previous Track (F5)",
+        "tt_play_pause": "Play / Pause (Space)",
+        "tt_next_track": "Next Track (F6)",
+        "tt_queue": "Queue / Playlist (Q)",
+        "tt_sleep_timer": "Sleep Timer",
+        "tt_autoplay": "Autoplay",
+        "tt_mute_toggle": "Mute / Unmute (M)",
+        "sleep_custom_minutes_tip": "Custom minutes",
+        "station_switch_tooltip": "Switch radio station",
+        "history_unknown_track": "Unknown Track",
+        "about_badge": "INFO & CREDITS",
+        "backend_ok": "Audio backend OK",
+        "dev_console_log_files_filter": ("Log Files (*.log);;Text Files (*.txt);;All Files (*)"),
+        # Updates (dialog details)
+        "updates_release_notes": "Release notes:",
+        "updates_no_release_notes": "No detailed release notes available.",
+        "updates_package_info": "Package: {name} ({size_mb} MB)",
+        "updates_available_github": "Available on GitHub Releases",
+        "updates_launch_installer": "Launch Installer",
+        "updates_download_error": "Download error: {error}",
+        # Settings (sections & remaining controls)
+        "settings_radio_prefs_section": "RADIO PREFERENCES",
+        "settings_visualizer": "Radial audio visualizer",
+        "settings_visualizer_tip": "Show an audio-reactive halo around the album cover art",
+        "settings_playback_section": "PLAYBACK BEHAVIOR",
+        "settings_discord_id_placeholder": "KikuMoe (default)",
+        "settings_audio_engine_section": "AUDIO ENGINE & OUTPUT",
+        "settings_network_libvlc_section": "NETWORK BUFFER & LIBVLC",
+        "settings_vlc_path_placeholder": "Auto / System PATH",
+        "settings_tray_section": "SYSTEM TRAY",
+        "settings_dev_console_section": "DEVELOPER CONSOLE",
+        "settings_back_to_player": "Player",
     },
 }
 
@@ -604,3 +703,64 @@ class I18n:
             return txt.format(**kwargs) if kwargs else txt
         except Exception:
             return I18N["it"].get(key, key)
+
+
+def resolve_i18n(i18n: I18n | None = None, parent: Any = None) -> I18n:
+    """Resolve an I18n instance from explicit argument, parent widget, or settings/default."""
+    if i18n is not None:
+        return i18n
+    if parent is not None:
+        parent_i18n = getattr(parent, "i18n", None) or getattr(parent, "_i18n", None)
+        if isinstance(parent_i18n, I18n):
+            return parent_i18n
+    return I18n("it")
+
+
+_active_qt_translator: Any = None
+
+
+def _candidate_qt_translation_dirs() -> list[str]:
+    dirs: list[str] = []
+    try:
+        from PyQt6.QtCore import QLibraryInfo
+
+        qt_dir = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+        if qt_dir:
+            dirs.append(qt_dir)
+    except Exception:
+        pass
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        base = Path(str(meipass))
+        for rel in (Path("PyQt6") / "Qt6" / "translations", Path("translations")):
+            p = str(base / rel)
+            if p not in dirs:
+                dirs.append(p)
+    return [d for d in dirs if d and os.path.isdir(d)]
+
+
+def install_qt_translator(app: Any, lang: str) -> bool:
+    """Load and install Qt's built-in qtbase_<lang>.qm translator on ``app``."""
+    global _active_qt_translator
+    if app is None:
+        return False
+    try:
+        from PyQt6.QtCore import QTranslator
+    except Exception:
+        return False
+
+    if _active_qt_translator is not None:
+        try:
+            app.removeTranslator(_active_qt_translator)
+        except Exception:
+            pass
+        _active_qt_translator = None
+
+    target_lang = "it" if lang not in ("it", "en") else lang
+    translator = QTranslator(app)
+    for tdir in _candidate_qt_translation_dirs():
+        if translator.load(f"qtbase_{target_lang}", tdir):
+            if app.installTranslator(translator):
+                _active_qt_translator = translator
+                return True
+    return False

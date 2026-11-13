@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.i18n import I18n, resolve_i18n
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 
 
@@ -169,8 +170,9 @@ class SleepTimerWidget(QFrame):
     start_requested = pyqtSignal(int)
     cancel_requested = pyqtSignal()
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, i18n: Optional[I18n] = None):
         super().__init__(parent)
+        self._i18n = resolve_i18n(i18n, parent)
         self.setObjectName("sleepTimerCard")
         self._is_active = False
         self._active_progress = 0.0  # 0.0 = inactive, 1.0 = active
@@ -190,7 +192,7 @@ class SleepTimerWidget(QFrame):
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(6)
 
-        self.title_label = QLabel("SLEEP TIMER")
+        self.title_label = QLabel(self._i18n.t("sleep_timer").upper())
         self.title_label.setObjectName("sectionTitleLabel")
         self.title_label.setStyleSheet(
             "font-size: 10px; font-weight: 700; letter-spacing: 1px; color: #9aa1b8;"
@@ -269,7 +271,7 @@ class SleepTimerWidget(QFrame):
             " border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 9px;"
             " padding: 0px 4px; font-size: 11px; font-weight: 700; color: #ffffff; }"
         )
-        self.spin_minutes.setToolTip("Custom minutes")
+        self.spin_minutes.setToolTip(self._i18n.t("sleep_custom_minutes_tip"))
         self.spin_minutes.valueChanged.connect(self._refresh_chip_styles)
 
         self.btn_plus = _AnimatedSleepBtn("+")
@@ -280,13 +282,13 @@ class SleepTimerWidget(QFrame):
         )
         self._apply_step_button_styles()
 
-        self.btn_start = _AnimatedSleepBtn("Start")
+        self.btn_start = _AnimatedSleepBtn(self._i18n.t("sleep_start"))
         self.btn_start.setObjectName("primaryButton")
         self.btn_start.setFixedSize(92, 25)
         self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start.clicked.connect(self._on_start_clicked)
 
-        self.btn_cancel = _AnimatedSleepBtn("Cancel")
+        self.btn_cancel = _AnimatedSleepBtn(self._i18n.t("sleep_cancel"))
         self.btn_cancel.setObjectName("pillButton")
         self.btn_cancel.setFixedSize(92, 25)
         self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -485,10 +487,18 @@ class SleepTimerWidget(QFrame):
     def get_minutes(self) -> int:
         return self.spin_minutes.value()
 
-    def apply_translations(self, title: str, start_btn: str, cancel_btn: str) -> None:
+    def apply_translations(
+        self,
+        title: str,
+        start_btn: str,
+        cancel_btn: str,
+        custom_minutes_tip: Optional[str] = None,
+    ) -> None:
         self.title_label.setText(title.upper())
         self.btn_start.setText(start_btn)
         self.btn_cancel.setText(cancel_btn)
+        if custom_minutes_tip is not None:
+            self.spin_minutes.setToolTip(custom_minutes_tip)
 
     def refresh_theme(self) -> None:
         self._apply_step_button_styles()

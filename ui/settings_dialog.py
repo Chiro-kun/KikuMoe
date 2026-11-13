@@ -11,7 +11,7 @@ Features:
 import os
 import sys
 import threading
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -893,14 +893,18 @@ class AccentColorSwatchButton(QPushButton):
     def __init__(
         self,
         initial_color: str = DEFAULT_ACCENT_COLOR,
-        dialog_title: str = "Select Accent Color",
+        dialog_title: Optional[str] = None,
         i18n: Optional[I18n] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._color = normalize_hex_color(initial_color)
-        self._dialog_title = dialog_title
         self._i18n = i18n
+        self._dialog_title = dialog_title or (
+            i18n.t("settings_custom_accent_dialog_title")
+            if i18n is not None
+            else "Select Accent Color"
+        )
         self._hover = False
         self._pressed = False
         self.setFixedSize(112, 30)
@@ -1069,13 +1073,12 @@ class SettingsDialog(QDialog):
             body_layout.setSpacing(10)
 
         # Embedded Panel Header Row: [< Player]  IMPOSTAZIONI
-        is_it = self.i18n.lang == "it"
         if embedded:
             hdr_row = QHBoxLayout()
             hdr_row.setContentsMargins(2, 0, 2, 2)
             hdr_row.setSpacing(8)
 
-            self.btn_back = BackToPlayerButton("Player", self)
+            self.btn_back = BackToPlayerButton(self.i18n.t("settings_back_to_player"), self)
             self.btn_back.clicked.connect(self.reject)
             hdr_row.addWidget(self.btn_back)
 
@@ -1115,15 +1118,16 @@ class SettingsDialog(QDialog):
         gen_layout.setContentsMargins(0, 2, 0, 2)
         gen_layout.setSpacing(8)
 
-        card_prefs, prefs_lay = self._make_card(
-            "PREFERENZE RADIO" if is_it else "RADIO PREFERENCES"
-        )
+        card_prefs, prefs_lay = self._make_card(self.i18n.t("settings_radio_prefs_section"))
+        self._card_prefs_hdr = self._layout_first_widget(prefs_lay)
 
         self.cmb_lang = GlassComboBox()
         self.cmb_lang.addItems(["Italiano", "English"])
         self.cmb_lang.setCurrentIndex(0 if self.settings.value(KEY_LANG, "it") == "it" else 1)
         self.cmb_lang.setFixedWidth(combo_w)
-        prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_language"), self.cmb_lang))
+        lang_row = self._make_field_row(self.i18n.t("settings_language"), self.cmb_lang)
+        self._lbl_lang = self._layout_first_widget(lang_row)
+        prefs_lay.addLayout(lang_row)
 
         self.cmb_station = GlassComboBox()
         self.cmb_station.addItem("LISTEN.moe", userData=STATION_LISTENMOE)
@@ -1137,13 +1141,17 @@ class SettingsDialog(QDialog):
                 self.cmb_station.setCurrentIndex(i)
                 break
         self.cmb_station.setFixedWidth(combo_w)
-        prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_station"), self.cmb_station))
+        station_row = self._make_field_row(self.i18n.t("settings_station"), self.cmb_station)
+        self._lbl_station = self._layout_first_widget(station_row)
+        prefs_lay.addLayout(station_row)
 
         self.cmb_channel = GlassComboBox()
         self.cmb_channel.addItems(["J-POP", "K-POP"])
         self.cmb_channel.setCurrentText(self.settings.value(KEY_CHANNEL, "J-POP"))
         self.cmb_channel.setFixedWidth(combo_w)
-        prefs_lay.addLayout(self._make_field_row(self.i18n.t("settings_channel"), self.cmb_channel))
+        channel_row = self._make_field_row(self.i18n.t("settings_channel"), self.cmb_channel)
+        self._lbl_channel = self._layout_first_widget(channel_row)
+        prefs_lay.addLayout(channel_row)
 
         gen_layout.addWidget(card_prefs)
 
@@ -1208,18 +1216,12 @@ class SettingsDialog(QDialog):
         self.custom_accent_row.setVisible(self.chk_custom_accent.isChecked())
         theme_lay.addWidget(self.custom_accent_row)
 
-        self.chk_visualizer = AnimatedToggleSwitch(
-            "Visualizzatore audio radiale" if is_it else "Radial audio visualizer"
-        )
+        self.chk_visualizer = AnimatedToggleSwitch(self.i18n.t("settings_visualizer"))
         def_viz = "true" if DEFAULT_VISUALIZER_ENABLED else "false"
         self.chk_visualizer.setChecked(
             self.settings.value(KEY_VISUALIZER_ENABLED, def_viz) == "true"
         )
-        self.chk_visualizer.setToolTip(
-            "Mostra un alone audio-reattivo attorno alla copertina dell'album"
-            if is_it
-            else "Show an audio-reactive halo around the album cover art"
-        )
+        self.chk_visualizer.setToolTip(self.i18n.t("settings_visualizer_tip"))
         theme_lay.addWidget(self.chk_visualizer)
 
         self.cmb_theme.currentIndexChanged.connect(self._on_theme_combo_changed)
@@ -1230,9 +1232,9 @@ class SettingsDialog(QDialog):
 
         gen_layout.addWidget(card_theme)
 
-        card_play, play_lay = self._make_card(
-            "COMPORTAMENTO RIPRODUZIONE" if is_it else "PLAYBACK BEHAVIOR"
-        )
+        card_play, play_lay = self._make_card(self.i18n.t("settings_playback_section"))
+        play_hdr_item = play_lay.itemAt(0)
+        self._card_play_hdr = play_hdr_item.widget() if play_hdr_item is not None else None
 
         self.chk_autoplay = AnimatedToggleSwitch(self.i18n.t("settings_autoplay"))
         self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
@@ -1247,7 +1249,9 @@ class SettingsDialog(QDialog):
         self.txt_discord_client_id = QLineEdit(
             str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
         )
-        self.txt_discord_client_id.setPlaceholderText("KikuMoe (default)")
+        self.txt_discord_client_id.setPlaceholderText(
+            self.i18n.t("settings_discord_id_placeholder")
+        )
         self.txt_discord_client_id.setFixedWidth(combo_w)
         self.txt_discord_client_id.setFixedHeight(30)
         self.discord_id_row = QWidget()
@@ -1283,15 +1287,16 @@ class SettingsDialog(QDialog):
         audio_layout.setContentsMargins(0, 2, 0, 2)
         audio_layout.setSpacing(8)
 
-        card_engine, eng_lay = self._make_card(
-            "MOTORE AUDIO & USCITA" if is_it else "AUDIO ENGINE & OUTPUT"
-        )
+        card_engine, eng_lay = self._make_card(self.i18n.t("settings_audio_engine_section"))
+        self._card_engine_hdr = self._layout_first_widget(eng_lay)
 
         self.cmb_format = GlassComboBox()
         self.cmb_format.addItems(["Vorbis", "Opus", "MP3"])
         self.cmb_format.setCurrentText(self.settings.value(KEY_FORMAT, "Vorbis"))
         self.cmb_format.setFixedWidth(combo_w)
-        eng_lay.addLayout(self._make_field_row(self.i18n.t("settings_format"), self.cmb_format))
+        fmt_row = self._make_field_row(self.i18n.t("settings_format"), self.cmb_format)
+        self._lbl_format = self._layout_first_widget(fmt_row)
+        eng_lay.addLayout(fmt_row)
 
         self.cmb_audio_backend = GlassComboBox()
         self.cmb_audio_backend.addItem(self.i18n.t("settings_audio_backend_auto"), userData="auto")
@@ -1306,13 +1311,15 @@ class SettingsDialog(QDialog):
                 self.cmb_audio_backend.setCurrentIndex(i)
                 break
         self.cmb_audio_backend.setFixedWidth(combo_w)
-        eng_lay.addLayout(
-            self._make_field_row(self.i18n.t("settings_audio_backend"), self.cmb_audio_backend)
+        backend_row = self._make_field_row(
+            self.i18n.t("settings_audio_backend"), self.cmb_audio_backend
         )
+        self._lbl_audio_backend = self._layout_first_widget(backend_row)
+        eng_lay.addLayout(backend_row)
 
-        lab_audio = QLabel(self.i18n.t("settings_audio_output"))
-        lab_audio.setObjectName("settingsFieldLabel")
-        eng_lay.addWidget(lab_audio)
+        self._lbl_audio_output = QLabel(self.i18n.t("settings_audio_output"))
+        self._lbl_audio_output.setObjectName("settingsFieldLabel")
+        eng_lay.addWidget(self._lbl_audio_output)
 
         audio_dev_row = QHBoxLayout()
         audio_dev_row.setContentsMargins(0, 0, 0, 0)
@@ -1337,16 +1344,16 @@ class SettingsDialog(QDialog):
 
         audio_layout.addWidget(card_engine)
 
-        card_net, net_lay = self._make_card(
-            "BUFFER DI RETE & LIBVLC" if is_it else "NETWORK BUFFER & LIBVLC"
-        )
+        card_net, net_lay = self._make_card(self.i18n.t("settings_network_libvlc_section"))
+        net_hdr_item = net_lay.itemAt(0)
+        self._card_net_hdr = net_hdr_item.widget() if net_hdr_item is not None else None
 
         nc_row = QHBoxLayout()
         nc_row.setContentsMargins(0, 0, 0, 0)
         nc_row.setSpacing(6)
-        lab_nc = QLabel(self.i18n.t("settings_network_caching"))
-        lab_nc.setObjectName("settingsFieldLabel")
-        nc_row.addWidget(lab_nc)
+        self._lbl_network_caching = QLabel(self.i18n.t("settings_network_caching"))
+        self._lbl_network_caching.setObjectName("settingsFieldLabel")
+        nc_row.addWidget(self._lbl_network_caching)
         nc_row.addStretch(1)
 
         btn_nc_minus = QPushButton("−")
@@ -1387,15 +1394,15 @@ class SettingsDialog(QDialog):
         nc_row.addWidget(btn_nc_plus)
         net_lay.addLayout(nc_row)
 
-        lab_path = QLabel(self.i18n.t("settings_vlc_path"))
-        lab_path.setObjectName("settingsFieldLabel")
-        net_lay.addWidget(lab_path)
+        self._lbl_vlc_path = QLabel(self.i18n.t("settings_vlc_path"))
+        self._lbl_vlc_path.setObjectName("settingsFieldLabel")
+        net_lay.addWidget(self._lbl_vlc_path)
 
         path_row = QHBoxLayout()
         path_row.setContentsMargins(0, 0, 0, 0)
         path_row.setSpacing(6)
         self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ""))
-        self.txt_vlc_path.setPlaceholderText("Auto / System PATH")
+        self.txt_vlc_path.setPlaceholderText(self.i18n.t("settings_vlc_path_placeholder"))
         path_row.addWidget(self.txt_vlc_path, 1)
 
         self.btn_browse = QPushButton(self.i18n.t("settings_browse"))
@@ -1415,7 +1422,9 @@ class SettingsDialog(QDialog):
         sys_layout.setContentsMargins(0, 2, 0, 2)
         sys_layout.setSpacing(8)
 
-        card_tray, tray_lay = self._make_card("SYSTEM TRAY")
+        card_tray, tray_lay = self._make_card(self.i18n.t("settings_tray_section"))
+        tray_hdr_item = tray_lay.itemAt(0)
+        self._card_tray_hdr = tray_hdr_item.widget() if tray_hdr_item is not None else None
 
         self.chk_tray_enabled = AnimatedToggleSwitch(self.i18n.t("settings_tray_enable"))
         self.chk_tray_enabled.setChecked(self.settings.value(KEY_TRAY_ENABLED, "true") == "true")
@@ -1443,9 +1452,9 @@ class SettingsDialog(QDialog):
 
         sys_layout.addWidget(card_tray)
 
-        card_dev, dev_lay = self._make_card(
-            "CONSOLE SVILUPPATORE" if is_it else "DEVELOPER CONSOLE"
-        )
+        card_dev, dev_lay = self._make_card(self.i18n.t("settings_dev_console_section"))
+        dev_hdr_item = dev_lay.itemAt(0)
+        self._card_dev_hdr = dev_hdr_item.widget() if dev_hdr_item is not None else None
 
         dev_top_row = QHBoxLayout()
         dev_top_row.setContentsMargins(0, 0, 0, 0)
@@ -1477,6 +1486,8 @@ class SettingsDialog(QDialog):
         sys_layout.addWidget(card_dev)
 
         card_updates, updates_lay = self._make_card(self.i18n.t("updates_section"))
+        updates_hdr_item = updates_lay.itemAt(0)
+        self._card_updates_hdr = updates_hdr_item.widget() if updates_hdr_item is not None else None
 
         self.chk_update_startup = AnimatedToggleSwitch(self.i18n.t("updates_startup_check"))
         self.chk_update_startup.setToolTip(self.i18n.t("updates_startup_check_tip"))
@@ -1505,9 +1516,11 @@ class SettingsDialog(QDialog):
         else:
             self.cmb_update_channel.setCurrentIndex(1)
         self.cmb_update_channel.setFixedWidth(combo_w)
-        updates_lay.addLayout(
-            self._make_field_row(self.i18n.t("updates_channel_label"), self.cmb_update_channel)
+        update_ch_row = self._make_field_row(
+            self.i18n.t("updates_channel_label"), self.cmb_update_channel
         )
+        self._lbl_update_channel = self._layout_first_widget(update_ch_row)
+        updates_lay.addLayout(update_ch_row)
 
         btn_update_row = QHBoxLayout()
         btn_update_row.setContentsMargins(0, 4, 0, 0)
@@ -1624,6 +1637,12 @@ class SettingsDialog(QDialog):
             self._device_enum_timer.start(120)
             return
         self._populate_audio_devices(async_mode=True)
+
+    @staticmethod
+    def _layout_first_widget(layout: Any) -> Optional[QWidget]:
+        """Safely return the first widget inside a Qt layout, or ``None``."""
+        item = layout.itemAt(0)
+        return item.widget() if item is not None else None
 
     def _add_settings_page(self, page: QWidget) -> None:
         """Let each settings page scroll independently when space is limited."""
@@ -1810,24 +1829,106 @@ class SettingsDialog(QDialog):
             if lang_changed:
                 self._loaded_lang = lang
                 self.i18n.set_lang(lang)
-                self.chk_discord_rpc.setText(self.i18n.t("settings_discord_rpc"))
-                if isinstance(self.discord_id_label, QLabel):
-                    self.discord_id_label.setText(self.i18n.t("settings_discord_id"))
-                if isinstance(self._card_theme_hdr, QLabel):
-                    self._card_theme_hdr.setText(self.i18n.t("settings_appearance_section"))
-                if isinstance(self.lbl_theme, QLabel):
-                    self.lbl_theme.setText(self.i18n.t("settings_theme"))
+                self.setWindowTitle(self.i18n.t("settings_title"))
+                if self._title_bar is not None:
+                    self._title_bar.retranslate(self.i18n)
+                    self._title_bar._ver_badge.setText(self.i18n.t("settings_title").upper())
+                if hasattr(self, "btn_back"):
+                    self.btn_back.setText(self.i18n.t("settings_back_to_player"))
+                if hasattr(self, "panel_title_lbl"):
+                    self.panel_title_lbl.setText(self.i18n.t("settings_title").upper())
+
+                for hdr_attr, key in (
+                    ("_card_prefs_hdr", "settings_radio_prefs_section"),
+                    ("_card_theme_hdr", "settings_appearance_section"),
+                    ("_card_play_hdr", "settings_playback_section"),
+                    ("_card_engine_hdr", "settings_audio_engine_section"),
+                    ("_card_net_hdr", "settings_network_libvlc_section"),
+                    ("_card_tray_hdr", "settings_tray_section"),
+                    ("_card_dev_hdr", "settings_dev_console_section"),
+                    ("_card_updates_hdr", "updates_section"),
+                ):
+                    hdr_w = getattr(self, hdr_attr, None)
+                    if isinstance(hdr_w, QLabel):
+                        hdr_w.setText(self.i18n.t(key))
+
+                for lbl_attr, key in (
+                    ("_lbl_lang", "settings_language"),
+                    ("_lbl_station", "settings_station"),
+                    ("_lbl_channel", "settings_channel"),
+                    ("lbl_theme", "settings_theme"),
+                    ("lbl_custom_accent", "settings_custom_accent_color"),
+                    ("discord_id_label", "settings_discord_id"),
+                    ("_lbl_format", "settings_format"),
+                    ("_lbl_audio_backend", "settings_audio_backend"),
+                    ("_lbl_audio_output", "settings_audio_output"),
+                    ("_lbl_network_caching", "settings_network_caching"),
+                    ("_lbl_vlc_path", "settings_vlc_path"),
+                    ("_lbl_update_channel", "updates_channel_label"),
+                ):
+                    lbl_w = getattr(self, lbl_attr, None)
+                    if isinstance(lbl_w, QLabel):
+                        lbl_w.setText(self.i18n.t(key))
+
                 for i, tid in enumerate(THEME_ORDER):
                     if i < self.cmb_theme.count():
                         self.cmb_theme.setItemText(i, self.i18n.t(THEME_PRESETS[tid]["i18n_key"]))
                 self.chk_custom_accent.setText(self.i18n.t("settings_custom_accent_enable"))
-                self.lbl_custom_accent.setText(self.i18n.t("settings_custom_accent_color"))
                 self.btn_accent_swatch.setToolTip(self.i18n.t("settings_custom_accent_pick"))
                 self.btn_accent_swatch.set_dialog_title(
                     self.i18n.t("settings_custom_accent_dialog_title")
                 )
                 self.btn_accent_reset.setText(self.i18n.t("settings_custom_accent_reset"))
                 self.btn_accent_reset.setToolTip(self.i18n.t("settings_custom_accent_reset_tip"))
+                self.chk_visualizer.setText(self.i18n.t("settings_visualizer"))
+                self.chk_visualizer.setToolTip(self.i18n.t("settings_visualizer_tip"))
+
+                self.chk_autoplay.setText(self.i18n.t("settings_autoplay"))
+                self.chk_autoplay.setToolTip(self.i18n.t("settings_autoplay_tip"))
+                self.chk_discord_rpc.setText(self.i18n.t("settings_discord_rpc"))
+                self.txt_discord_client_id.setPlaceholderText(
+                    self.i18n.t("settings_discord_id_placeholder")
+                )
+                self.chk_sleep_stop.setText(self.i18n.t("settings_sleep_stop_on_end"))
+                self.chk_session_timer.setText(self.i18n.t("settings_session_timer_enable"))
+                self.chk_session_timer.setToolTip(self.i18n.t("settings_session_timer_tip"))
+
+                for i, backend_key in enumerate(
+                    (
+                        "settings_audio_backend_auto",
+                        "settings_audio_backend_ffmpeg",
+                        "settings_audio_backend_mpv",
+                        "settings_audio_backend_vlc",
+                    )
+                ):
+                    if i < self.cmb_audio_backend.count():
+                        self.cmb_audio_backend.setItemText(i, self.i18n.t(backend_key))
+                if self.cmb_audio_device.count() > 0 and self.cmb_audio_device.itemData(0) is None:
+                    self.cmb_audio_device.setItemText(0, self.i18n.t("settings_audio_default"))
+                self.btn_audio_refresh.setText(self.i18n.t("settings_audio_refresh"))
+                self.txt_vlc_path.setPlaceholderText(self.i18n.t("settings_vlc_path_placeholder"))
+                self.btn_browse.setText(self.i18n.t("settings_browse"))
+
+                self.chk_tray_enabled.setText(self.i18n.t("settings_tray_enable"))
+                self.chk_tray_hide_on_minimize.setText(
+                    self.i18n.t("settings_tray_hide_on_minimize")
+                )
+                self.chk_tray_notifications.setText(self.i18n.t("settings_tray_notifications"))
+                self.chk_dev_console.setText(self.i18n.t("settings_dev_console"))
+                self.btn_open_console.setText(self.i18n.t("dev_console_button"))
+                self.chk_dev_show_dev.setText(self.i18n.t("settings_dev_console_show_dev"))
+
+                self.chk_update_startup.setText(self.i18n.t("updates_startup_check"))
+                self.chk_update_startup.setToolTip(self.i18n.t("updates_startup_check_tip"))
+                for i, ch_key in enumerate(("updates_channel_stable", "updates_channel_beta")):
+                    if i < self.cmb_update_channel.count():
+                        self.cmb_update_channel.setItemText(i, self.i18n.t(ch_key))
+                self.btn_check_updates.setText(self.i18n.t("updates_check_now"))
+
+                self.btn_cancel.setText(self.i18n.t("settings_cancel"))
+                self.btn_apply.setText(self.i18n.t("settings_apply"))
+                self.btn_ok.setText(self.i18n.t("settings_ok"))
+
                 tab_labels = [
                     self.i18n.t("settings_tab_general"),
                     self.i18n.t("settings_tab_audio"),

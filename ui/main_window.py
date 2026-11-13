@@ -59,7 +59,13 @@ from audio.player_vlc import PlayerVLC
 if TYPE_CHECKING:
     from core.mpris import MprisBridge
     from core.windows_media import WindowsMediaBridge
-from core.config import STATIONS, STREAMS, get_station_config, get_station_stream_url
+from core.config import (
+    STATIONS,
+    STREAMS,
+    get_station_config,
+    get_station_display_name,
+    get_station_stream_url,
+)
 from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
@@ -110,7 +116,7 @@ from core.constants import (
     UPDATE_CHANNEL_STABLE,
 )
 from core.discord_presence import DiscordPresence, activity_payload
-from core.i18n import I18n
+from core.i18n import I18n, install_qt_translator
 from core.local_metadata import LocalTrackInfo
 from core.local_playlist import LocalPlaylistManager
 from core.logger import get_logger
@@ -591,6 +597,7 @@ class ListenMoePlayer(QWidget):
             sys_lang = QLocale.system().name().lower()
             saved_lang = "it" if sys_lang.startswith("it") else "en"
         self.i18n = I18n(saved_lang)
+        install_qt_translator(QApplication.instance(), self.i18n.lang)
         self._lang_map = {"Italiano": "it", "English": "en"}
         self.log = get_logger("KikuMoe")
         self._sync_clock_with_server()
@@ -746,7 +753,9 @@ class ListenMoePlayer(QWidget):
         self._canvas_outer_layout.setSpacing(0)
 
         # Custom Cyber-Moe Translucent Title Bar inside the blurred canvas
-        self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
+        self._title_bar = CustomTitleBar(
+            self, icon=getattr(self, "_icon_app", None), i18n=self.i18n
+        )
         self._canvas_outer_layout.addWidget(self._title_bar)
 
         self._body_container = QWidget()
@@ -808,6 +817,7 @@ class ListenMoePlayer(QWidget):
             initial_station=saved_station,
             initial_channel=saved_channel,
             icon_dir=getattr(self, "_icon_dir", None),
+            i18n=self.i18n,
         )
         self.station_pill.station_selected.connect(self._on_station_pill_selected)
         self.channel_switch = None
@@ -1164,7 +1174,7 @@ class ListenMoePlayer(QWidget):
         Sets up modern Cyber-Moe PlaybackControls with hero circular play button,
         stop, force stop, volume slider, dynamic speaker icon and autoplay.
         """
-        self.playback_controls = PlaybackControls()
+        self.playback_controls = PlaybackControls(i18n=self.i18n)
 
         # Wire PlaybackControls signals
         self.playback_controls.play_clicked.connect(self.play_stream)
@@ -1222,7 +1232,7 @@ class ListenMoePlayer(QWidget):
 
     def _init_sleep_timer_section(self):
         """Initializes modern SleepTimerWidget with chip presets and live countdown."""
-        self.sleep_timer_widget = SleepTimerWidget()
+        self.sleep_timer_widget = SleepTimerWidget(i18n=self.i18n)
         self.sleep_timer_widget.start_requested.connect(self._on_sleep_start_requested)
         self.sleep_timer_widget.cancel_requested.connect(self.sleep_cancel_clicked)
         self.sleep_timer_widget.btn_close.clicked.connect(self._sync_window_height_for_sleep_drawer)
@@ -1458,7 +1468,7 @@ class ListenMoePlayer(QWidget):
         if title == self.i18n.t("unknown"):
             title = ""
         station_id = getattr(self, "_current_radio_provider", DEFAULT_STATION)
-        station = str(STATIONS.get(station_id, {}).get("name", station_id))
+        station = get_station_display_name(station_id, self.i18n)
         end = self._current_start_epoch
         if end and self._current_duration_seconds:
             end -= self._clock_sync_offset
@@ -1718,7 +1728,7 @@ class ListenMoePlayer(QWidget):
                 title = ""
             artist = (self._current_artist or "").strip()
             station_id = getattr(self, "_current_radio_provider", DEFAULT_STATION)
-            station = str(STATIONS.get(station_id, {}).get("name", station_id))
+            station = get_station_display_name(station_id, self.i18n)
             duration = max(0, self._current_duration_seconds or 0)
             epoch = self._current_start_epoch
             position = 0.0
@@ -2297,11 +2307,8 @@ class ListenMoePlayer(QWidget):
                 self._last_notified_track = track_sig
 
                 # Record into session song history
-                from core.config import STATIONS
-
                 current_st = getattr(self, "_current_radio_provider", "listenmoe")
-                st_cfg = STATIONS.get(current_st, {})
-                st_name = str(st_cfg.get("name", current_st.upper()))
+                st_name = get_station_display_name(current_st, self.i18n)
                 self.history_mgr.add_entry(
                     title=self._current_title,
                     artist=self._current_artist,
@@ -2402,7 +2409,7 @@ class ListenMoePlayer(QWidget):
                 if hasattr(self, "stream_tag_label") and self.stream_tag_label:
                     tag_suffix = "PLAYLIST" if clean_id == STATION_LOCAL else "STREAM"
                     self.stream_tag_label.setText(
-                        f"{str(cfg.get('name', clean_id)).upper()} · {tag_suffix}"
+                        f"{get_station_display_name(clean_id, self.i18n).upper()} · {tag_suffix}"
                     )
 
                 if clean_id != STATION_LOCAL:
@@ -2729,6 +2736,15 @@ class ListenMoePlayer(QWidget):
             pass
 
     def apply_translations(self):
+        install_qt_translator(QApplication.instance(), self.i18n.lang)
+        if hasattr(self, "_title_bar"):
+            self._title_bar.retranslate(self.i18n)
+        if hasattr(self, "station_pill"):
+            self.station_pill.retranslate(self.i18n)
+        if hasattr(self, "history_button"):
+            self.history_button.setToolTip(self.i18n.t("history_button"))
+        if hasattr(self, "track_menu_btn"):
+            self.track_menu_btn.setToolTip(self.i18n.t("search_menu_tooltip"))
         if hasattr(self, "lyrics_button"):
             self.lyrics_button.setToolTip(self.t("lyrics_button"))
             self.lyrics_button.setAccessibleName(self.t("lyrics_button"))
@@ -2771,6 +2787,7 @@ class ListenMoePlayer(QWidget):
                 title=self.i18n.t("sleep_timer"),
                 start_btn=self.i18n.t("sleep_start"),
                 cancel_btn=self.i18n.t("sleep_cancel"),
+                custom_minutes_tip=self.i18n.t("sleep_custom_minutes_tip"),
             )
         if hasattr(self, "sleep_title"):
             self.sleep_title.setText(self.i18n.t("sleep_timer"))
@@ -2784,11 +2801,15 @@ class ListenMoePlayer(QWidget):
         self.update_now_playing_label()
         self.update_vlc_status_label()
         self._update_session_label()
+        if hasattr(self, "tray_mgr") and self.tray_mgr:
+            self.tray_mgr.retranslate(self.i18n)
         self.update_tray_texts()
         if hasattr(self, "autoplay_checkbox"):
             self.autoplay_checkbox.setText(self.i18n.t("settings_autoplay"))
         if hasattr(self, "playback_controls"):
-            self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
+            self.playback_controls.apply_translations(self.i18n)
+        if getattr(self, "_queue_dialog", None) is not None:
+            self._queue_dialog.retranslate(self.i18n)
         # Update dev console translator and dialog texts if open
         try:
             if hasattr(self, "dev_console") and self.dev_console:
@@ -4570,7 +4591,7 @@ class ListenMoePlayer(QWidget):
                 if not ok:
                     vlc_lbl.setText(self.i18n.t("vlc_not_found"))
                 else:
-                    vlc_lbl.setText(txt or "Audio backend OK")
+                    vlc_lbl.setText(txt or self.i18n.t("backend_ok"))
             if hasattr(self, "status_footer"):
                 backend_name = "Audio"
                 if hasattr(self, "player") and self.player is not None:
@@ -5037,7 +5058,7 @@ class ListenMoePlayer(QWidget):
     def show_local_queue_dialog(self) -> None:
         """Opens or brings to front the frameless Local Queue manager dialog."""
         if self._queue_dialog is None:
-            self._queue_dialog = LocalQueueDialog(self.local_playlist, self)
+            self._queue_dialog = LocalQueueDialog(self.local_playlist, self, i18n=self.i18n)
             self._queue_dialog.play_track_requested.connect(self._on_queue_play_track_requested)
         if self._queue_dialog.isVisible() and not getattr(self._queue_dialog, "_is_closing", False):
             self._queue_dialog.activateWindow()

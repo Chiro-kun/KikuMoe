@@ -174,16 +174,22 @@ a = Analysis(
     noarchive=False,
 )
 
-# Filter out unused Qt translation files (*.qm) from a.datas to optimize bundle size
-a.datas = [
-    d
-    for d in a.datas
-    if not (
-        d[0].endswith(".qm")
-        or "translations" in d[1].replace("\\", "/").split("/")
-        or "translations" in d[0].replace("\\", "/").split("/")
-    )
-]
+# Filter out unused Qt translation files (*.qm) from a.datas to optimize bundle size,
+# while retaining qtbase_it.qm and qtbase_en.qm for built-in Qt dialog/menu localization.
+_KEEP_QM_FILES = {"qtbase_it.qm", "qtbase_en.qm"}
+
+
+def _keep_translation_data(entry: tuple[str, str, str]) -> bool:
+    src_norm = entry[0].replace("\\", "/")
+    dst_norm = entry[1].replace("\\", "/")
+    is_qm = src_norm.endswith(".qm") or dst_norm.endswith(".qm")
+    is_tr_dir = "translations" in src_norm.split("/") or "translations" in dst_norm.split("/")
+    if not (is_qm or is_tr_dir):
+        return True
+    return os.path.basename(src_norm) in _KEEP_QM_FILES or os.path.basename(dst_norm) in _KEEP_QM_FILES
+
+
+a.datas = [d for d in a.datas if _keep_translation_data(d)]
 # On Linux, exclude low-level host audio system libraries (ALSA, PulseAudio, JACK, PipeWire),
 # host multimedia backends (libvlc, libmpv - loaded from host dynamically via ctypes),
 # transitive video codecs/encoders/engines pulled by host libmpv (libav*, libx265, libcodec2,

@@ -697,6 +697,15 @@ class AboutWidget(QWidget):
         }}
         """)
 
+    def retranslate(self, i18n: I18n) -> None:
+        self.i18n = i18n
+        self.setWindowTitle(self.i18n.t("about_title"))
+        if hasattr(self, "_title_bar"):
+            self._title_bar.retranslate(self.i18n)
+            self._title_bar._ver_badge.setText(self.i18n.t("about_badge"))
+        if hasattr(self, "about_widget"):
+            self.about_widget.set_i18n(self.i18n)
+
     def refresh_theme(self) -> None:
         self._apply_widget_stylesheet()
         self._apply_version_pill_style()
@@ -838,10 +847,10 @@ class AboutDialog(CyberMoeDialogAnimationMixin, QDialog):
 
         # Custom Cyber-Moe Titlebar with app icon and title
         app_icon = getattr(parent, "_icon_app", None) if parent is not None else None
-        self._title_bar = CustomTitleBar(self, icon=app_icon)
+        self._title_bar = CustomTitleBar(self, icon=app_icon, i18n=self.i18n)
         self._title_bar._btn_min.setVisible(False)
         self._title_bar._btn_max.setVisible(False)
-        self._title_bar._ver_badge.setText("INFO & CREDITS")
+        self._title_bar._ver_badge.setText(self.i18n.t("about_badge"))
         outer_layout.addWidget(self._title_bar)
         install_size_grip(self)
 
@@ -894,6 +903,15 @@ class AboutDialog(CyberMoeDialogAnimationMixin, QDialog):
         }}
         """
         self.setStyleSheet(base_qss + extra_qss)
+
+    def retranslate(self, i18n: I18n) -> None:
+        self.i18n = i18n
+        self.setWindowTitle(self.i18n.t("about_title"))
+        if hasattr(self, "_title_bar"):
+            self._title_bar.retranslate(self.i18n)
+            self._title_bar._ver_badge.setText(self.i18n.t("about_badge"))
+        if hasattr(self, "about_widget"):
+            self.about_widget.set_i18n(self.i18n)
 
     def refresh_theme(self) -> None:
         self._apply_dialog_stylesheet()

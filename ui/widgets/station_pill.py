@@ -47,11 +47,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.config import STATIONS, get_station_config
+from core.config import STATIONS, get_station_config, get_station_display_name
 from core.constants import (
     DEFAULT_STATION,
     STATION_LISTENMOE,
 )
+from core.i18n import I18n, resolve_i18n
 from ui.themes.cyber_moe import PALETTE, surface_qcolor
 
 _IS_LINUX = sys.platform.startswith("linux")
@@ -340,6 +341,7 @@ class StationGlassPopover(QWidget):
         current_channel: str,
         parent: QWidget | None = None,
         icon_dir: str | None = None,
+        i18n: I18n | None = None,
     ) -> None:
         flags = (
             Qt.WindowType.Popup
@@ -351,6 +353,7 @@ class StationGlassPopover(QWidget):
 
         self.current_station = current_station
         self.current_channel = current_channel
+        self._i18n = resolve_i18n(i18n, parent)
         self.icon_dir = (
             icon_dir
             if icon_dir and os.path.isdir(icon_dir)
@@ -397,7 +400,7 @@ class StationGlassPopover(QWidget):
             has_channels = bool(st_cfg.get("has_channels", False))
             channels = list(st_cfg.get("channels", []))
             pm = self._get_icon_pm(str(st_cfg.get("icon", "listen.png")))
-            name = str(st_cfg.get("name", st_id))
+            name = get_station_display_name(st_id, self._i18n)
 
             if has_channels and channels:
                 row_multi = StationRowWithChannels(
@@ -617,8 +620,10 @@ class StationPillButton(QWidget):
         initial_station: str = DEFAULT_STATION,
         initial_channel: str = "J-POP",
         icon_dir: str | None = None,
+        i18n: I18n | None = None,
     ) -> None:
         super().__init__(parent)
+        self._i18n = resolve_i18n(i18n, parent)
         self._current_station = (initial_station or DEFAULT_STATION).lower().strip()
         self._current_channel = (initial_channel or "J-POP").strip()
         self._icon_dir = (
@@ -642,7 +647,7 @@ class StationPillButton(QWidget):
         self.setMinimumWidth(90)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
-        self.setToolTip("Cambia stazione radio")
+        self.setToolTip(self._i18n.t("station_switch_tooltip"))
         self._pixmap_cache: dict[str, QPixmap] = {}
         self.setMaximumWidth(self.sizeHint().width())
         self.resize(self.sizeHint())
@@ -686,8 +691,17 @@ class StationPillButton(QWidget):
     def get_display_title(self) -> str:
         if self._current_station == STATION_LISTENMOE:
             return f"LISTEN.moe · {self._current_channel}"
-        cfg = get_station_config(self._current_station)
-        return str(cfg.get("name", self._current_station))
+        return get_station_display_name(self._current_station, self._i18n)
+
+    def retranslate(self, i18n: I18n | None = None) -> None:
+        """Update tooltip and station display title for the active language."""
+        if i18n is not None:
+            self._i18n = i18n
+        self.setToolTip(self._i18n.t("station_switch_tooltip"))
+        self.setMaximumWidth(self.sizeHint().width())
+        self.resize(self.sizeHint())
+        self.updateGeometry()
+        self.update()
 
     def sizeHint(self) -> QSize:
         font = QFont(self.font())
@@ -855,6 +869,7 @@ class StationPillButton(QWidget):
             current_channel=self._current_channel,
             parent=self.window(),
             icon_dir=self._icon_dir,
+            i18n=self._i18n,
         )
         self._popover = popover
         self._menu_open = True

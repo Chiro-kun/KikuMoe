@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.i18n import I18n, resolve_i18n
 from ui.themes.cyber_moe import PALETTE, accent_qcolor
 
 
@@ -736,8 +737,9 @@ class PlaybackControls(QFrame):
     mute_toggled = pyqtSignal(bool)
     autoplay_toggled = pyqtSignal(bool)
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, i18n: Optional[I18n] = None):
         super().__init__(parent)
+        self._i18n = resolve_i18n(i18n, parent)
         self.setObjectName("consoleDeck")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._is_playing = False
@@ -755,41 +757,41 @@ class PlaybackControls(QFrame):
         transport_row.setSpacing(12)
 
         self.btn_force_stop = ForceStopButton(size=36)
-        self.btn_force_stop.setToolTip("Force Reset Audio")
+        self.btn_force_stop.setToolTip(self._i18n.t("tt_force_stop"))
         self.btn_force_stop.clicked.connect(self.force_stop_clicked.emit)
 
         self.btn_stop = StopButton(size=42)
-        self.btn_stop.setToolTip("Stop (S)")
+        self.btn_stop.setToolTip(self._i18n.t("tt_stop_shortcut"))
         self.btn_stop.clicked.connect(self.stop_clicked.emit)
         self.btn_stop.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.btn_stop.customContextMenuRequested.connect(self._show_stop_context_menu)
 
         self.btn_prev = PrevButton(size=36)
-        self.btn_prev.setToolTip("Previous Track (F5)")
+        self.btn_prev.setToolTip(self._i18n.t("tt_prev_track"))
         self.btn_prev.clicked.connect(self.prev_clicked.emit)
 
         self.hero_play = HeroPlayButton(size=62)
-        self.hero_play.setToolTip("Play / Pause (Space)")
+        self.hero_play.setToolTip(self._i18n.t("tt_play_pause"))
         self.hero_play.clicked.connect(self._on_hero_clicked)
 
         self.btn_next = NextButton(size=36)
-        self.btn_next.setToolTip("Next Track (F6)")
+        self.btn_next.setToolTip(self._i18n.t("tt_next_track"))
         self.btn_next.clicked.connect(self.next_clicked.emit)
 
         self.btn_queue = QueueButton(size=36)
-        self.btn_queue.setToolTip("Queue / Playlist (Q)")
+        self.btn_queue.setToolTip(self._i18n.t("tt_queue"))
         self.btn_queue.clicked.connect(self.queue_clicked.emit)
 
         self.btn_sleep = SleepButton()
-        self.btn_sleep.setToolTip("Sleep Timer")
+        self.btn_sleep.setToolTip(self._i18n.t("tt_sleep_timer"))
         self.btn_sleep.clicked.connect(self.sleep_toggle_clicked.emit)
 
         self.btn_autoplay = AutoplayPillButton()
-        self.btn_autoplay.setToolTip("Autoplay")
+        self.btn_autoplay.setToolTip(self._i18n.t("tt_autoplay"))
         self.btn_autoplay.toggled.connect(self._on_autoplay_pill_toggled)
 
         # Keep hidden QCheckBox for full backward compatibility
-        self.chk_autoplay = QCheckBox("Autoplay")
+        self.chk_autoplay = QCheckBox(self._i18n.t("settings_autoplay"))
         self.chk_autoplay.setVisible(False)
         self.chk_autoplay.toggled.connect(self._on_chk_autoplay_toggled)
 
@@ -815,7 +817,7 @@ class PlaybackControls(QFrame):
 
         self.speaker_btn = SpeakerButton(size=32)
         self.speaker_btn.setCheckable(True)
-        self.speaker_btn.setToolTip("Mute / Unmute (M)")
+        self.speaker_btn.setToolTip(self._i18n.t("tt_mute_toggle"))
         self.speaker_btn.clicked.connect(self._on_speaker_clicked)
 
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -843,10 +845,23 @@ class PlaybackControls(QFrame):
 
     def _show_stop_context_menu(self, pos) -> None:
         menu = QMenu(self)
-        act_force = menu.addAction("Force Stop / Reset Audio")
+        act_force = menu.addAction(self._i18n.t("tt_force_stop_menu"))
         action = menu.exec(self.btn_stop.mapToGlobal(pos))
         if action == act_force:
             self.force_stop_clicked.emit()
+
+    def apply_translations(self, i18n: I18n) -> None:
+        """Update control tooltips and labels to match ``i18n``."""
+        self._i18n = i18n
+        self.btn_force_stop.setToolTip(i18n.t("tt_force_stop"))
+        self.btn_stop.setToolTip(i18n.t("tt_stop_shortcut"))
+        self.btn_prev.setToolTip(i18n.t("tt_prev_track"))
+        self.hero_play.setToolTip(i18n.t("tt_play_pause"))
+        self.btn_next.setToolTip(i18n.t("tt_next_track"))
+        self.btn_queue.setToolTip(i18n.t("tt_queue"))
+        self.btn_sleep.setToolTip(i18n.t("tt_sleep_timer"))
+        self.speaker_btn.setToolTip(i18n.t("tt_mute_toggle"))
+        self.set_autoplay_text(i18n.t("settings_autoplay"))
 
     def _on_hero_clicked(self) -> None:
         if not self._is_playing and not self._is_paused:

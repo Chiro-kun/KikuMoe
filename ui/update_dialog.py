@@ -71,7 +71,7 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.resize(520, 560)
 
         app_icon = getattr(parent, "_icon_app", None) if parent is not None else None
-        self._title_bar = CustomTitleBar(self, icon=app_icon)
+        self._title_bar = CustomTitleBar(self, icon=app_icon, i18n=self.i18n)
         self._title_bar._btn_min.setVisible(False)
         self._title_bar._btn_max.setVisible(False)
         self._title_bar._ver_badge.setText(self.i18n.t("updates_title").upper())
@@ -194,7 +194,7 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         content_layout.addWidget(header_card)
 
         # Changelog / Release notes text browser (Markdown)
-        notes_label = QLabel("Note di rilascio:")
+        notes_label = QLabel(self.i18n.t("updates_release_notes"))
         notes_label.setStyleSheet(
             f"color: {text_sec}; font-size: 11px; font-weight: 600; text-transform: uppercase;"
         )
@@ -207,7 +207,7 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         body_text = (
             self.release.body.strip()
             if self.release.body
-            else "Nessuna nota di rilascio dettagliata disponibile."
+            else self.i18n.t("updates_no_release_notes")
         )
         self.changelog_browser.setMarkdown(body_text)
         content_layout.addWidget(self.changelog_browser, 1)
@@ -216,10 +216,14 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.asset_info_lbl = QLabel()
         if self._target_asset:
             self.asset_info_lbl.setText(
-                f"Pacchetto: {self._target_asset.name} ({self._target_asset.size_mb} MB)"
+                self.i18n.t(
+                    "updates_package_info",
+                    name=self._target_asset.name,
+                    size_mb=self._target_asset.size_mb,
+                )
             )
         else:
-            self.asset_info_lbl.setText("Disponibile su GitHub Releases")
+            self.asset_info_lbl.setText(self.i18n.t("updates_available_github"))
         self.asset_info_lbl.setStyleSheet(f"color: {text_sec}; font-size: 11px;")
         content_layout.addWidget(self.asset_info_lbl)
 
@@ -346,13 +350,13 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.status_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 700;")
         self.btn_action.setEnabled(True)
         if _IS_WIN32 and saved_path.lower().endswith(".exe"):
-            self.btn_action.setText("Avvia Installer")
+            self.btn_action.setText(self.i18n.t("updates_launch_installer"))
         else:
             self.btn_action.setText(self.i18n.t("updates_open_folder"))
 
     def _on_download_error(self, err_msg: str) -> None:
         self.progress_bar.setVisible(False)
-        self.status_lbl.setText(f"Errore download: {err_msg}")
+        self.status_lbl.setText(self.i18n.t("updates_download_error", error=err_msg))
         self.status_lbl.setStyleSheet("color: #EF4444; font-size: 11px; font-weight: 600;")
         self.btn_action.setEnabled(True)
         self.btn_action.setText(self.i18n.t("updates_download"))

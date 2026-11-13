@@ -990,7 +990,10 @@ class DevConsole(QObject):
                 self._console_dialog,
                 self._t("dev_console_save", "Save..."),
                 suggested,
-                "Log Files (*.log);;Text Files (*.txt);;All Files (*)",
+                self._t(
+                    "dev_console_log_files_filter",
+                    "Log Files (*.log);;Text Files (*.txt);;All Files (*)",
+                ),
             )
             if filename:
                 text = self._console_text.toPlainText()

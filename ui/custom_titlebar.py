@@ -25,6 +25,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizeGrip, QWidget
 
 from core.constants import APP_VERSION
+from core.i18n import I18n, resolve_i18n
 from ui.themes.cyber_moe import PALETTE, accent_qcolor
 
 _TITLE_BAR_HEIGHT = 38
@@ -383,9 +384,11 @@ class CustomTitleBar(QFrame):
         window: QWidget,
         icon: QIcon | None = None,
         title: str | None = None,
+        i18n: I18n | None = None,
     ) -> None:
         super().__init__(window)
         self._window = window
+        self._i18n = resolve_i18n(i18n, window)
         self.setObjectName("customTitleBar")
         self.setFixedHeight(self.HEIGHT)
 
@@ -424,13 +427,13 @@ class CustomTitleBar(QFrame):
 
         # 4. Window Control Buttons
         self._btn_min = _WinCtrlButton("min", self)
-        self._btn_min.setToolTip("Minimizza")
+        self._btn_min.setToolTip(self._i18n.t("window_minimize"))
 
         self._btn_max = _WinCtrlButton("max", self)
-        self._btn_max.setToolTip("Ingrandisci")
+        self._btn_max.setToolTip(self._i18n.t("window_maximize"))
 
         self._btn_close = _WinCtrlButton("close", self)
-        self._btn_close.setToolTip("Chiudi")
+        self._btn_close.setToolTip(self._i18n.t("window_close"))
 
         layout.addWidget(self._btn_min)
         layout.addWidget(self._btn_max)
@@ -482,10 +485,18 @@ class CustomTitleBar(QFrame):
     def sync_maximize_button(self) -> None:
         if self._window.isMaximized():
             self._btn_max.set_kind("restore")
-            self._btn_max.setToolTip("Ripristina")
+            self._btn_max.setToolTip(self._i18n.t("window_restore"))
         else:
             self._btn_max.set_kind("max")
-            self._btn_max.setToolTip("Ingrandisci")
+            self._btn_max.setToolTip(self._i18n.t("window_maximize"))
+
+    def retranslate(self, i18n: I18n | None = None) -> None:
+        """Update window control tooltips to match the active language."""
+        if i18n is not None:
+            self._i18n = i18n
+        self._btn_min.setToolTip(self._i18n.t("window_minimize"))
+        self._btn_close.setToolTip(self._i18n.t("window_close"))
+        self.sync_maximize_button()
 
     def mousePressEvent(self, a0) -> None:
         if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:

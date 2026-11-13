@@ -168,7 +168,7 @@ class SongHistoryRowWidget(QWidget):
         text_col.setContentsMargins(0, 0, 0, 0)
         text_col.setSpacing(2)
 
-        self.lbl_title = _ElidedLabel(entry.title or "Unknown Track", self)
+        self.lbl_title = _ElidedLabel(entry.title or self.i18n.t("history_unknown_track"), self)
         self.lbl_title.setStyleSheet(
             "color: #ffffff; font-size: 12px; font-weight: 700; "
             "background: transparent; border: none;"

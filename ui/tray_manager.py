@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
     QWidgetAction,
 )
 
-from core.config import get_station_config
+from core.config import get_station_config, get_station_display_name
 from core.constants import (
     DEFAULT_STATION,
     KEY_CHANNEL,
@@ -352,6 +352,14 @@ class TrayNowPlayingCard(QFrame):
         painter.drawImage(0, 0, glow_img)
         painter.end()
 
+    def retranslate(self, i18n: object) -> None:
+        """Re-applies localized labels and tooltips on language switch."""
+        self._i18n = i18n
+        self._btn_stop.setToolTip(self._t("stop", "Stop"))
+        self._btn_history.setToolTip(self._t("history_button", "Cronologia brani..."))
+        self.update_controls_state(self._is_playing, self._is_paused, self._is_muted)
+        self._update_elided_text()
+
     def set_track_info(
         self,
         title: str = "",
@@ -558,6 +566,7 @@ class TrayManager(QObject):
         self._act_show: QAction | None = None
         self._act_ch: QAction | None = None
         self._act_fmt: QAction | None = None
+        self._sub_station: QMenu | None = None
         self._sub_channel: QMenu | None = None
         self._sub_format: QMenu | None = None
         self._channel_actions: dict[str, QAction] = {}
@@ -751,6 +760,7 @@ class TrayManager(QObject):
                     # Sottomenu Stazione
                     txt_station = self._t("tray_station", "Stazione")
                     sub_station = QMenu(txt_station, self._parent)
+                    self._sub_station = sub_station
                     self._apply_menu_stylesheet(sub_station, is_submenu=True)
                     grp_station = QActionGroup(self._parent)
                     grp_station.setExclusive(True)
@@ -1114,11 +1124,12 @@ class TrayManager(QObject):
                     station = DEFAULT_STATION
 
             # Update the header card
+            display_station = get_station_display_name(station, self._i18n)
             if self._card is not None:
                 self._card.set_track_info(
                     title=title,
                     artist=artist,
-                    station=station,
+                    station=display_station,
                     session=info_session,
                 )
 
@@ -1135,8 +1146,7 @@ class TrayManager(QObject):
                     self._act_info_now.setText(fallback_no_track)
 
             if self._act_info_session is not None:
-                cfg = get_station_config(station)
-                st_name = str(cfg.get("name", station)).upper()
+                st_name = display_station.upper()
                 if info_session:
                     self._act_info_session.setText(f"{st_name} • {info_session}")
                 else:
@@ -1258,6 +1268,39 @@ class TrayManager(QObject):
             )
         except Exception:
             pass
+
+    def retranslate(self, i18n: object) -> None:
+        """Re-applies localized labels across tray card, menu actions, and submenus."""
+        self._i18n = i18n
+        if self._card is not None:
+            self._card.retranslate(i18n)
+        if self._act_hdr_playback is not None:
+            self._act_hdr_playback.setText(self._t("tray_section_playback", "Riproduzione").upper())
+        if self._act_stop is not None:
+            self._act_stop.setText(self._t("tray_stop", "Stop"))
+        if self._act_history is not None:
+            self._act_history.setText(self._t("history_button", "Cronologia brani"))
+        if self._act_hdr_window is not None:
+            self._act_hdr_window.setText(self._t("tray_section_window", "Finestra").upper())
+        if self._act_show is not None:
+            self._act_show.setText(self._t("tray_show", "Mostra finestra"))
+        if self._act_settings is not None:
+            self._act_settings.setText(self._t("settings_button", "Impostazioni"))
+        if self._act_about is not None:
+            self._act_about.setText(self._t("tray_about", "Informazioni su KikuMoe..."))
+        if self._act_hdr_prefs is not None:
+            self._act_hdr_prefs.setText(self._t("tray_section_preferences", "Preferenze").upper())
+        if self._sub_station is not None:
+            self._sub_station.setTitle(self._t("tray_station", "Stazione"))
+        if STATION_LOCAL in self._station_actions:
+            self._station_actions[STATION_LOCAL].setText(self._t("station_local", "Musica locale"))
+        if self._sub_channel is not None:
+            self._sub_channel.setTitle(self._t("tray_channel", "Canale"))
+        if self._sub_format is not None:
+            self._sub_format.setTitle(self._t("tray_format", "Formato (codec)"))
+        if self._act_quit is not None:
+            self._act_quit.setText(self._t("tray_quit", "Esci"))
+        self._sync_controls_from_parent()
 
     def refresh_theme(self) -> None:
         """Refreshes menu styling, Now Playing Card, and vector icons with the active theme."""

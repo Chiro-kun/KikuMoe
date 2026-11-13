@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
@@ -51,6 +51,10 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
         super().__init__(parent)
         self.playlist_mgr = playlist_mgr
         self.i18n = i18n or I18n("it")
+        # True while this dialog itself is adding tracks (avoids double-handling
+        # the queue_updated signal); True once tracks_loaded has been emitted.
+        self._self_loading = False
+        self._tracks_emitted = False
 
         self.setObjectName("localPromptDialogRoot")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -66,6 +70,10 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
 
         self._init_ui()
         apply_windows_titlebar_dark_mode(self, True)
+
+        # Tracks may also be added from elsewhere (e.g. the queue manager opened
+        # via "Manage Queue"): close the prompt as soon as the queue is filled.
+        self.playlist_mgr.queue_updated.connect(self._on_queue_updated)
 
     def _init_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
@@ -214,6 +222,27 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
         frame_layout.addWidget(body, 1)
         outer_layout.addWidget(self._content_frame)
 
+    def _finish_with_tracks(self) -> None:
+        """Emit tracks_loaded exactly once and close the prompt."""
+        if self._tracks_emitted:
+            return
+        count = len(self.playlist_mgr.tracks)
+        if count <= 0:
+            return
+        self._tracks_emitted = True
+        self.tracks_loaded.emit(count)
+        self.accept()
+
+    def _on_queue_updated(self) -> None:
+        """Close the prompt when tracks are added from outside this dialog."""
+        if self._self_loading or self._tracks_emitted:
+            return
+        if not self.isVisible() or getattr(self, "_is_closing", False):
+            return
+        # Deferred: LocalPlaylistManager emits queue_updated *before* selecting the
+        # first track, so the receiver of tracks_loaded would find no current track.
+        QTimer.singleShot(0, self._finish_with_tracks)
+
     def _on_select_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self,
@@ -221,13 +250,16 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
             "",
         )
         if folder:
-            count = self.playlist_mgr.add_folder(folder)
+            self._self_loading = True
+            try:
+                count = self.playlist_mgr.add_folder(folder)
+            finally:
+                self._self_loading = False
             if count > 0:
-                self.tracks_loaded.emit(count)
-                self.accept()
+                self._finish_with_tracks()
 
     def _on_select_files(self) -> None:
-        filters = "Audio Files (*.mp3 *.flac *.ogg *.opus *.m4a *.aac *.wav);;All Files (*.*)"
+        filters = self.i18n.t("local_audio_files_filter")
         files, _ = QFileDialog.getOpenFileNames(
             self,
             self.i18n.t("local_add_files"),
@@ -235,14 +267,18 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
             filters,
         )
         if files:
-            count = self.playlist_mgr.add_files(files)
+            self._self_loading = True
+            try:
+                count = self.playlist_mgr.add_files(files)
+            finally:
+                self._self_loading = False
             if count > 0:
-                self.tracks_loaded.emit(count)
-                self.accept()
+                self._finish_with_tracks()
 
     def _on_open_queue(self) -> None:
+        # Keep the prompt open: it closes by itself (via queue_updated) once the
+        # user adds tracks from the queue manager, or manually via its close button.
         self.open_queue_requested.emit()
-        self.reject()
 
     def dragEnterEvent(self, a0: QDragEnterEvent | None) -> None:
         if a0 is None:
@@ -261,22 +297,24 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
             return
         urls = mime.urls()
         files_to_add: list[str] = []
-        for url in urls:
-            path_str = url.toLocalFile()
-            if not path_str:
-                continue
-            p = Path(path_str)
-            if p.is_dir():
-                self.playlist_mgr.add_folder(str(p))
-            elif p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
-                files_to_add.append(str(p))
+        self._self_loading = True
+        try:
+            for url in urls:
+                path_str = url.toLocalFile()
+                if not path_str:
+                    continue
+                p = Path(path_str)
+                if p.is_dir():
+                    self.playlist_mgr.add_folder(str(p))
+                elif p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                    files_to_add.append(str(p))
 
-        if files_to_add:
-            self.playlist_mgr.add_files(files_to_add)
+            if files_to_add:
+                self.playlist_mgr.add_files(files_to_add)
+        finally:
+            self._self_loading = False
 
-        count = len(self.playlist_mgr.tracks)
-        if count > 0:
-            self.tracks_loaded.emit(count)
-            self.accept()
+        if len(self.playlist_mgr.tracks) > 0:
+            self._finish_with_tracks()
         else:
             a0.acceptProposedAction()

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.constants import DEFAULT_STATION
+
 # Legacy stream dictionary for LISTEN.moe backward compatibility
 STREAMS: dict[str, dict[str, str]] = {
     "J-POP": {
@@ -109,6 +111,7 @@ STATIONS: dict[str, dict[str, Any]] = {
     "local": {
         "id": "local",
         "name": "Musica Locale",
+        "name_i18n_key": "station_local",
         "icon": "radio_local.png",
         "has_channels": False,
         "channels": [],
@@ -124,6 +127,16 @@ STATIONS: dict[str, dict[str, Any]] = {
 def get_station_config(station_id: str) -> dict[str, Any]:
     """Returns the configuration dict for the given station, defaulting to LISTEN.moe."""
     return STATIONS.get(station_id.lower().strip(), STATIONS["listenmoe"])
+
+
+def get_station_display_name(station_id: str, i18n: Any = None) -> str:
+    """Return the localized station name when ``name_i18n_key`` is configured."""
+    clean_id = (station_id or DEFAULT_STATION).lower().strip()
+    cfg = get_station_config(clean_id)
+    i18n_key = cfg.get("name_i18n_key")
+    if i18n_key and i18n is not None and hasattr(i18n, "t"):
+        return str(i18n.t(str(i18n_key)))
+    return str(cfg.get("name", clean_id))
 
 
 def get_station_stream_url(

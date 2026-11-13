@@ -239,6 +239,70 @@ def test_local_prompt_dialog_creation_and_signals():
     dlg.close()
 
 
+def test_local_prompt_stays_open_when_opening_queue(tmp_path):
+    """'Manage Queue' must not close the prompt; adding tracks elsewhere closes it once."""
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+    _app = QApplication.instance() or QApplication([])
+
+    mgr = LocalPlaylistManager()
+    dlg = LocalMusicPromptDialog(mgr)
+    dlg.show()
+    _app.processEvents()
+
+    loaded: list[int] = []
+    dlg.tracks_loaded.connect(loaded.append)
+
+    dlg._on_open_queue()
+    _app.processEvents()
+    assert dlg.isVisible()
+    assert loaded == []
+
+    # Simulate the queue manager adding tracks to the shared playlist
+    song = tmp_path / "song.mp3"
+    song.write_bytes(b"")
+    assert mgr.add_files([str(song)]) == 1
+    assert loaded == []  # deferred until the playlist has selected its current track
+    _app.processEvents()
+    assert loaded == [1]
+    assert mgr.get_current_track() is not None
+    assert not dlg.isVisible()
+
+    # Further queue updates must not re-emit
+    mgr.queue_updated.emit()
+    assert loaded == [1]
+    dlg.close()
+
+
+def test_local_prompt_self_loading_emits_once(tmp_path):
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+    _app = QApplication.instance() or QApplication([])
+
+    mgr = LocalPlaylistManager()
+    dlg = LocalMusicPromptDialog(mgr)
+    dlg.show()
+    _app.processEvents()
+
+    loaded: list[int] = []
+    dlg.tracks_loaded.connect(loaded.append)
+
+    song = tmp_path / "song.mp3"
+    song.write_bytes(b"")
+    dlg._self_loading = True
+    mgr.add_files([str(song)])
+    dlg._self_loading = False
+    assert loaded == []  # queue_updated ignored while the dialog loads tracks itself
+    dlg._finish_with_tracks()
+    dlg._finish_with_tracks()
+    assert loaded == [1]
+    dlg.close()
+
+
 def test_dialog_entrance_and_exit_animations():
     from PyQt6.QtWidgets import QApplication
 
