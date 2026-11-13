@@ -521,7 +521,7 @@ class SleepTimerWidget(QFrame):
         self.drawer_toggled.emit(False)
 
     def toggle_visible(self) -> None:
-        new_vis = not self.isVisible()
+        new_vis = self.isHidden()
         self.setVisible(new_vis)
         self.drawer_toggled.emit(new_vis)
 

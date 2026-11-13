@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
-from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QPushButton, QWidget
 
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
@@ -158,3 +158,17 @@ class LyricsButton(HistoryIconButton):
         painter.drawLine(QPointF(cx - 5, cy - 4), QPointF(cx + 5, cy - 4))
         painter.drawLine(QPointF(cx - 5, cy), QPointF(cx + 5, cy))
         painter.drawLine(QPointF(cx - 5, cy + 4), QPointF(cx + 2, cy + 4))
+
+
+class SleepIconButton(LyricsButton):
+    """Sleep timer drawer toggle matching the top HUD icon buttons."""
+
+    def _draw_icon(self, painter, cx, cy, fg):
+        outer = QPainterPath()
+        outer.addEllipse(QPointF(cx + 0.5, cy), 5.8, 5.8)
+        cutout = QPainterPath()
+        cutout.addEllipse(QPointF(cx + 3.2, cy - 2.0), 4.8, 4.8)
+        crescent = outer.subtracted(cutout)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fg)
+        painter.drawPath(crescent)

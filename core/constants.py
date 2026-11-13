@@ -187,6 +187,16 @@ DEFAULT_VISUALIZER_ENABLED = False
 KEY_AMBIENT_MODE_ENABLED = "ambient_mode_enabled"
 DEFAULT_AMBIENT_MODE_ENABLED = True
 
+# Dynamic Volume (automatic audio ducking per app/game)
+KEY_DYNAMIC_VOLUME_ENABLED = "dynamic_volume_enabled"
+DEFAULT_DYNAMIC_VOLUME_ENABLED = False
+KEY_DYNAMIC_VOLUME_APPS = "dynamic_volume_apps"
+DEFAULT_DYNAMIC_VOLUME_APPS = ""
+KEY_DYNAMIC_VOLUME_LEVEL = "dynamic_volume_level"
+DEFAULT_DYNAMIC_VOLUME_LEVEL = 25
+KEY_DYNAMIC_VOLUME_MODE = "dynamic_volume_mode"
+DEFAULT_DYNAMIC_VOLUME_MODE = "any_open"
+
 # OTA Updates (GitHub Releases)
 KEY_UPDATE_CHECK_ON_STARTUP = "update_check_on_startup"
 KEY_UPDATE_CHANNEL = "update_channel"

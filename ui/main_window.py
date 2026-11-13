@@ -47,6 +47,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QSizeGrip,
     QSizePolicy,
+    QSpacerItem,
     QStyle,
     QVBoxLayout,
     QWidget,
@@ -72,6 +73,10 @@ from core.constants import (
     APP_VERSION,
     DEFAULT_AMBIENT_MODE_ENABLED,
     DEFAULT_DISCORD_CLIENT_ID,
+    DEFAULT_DYNAMIC_VOLUME_APPS,
+    DEFAULT_DYNAMIC_VOLUME_ENABLED,
+    DEFAULT_DYNAMIC_VOLUME_LEVEL,
+    DEFAULT_DYNAMIC_VOLUME_MODE,
     DEFAULT_STATION,
     DEFAULT_THEME,
     DEFAULT_VISUALIZER_ENABLED,
@@ -88,6 +93,10 @@ from core.constants import (
     KEY_DISCORD_CLIENT_ID,
     KEY_DISCORD_RPC_ENABLED,
     KEY_DONT_ASK_ON_CLOSE,
+    KEY_DYNAMIC_VOLUME_APPS,
+    KEY_DYNAMIC_VOLUME_ENABLED,
+    KEY_DYNAMIC_VOLUME_LEVEL,
+    KEY_DYNAMIC_VOLUME_MODE,
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
@@ -119,6 +128,7 @@ from core.constants import (
     UPDATE_CHANNEL_STABLE,
 )
 from core.discord_presence import DiscordPresence, activity_payload
+from core.dynamic_volume import DynamicVolumeController
 from core.i18n import I18n, install_qt_translator
 from core.local_metadata import LocalTrackInfo
 from core.local_playlist import LocalPlaylistManager
@@ -172,7 +182,7 @@ from ui.widgets.ambient_cover import (
     LiveEqualizerBadge,
     TrackHoverGroup,
 )
-from ui.widgets.history_button import HistoryIconButton, LyricsButton
+from ui.widgets.history_button import HistoryIconButton, LyricsButton, SleepIconButton
 from ui.widgets.lyrics_panel import LyricsPanel
 from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniIconButton
 from ui.widgets.playback_controls import PlaybackControls
@@ -545,6 +555,9 @@ class ListenMoePlayer(QWidget):
         self._sleep_remaining_sec = 0
         self._sleep_fadeout_sec = 15
         self._sleep_saved_volume: Optional[int] = None
+        self._dynamic_volume_factor: float = 1.0
+        self._dynamic_volume_app: str = ""
+        self.dynamic_volume: Optional[DynamicVolumeController] = None
         self._from_tray_quit: bool = False
         self._clock_sync_offset = 0.0  # Difference between server time and local CPU clock
         self._retry_count = 0
@@ -715,7 +728,7 @@ class ListenMoePlayer(QWidget):
     def _effective_min_window_height(self) -> int:
         sleep_w = getattr(self, "sleep_timer_widget", None)
         is_visible = (
-            sleep_w.isVisible()
+            not sleep_w.isHidden()
             if sleep_w is not None
             else self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
         )
@@ -729,7 +742,7 @@ class ListenMoePlayer(QWidget):
         # Use custom Cyber-Moe title bar with logo on all platforms (Windows & Linux)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 405, self._effective_min_window_height()
+        fixed_w, fixed_h = 420, self._effective_min_window_height()
         self.setMinimumSize(380, fixed_h)
         self.resize(fixed_w, fixed_h)
         self.setObjectName("mainWindowRoot")
@@ -785,7 +798,10 @@ class ListenMoePlayer(QWidget):
         self._player_stage_outer = QVBoxLayout(self._player_stage)
         self._player_stage_outer.setContentsMargins(0, 0, 0, 0)
         self._player_stage_outer.setSpacing(0)
-        self._player_stage_outer.addStretch(1)
+        self._stage_outer_top_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        self._player_stage_outer.addSpacerItem(self._stage_outer_top_spacer)
 
         self._stage_column = QWidget()
         self._stage_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -793,7 +809,18 @@ class ListenMoePlayer(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(7)
         self._player_stage_outer.addWidget(self._stage_column)
-        self._player_stage_outer.addStretch(1)
+        self._stage_outer_bottom_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        self._player_stage_outer.addSpacerItem(self._stage_outer_bottom_spacer)
+        self._stage_mode_hero: bool | None = None
+        self._stage_was_extra_v = False
+        self._stage_hero_blend = 0.0
+        self._stage_hero_anim = QVariantAnimation(self)
+        self._stage_hero_anim.setDuration(240)
+        self._stage_hero_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._stage_hero_anim.valueChanged.connect(self._on_stage_hero_anim_changed)
+        self._stage_hero_anim.finished.connect(self._on_stage_hero_anim_finished)
         self._view_stack.addWidget(self._player_stage)
 
         self._canvas_outer_layout.addWidget(self._body_container, 1)
@@ -815,13 +842,19 @@ class ListenMoePlayer(QWidget):
         top_bar_layout.setSpacing(6)
 
         left_wing = QWidget()
-        left_wing.setFixedWidth(78)
+        left_wing.setFixedWidth(108)
         left_wing_layout = QHBoxLayout(left_wing)
         left_wing_layout.setContentsMargins(0, 0, 0, 0)
-        left_wing_layout.setSpacing(0)
+        left_wing_layout.setSpacing(6)
 
         self.live_badge = LiveEqualizerBadge()
+        self.sleep_button = SleepIconButton()
+        self.sleep_button.setObjectName("sleepToggleButton")
+        self.sleep_button.setToolTip(self.i18n.t("tt_sleep_timer"))
+        self.sleep_button.setAccessibleName(self.i18n.t("sleep_timer"))
+        self.sleep_button.clicked.connect(self._on_sleep_toggle_clicked)
         left_wing_layout.addWidget(self.live_badge)
+        left_wing_layout.addWidget(self.sleep_button)
         left_wing_layout.addStretch(1)
 
         # Keep brand_label attribute for backward compatibility (displayed in CustomTitleBar)
@@ -853,7 +886,7 @@ class ListenMoePlayer(QWidget):
         center_hud_layout.addStretch(1)
 
         right_wing = QWidget()
-        right_wing.setFixedWidth(102)
+        right_wing.setFixedWidth(108)
         right_wing_layout = QHBoxLayout(right_wing)
         right_wing_layout.setContentsMargins(0, 0, 0, 0)
         right_wing_layout.setSpacing(6)
@@ -905,6 +938,11 @@ class ListenMoePlayer(QWidget):
         self.lyrics_panel = LyricsPanel()
         self.lyrics_panel.hide()
         self._artwork_row.addWidget(self.lyrics_panel, 1)
+        self._stage_top_fill = QWidget()
+        self._stage_top_fill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._stage_top_fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self._stage_top_fill.setVisible(False)
+        self._layout.addWidget(self._stage_top_fill, 1)
         self._layout.addLayout(self._artwork_row)
         self.lyrics_provider = LyricsProvider(self)
         self.lyrics_provider.finished.connect(self._on_lyrics_result)
@@ -1257,6 +1295,11 @@ class ListenMoePlayer(QWidget):
         self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
 
         self._layout.addWidget(self.playback_controls)
+        self._stage_mid_fill = QWidget()
+        self._stage_mid_fill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._stage_mid_fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self._stage_mid_fill.setVisible(False)
+        self._layout.addWidget(self._stage_mid_fill, 1)
 
     def _init_progress_section(self):
         """
@@ -1281,7 +1324,12 @@ class ListenMoePlayer(QWidget):
         self.sleep_timer_widget.start_requested.connect(self._on_sleep_start_requested)
         self.sleep_timer_widget.cancel_requested.connect(self.sleep_cancel_clicked)
         self.sleep_timer_widget.drawer_toggled.connect(self._on_sleep_drawer_toggled)
-        self.sleep_timer_widget.setVisible(self._get_bool(KEY_SHOW_SLEEP_TIMER, True))
+        show_sleep = self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
+        self.sleep_timer_widget.setVisible(show_sleep)
+        if hasattr(self, "sleep_button"):
+            self.sleep_button.blockSignals(True)
+            self.sleep_button.setChecked(show_sleep)
+            self.sleep_button.blockSignals(False)
 
         # Backward compatibility attributes
         self.spin_sleep = self.sleep_timer_widget.spin_minutes
@@ -1408,7 +1456,7 @@ class ListenMoePlayer(QWidget):
 
         # Set initial audio state
         try:
-            self.player.set_volume(self.volume_slider.value())
+            self._apply_effective_volume(self.volume_slider.value())
             is_muted = self._get_bool(KEY_MUTE, False)
             if hasattr(self, "playback_controls"):
                 self.playback_controls.set_muted(is_muted)
@@ -1449,6 +1497,14 @@ class ListenMoePlayer(QWidget):
         self._progress_timer.setInterval(1000)
         self._progress_timer.timeout.connect(self.update_now_playing_label)
         self._progress_timer.start()
+
+        # Dynamic Volume (automatic audio ducking)
+        try:
+            self.dynamic_volume = DynamicVolumeController(self)
+            self.dynamic_volume.factor_changed.connect(self._on_dynamic_volume_factor_changed)
+            self._sync_dynamic_volume_settings()
+        except Exception:
+            self.dynamic_volume = None
 
         # Connections for UI signals
         try:
@@ -2141,6 +2197,8 @@ class ListenMoePlayer(QWidget):
                 self.dev_console.close()
             if hasattr(self, "_session_timer") and self._session_timer:
                 self._session_timer.stop()
+            if hasattr(self, "dynamic_volume") and self.dynamic_volume:
+                self.dynamic_volume.stop()
             if hasattr(self, "player") and self.player:
                 self.player.stop()
             if hasattr(self, "station_mgr") and self.station_mgr:
@@ -2206,6 +2264,100 @@ class ListenMoePlayer(QWidget):
         super().resizeEvent(a0)
         self._update_responsive_stage()
 
+    def _on_stage_hero_anim_changed(self, value) -> None:
+        if getattr(self, "_mini_mode", False):
+            anim = getattr(self, "_stage_hero_anim", None)
+            if anim is not None:
+                anim.stop()
+            return
+        try:
+            self._stage_hero_blend = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return
+        self._apply_stage_hero_layout()
+
+    def _on_stage_hero_anim_finished(self) -> None:
+        if getattr(self, "_mini_mode", False):
+            return
+        is_hero = bool(getattr(self, "_stage_mode_hero", False))
+        self._stage_hero_blend = 1.0 if is_hero else 0.0
+        self._apply_stage_hero_layout()
+
+    def _apply_stage_hero_layout(self) -> None:
+        outer = getattr(self, "_player_stage_outer", None)
+        if outer is None:
+            return
+        top_sp = getattr(self, "_stage_outer_top_spacer", None)
+        bot_sp = getattr(self, "_stage_outer_bottom_spacer", None)
+        top_fill = getattr(self, "_stage_top_fill", None)
+        mid_fill = getattr(self, "_stage_mid_fill", None)
+        stage_col = getattr(self, "_stage_column", None)
+        player_stage = getattr(self, "_player_stage", None)
+        layout = getattr(self, "_layout", None)
+
+        extra_v = bool(getattr(self, "_stage_was_extra_v", False))
+        blend = max(0.0, min(1.0, float(getattr(self, "_stage_hero_blend", 0.0))))
+
+        if blend >= 0.999:
+            if top_sp is not None:
+                top_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+            if bot_sp is not None:
+                bot_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+            if stage_col is not None:
+                stage_col.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            for fill in (top_fill, mid_fill):
+                if fill is not None:
+                    fill.setMinimumHeight(0)
+                    fill.setMaximumHeight(16777215)
+                    fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+                    fill.setVisible(False)
+        elif blend <= 0.001:
+            if top_sp is not None:
+                top_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            if bot_sp is not None:
+                bot_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+            if stage_col is not None:
+                stage_col.setSizePolicy(
+                    QSizePolicy.Policy.Expanding,
+                    QSizePolicy.Policy.Expanding if extra_v else QSizePolicy.Policy.Preferred,
+                )
+            for fill in (top_fill, mid_fill):
+                if fill is not None:
+                    fill.setMinimumHeight(0)
+                    fill.setMaximumHeight(16777215)
+                    fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+                    fill.setVisible(extra_v)
+        else:
+            stage_h = player_stage.height() if player_stage is not None else 0
+            if stage_h <= 0:
+                stage_h = max(0, self.height() - CustomTitleBar.HEIGHT - 44)
+            content_h = 0
+            if stage_col is not None:
+                for fill in (top_fill, mid_fill):
+                    if fill is not None:
+                        fill.setVisible(True)
+                        fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+                        fill.setFixedHeight(0)
+                if layout is not None:
+                    layout.invalidate()
+                content_h = stage_col.sizeHint().height()
+            half_slack = max(0, (stage_h - content_h) // 2)
+            fill_h = round(half_slack * (1.0 - blend))
+            for fill in (top_fill, mid_fill):
+                if fill is not None:
+                    fill.setVisible(fill_h > 0)
+                    fill.setFixedHeight(max(0, fill_h))
+            if stage_col is not None:
+                stage_col.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            if top_sp is not None:
+                top_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+            if bot_sp is not None:
+                bot_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+
+        outer.invalidate()
+        if layout is not None:
+            layout.invalidate()
+
     def _update_responsive_stage(self) -> None:
         """Keep the player compact at default size and frame a centered hero stage in fullscreen."""
         try:
@@ -2229,7 +2381,7 @@ class ListenMoePlayer(QWidget):
             else:
                 avail_h = max(500, self.height() - CustomTitleBar.HEIGHT - 56)
                 sleep_w = getattr(self, "sleep_timer_widget", None)
-                sleep_open = sleep_w is not None and sleep_w.isVisible()
+                sleep_open = sleep_w is not None and not sleep_w.isHidden()
                 reserved_v = 340 if sleep_open else 240
                 target_cover = max(
                     180,
@@ -2266,6 +2418,48 @@ class ListenMoePlayer(QWidget):
             artist_lbl = getattr(self, "now_playing_artist", None)
             if artist_lbl is not None and hasattr(artist_lbl, "set_font_size"):
                 artist_lbl.set_font_size(round(13 + 2 * t))
+
+            is_hero_stage = (
+                self.isFullScreen()
+                or self.isMaximized()
+                or (self.width() >= 960 and self.height() >= 820)
+            )
+            extra_v = self.height() > (self._effective_min_window_height() + 8)
+            prev_hero = getattr(self, "_stage_mode_hero", None)
+            was_extra_v = bool(getattr(self, "_stage_was_extra_v", False))
+            self._stage_was_extra_v = extra_v
+            anim = getattr(self, "_stage_hero_anim", None)
+
+            if prev_hero is None or not self.isVisible():
+                self._stage_mode_hero = is_hero_stage
+                self._stage_hero_blend = 1.0 if is_hero_stage else 0.0
+                if anim is not None and anim.state() == QVariantAnimation.State.Running:
+                    anim.stop()
+                self._apply_stage_hero_layout()
+                return
+
+            if prev_hero != is_hero_stage:
+                self._stage_mode_hero = is_hero_stage
+                target_blend = 1.0 if is_hero_stage else 0.0
+                should_animate = anim is not None and (
+                    (is_hero_stage and (was_extra_v or 0.01 < self._stage_hero_blend < 0.99))
+                    or (not is_hero_stage and (extra_v or 0.01 < self._stage_hero_blend < 0.99))
+                )
+                if should_animate and anim is not None:
+                    if anim.state() == QVariantAnimation.State.Running:
+                        anim.stop()
+                    anim.setStartValue(float(getattr(self, "_stage_hero_blend", 0.0)))
+                    anim.setEndValue(target_blend)
+                    anim.start()
+                else:
+                    if anim is not None and anim.state() == QVariantAnimation.State.Running:
+                        anim.stop()
+                    self._stage_hero_blend = target_blend
+                self._apply_stage_hero_layout()
+            else:
+                if anim is None or anim.state() != QVariantAnimation.State.Running:
+                    self._stage_hero_blend = 1.0 if is_hero_stage else 0.0
+                self._apply_stage_hero_layout()
         except Exception:
             pass
 
@@ -2696,12 +2890,17 @@ class ListenMoePlayer(QWidget):
                 else:
                     target_h = max(effective_min_h, self.minimumSizeHint().height())
                     self.resize(self.width(), target_h)
+                    self._update_responsive_stage()
         except Exception:
             pass
 
     def _on_sleep_drawer_toggled(self, visible: bool) -> None:
         try:
             self.settings.setValue(KEY_SHOW_SLEEP_TIMER, "true" if visible else "false")
+            if hasattr(self, "sleep_button"):
+                self.sleep_button.blockSignals(True)
+                self.sleep_button.setChecked(bool(visible))
+                self.sleep_button.blockSignals(False)
             self._sync_window_height_for_sleep_drawer()
         except Exception:
             pass
@@ -2710,9 +2909,13 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, "sleep_timer_widget"):
                 show_sleep = self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
-                if self.sleep_timer_widget.isVisible() != show_sleep:
+                if (not self.sleep_timer_widget.isHidden()) != show_sleep:
                     self.sleep_timer_widget.setVisible(show_sleep)
                     self._sync_window_height_for_sleep_drawer()
+                if hasattr(self, "sleep_button"):
+                    self.sleep_button.blockSignals(True)
+                    self.sleep_button.setChecked(show_sleep)
+                    self.sleep_button.blockSignals(False)
         except Exception:
             pass
 
@@ -2731,7 +2934,6 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, "sleep_timer_widget"):
                 self.sleep_timer_widget.toggle_visible()
-                self._sync_window_height_for_sleep_drawer()
         except Exception:
             pass
 
@@ -2976,6 +3178,9 @@ class ListenMoePlayer(QWidget):
         if hasattr(self, "lyrics_button"):
             self.lyrics_button.setToolTip(self.t("lyrics_button"))
             self.lyrics_button.setAccessibleName(self.t("lyrics_button"))
+        if hasattr(self, "sleep_button"):
+            self.sleep_button.setToolTip(self.t("tt_sleep_timer"))
+            self.sleep_button.setAccessibleName(self.t("sleep_timer"))
         if hasattr(self, "mini_hud"):
             self.mini_button.setToolTip(self.t("mini_mode"))
             self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
@@ -3240,6 +3445,8 @@ class ListenMoePlayer(QWidget):
                     self.lyrics_button.refresh_theme()
                 else:
                     self.lyrics_button.set_accent_color(accent)
+            if hasattr(self, "sleep_button") and self.sleep_button is not None:
+                self.sleep_button.refresh_theme()
             if hasattr(self, "mini_hud") and hasattr(self.mini_hud, "refresh_theme"):
                 self.mini_hud.refresh_theme()
             history_pop = getattr(self, "_history_popover", None)
@@ -4005,6 +4212,7 @@ class ListenMoePlayer(QWidget):
                             self._apply_prev_audio_idx = new_audio_idx
                         self._sync_sleep_timer_visibility()
                         self._sync_ambient_mode()
+                        self._sync_dynamic_volume_settings()
                         self.update_header_label()
                         self.update_tray_texts()
                     except Exception:
@@ -4115,11 +4323,12 @@ class ListenMoePlayer(QWidget):
                             libvlc_path=new_path,
                             network_caching_ms=new_nc,
                         )
-                    self.player.set_volume(self.volume_slider.value())
+                    self._apply_effective_volume(self.volume_slider.value())
                     self.player.set_mute(self.mute_button.isChecked())
                     self.update_vlc_status_label()
                 self._sync_sleep_timer_visibility()
                 self._sync_ambient_mode()
+                self._sync_dynamic_volume_settings()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev_tray_enabled:
@@ -5082,18 +5291,93 @@ class ListenMoePlayer(QWidget):
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
+    def _effective_volume(self, user_volume: int) -> int:
+        """Compute backend volume (0..100) after applying the active dynamic volume factor."""
+        base = max(0, min(100, int(user_volume)))
+        if base <= 0:
+            return 0
+        factor = max(0.0, min(1.0, float(getattr(self, "_dynamic_volume_factor", 1.0))))
+        if factor >= 0.999:
+            return base
+        return max(1, min(100, int(round(base * factor))))
+
+    def _apply_effective_volume(self, user_volume: Optional[int] = None) -> int:
+        """Apply scaled volume to the backend and refresh UI badges without changing KEY_VOLUME."""
+        if user_volume is None:
+            if hasattr(self, "volume_slider"):
+                base = int(self.volume_slider.value())
+            else:
+                try:
+                    base = int(self.settings.value(KEY_VOLUME, 60))
+                except (TypeError, ValueError):
+                    base = 60
+        else:
+            base = int(user_volume)
+        base = max(0, min(100, base))
+        effective = self._effective_volume(base)
+
+        try:
+            if hasattr(self, "player") and self.player:
+                self.player.set_volume(effective)
+        except Exception:
+            pass
+
+        app_name = str(getattr(self, "_dynamic_volume_app", "") or "")
+        factor = float(getattr(self, "_dynamic_volume_factor", 1.0))
+        is_ducked = bool(app_name) and factor < 0.999
+        tooltip = (
+            self.i18n.t(
+                "dynamic_volume_ducked_tooltip",
+                effective=effective,
+                app=app_name,
+                base=base,
+            )
+            if is_ducked
+            else f"{base}%"
+        )
+        try:
+            if hasattr(self, "playback_controls") and self.playback_controls is not None:
+                self.playback_controls.set_volume_display(
+                    effective, is_ducked=is_ducked, tooltip=tooltip
+                )
+            else:
+                if hasattr(self, "volume_value_label"):
+                    self.volume_value_label.setText(f"{effective}%")
+                if hasattr(self, "volume_slider"):
+                    self.volume_slider.setToolTip(tooltip)
+        except Exception:
+            pass
+        return effective
+
+    def _sync_dynamic_volume_settings(self) -> None:
+        """Reload Dynamic Volume configuration from QSettings into the controller."""
+        ctrl = getattr(self, "dynamic_volume", None)
+        if ctrl is None:
+            return
+        enabled = self._get_bool(KEY_DYNAMIC_VOLUME_ENABLED, DEFAULT_DYNAMIC_VOLUME_ENABLED)
+        apps_raw = str(
+            self.settings.value(KEY_DYNAMIC_VOLUME_APPS, DEFAULT_DYNAMIC_VOLUME_APPS)
+            or DEFAULT_DYNAMIC_VOLUME_APPS
+        )
+        try:
+            level = int(self.settings.value(KEY_DYNAMIC_VOLUME_LEVEL, DEFAULT_DYNAMIC_VOLUME_LEVEL))
+        except (TypeError, ValueError):
+            level = DEFAULT_DYNAMIC_VOLUME_LEVEL
+        mode = str(
+            self.settings.value(KEY_DYNAMIC_VOLUME_MODE, DEFAULT_DYNAMIC_VOLUME_MODE)
+            or DEFAULT_DYNAMIC_VOLUME_MODE
+        )
+        ctrl.configure(enabled, apps_raw, level, mode)
+
+    def _on_dynamic_volume_factor_changed(self, factor: float, active_app: str) -> None:
+        self._dynamic_volume_factor = max(0.05, min(1.0, float(factor)))
+        self._dynamic_volume_app = str(active_app or "")
+        self._apply_effective_volume()
+
     def change_volume(self, value: int) -> None:
         try:
-            self.player.set_volume(int(value))
+            self._apply_effective_volume(int(value))
             self.settings.setValue(KEY_VOLUME, int(value))
-            # Aggiorna UI volume
-            try:
-                if hasattr(self, "volume_value_label"):
-                    self.volume_value_label.setText(f"{int(value)}%")
-                if hasattr(self, "volume_slider"):
-                    self.volume_slider.setToolTip(f"{int(value)}%")
-            except Exception:
-                pass
             try:
                 self.log.debug(f"[UI] volume_changed -> {int(value)}")
             except Exception:
@@ -5161,7 +5445,7 @@ class ListenMoePlayer(QWidget):
                             if hasattr(self, "volume_slider"):
                                 self.volume_slider.setValue(60)
                             else:
-                                self.player.set_volume(60)
+                                self._apply_effective_volume(60)
                             try:
                                 self.settings.setValue(KEY_VOLUME, 60)
                             except Exception:

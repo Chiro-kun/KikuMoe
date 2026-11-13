@@ -362,6 +362,30 @@ I18N: dict[str, dict[str, str]] = {
         "settings_tray_section": "SYSTEM TRAY",
         "settings_dev_console_section": "CONSOLE SVILUPPATORE",
         "settings_back_to_player": "Player",
+        # Volume dinamico (audio ducking)
+        "settings_dynamic_volume_section": "VOLUME DINAMICO",
+        "settings_dynamic_volume_enable": "Riduci volume con app / giochi",
+        "settings_dynamic_volume_tip": (
+            "Riduce temporaneamente il volume di KikuMoe quando le app o i giochi "
+            "elencati sono aperti o in primo piano"
+        ),
+        "settings_dynamic_volume_mode": "Quando ridurre",
+        "settings_dynamic_volume_mode_any": "App in lista aperta",
+        "settings_dynamic_volume_mode_fg": "App in primo piano",
+        "settings_dynamic_volume_level": "Volume target",
+        "settings_dynamic_volume_level_tip": (
+            "Percentuale del volume attuale mantenuta durante la riduzione (es. 25%)"
+        ),
+        "settings_dynamic_volume_apps": "App / processi",
+        "settings_dynamic_volume_apps_placeholder": "es. VALORANT-Win64-Shipping, cs2, discord",
+        "settings_dynamic_volume_apps_tip": (
+            "Nomi di processi separati da virgola (con o senza .exe; supporta *)"
+        ),
+        "settings_dynamic_volume_pick_app": "Scegli app aperta…",
+        "settings_dynamic_volume_no_apps": "Nessuna app rilevata",
+        "dynamic_volume_ducked_tooltip": (
+            "Volume ridotto al {effective}% per {app} (volume base: {base}%)"
+        ),
     },
     "en": {
         "lyrics_button": "Lyrics",
@@ -708,6 +732,30 @@ I18N: dict[str, dict[str, str]] = {
         "settings_tray_section": "SYSTEM TRAY",
         "settings_dev_console_section": "DEVELOPER CONSOLE",
         "settings_back_to_player": "Player",
+        # Dynamic volume (audio ducking)
+        "settings_dynamic_volume_section": "DYNAMIC VOLUME",
+        "settings_dynamic_volume_enable": "Duck volume for specific apps",
+        "settings_dynamic_volume_tip": (
+            "Temporarily ducks KikuMoe's playback volume while listed games or apps "
+            "are running or focused"
+        ),
+        "settings_dynamic_volume_mode": "When to duck",
+        "settings_dynamic_volume_mode_any": "Listed app running",
+        "settings_dynamic_volume_mode_fg": "Listed app focused",
+        "settings_dynamic_volume_level": "Ducked level",
+        "settings_dynamic_volume_level_tip": (
+            "Percentage of your current volume kept while ducking is active (e.g. 25%)"
+        ),
+        "settings_dynamic_volume_apps": "Apps / processes",
+        "settings_dynamic_volume_apps_placeholder": "e.g. VALORANT-Win64-Shipping, cs2, discord",
+        "settings_dynamic_volume_apps_tip": (
+            "Comma-separated process names (with or without .exe; supports *)"
+        ),
+        "settings_dynamic_volume_pick_app": "Pick running app…",
+        "settings_dynamic_volume_no_apps": "No apps detected",
+        "dynamic_volume_ducked_tooltip": (
+            "Volume ducked to {effective}% for {app} (base volume: {base}%)"
+        ),
     },
 }
 

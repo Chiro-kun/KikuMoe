@@ -504,9 +504,12 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             "  padding: 4px;"
             f"  color: {PALETTE['text_primary']};"
             "}"
+            f"QMenu::item {{ padding: 6px 14px; border-radius: 6px; "
+            f"color: {PALETTE['text_secondary']}; }}"
             f"QMenu::item:selected {{"
-            f"  background-color: {PALETTE['accent']};"
-            "  border-radius: 4px;"
+            f"  background-color: {PALETTE['accent_menu_hover']};"
+            f"  color: {PALETTE['text_primary']};"
+            "  border-radius: 6px;"
             "}"
         )
 

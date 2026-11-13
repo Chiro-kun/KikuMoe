@@ -239,9 +239,7 @@ def get_cyber_moe_stylesheet(accent: Optional[str] = None) -> str:
     handle_hover = tokens["accent_handle_hover"]
     border_subtle = tokens["border_subtle"]
     border_card = tokens["border_card"]
-    border_highlight = tokens["border_highlight"]
     bg_main = tokens["bg_main"]
-    bg_surface = tokens["bg_surface"]
     bg_surface_elevated = tokens["bg_surface_elevated"]
     bg_popover = tokens["bg_popover"]
     bg_subtle = tokens["bg_subtle"]
@@ -519,26 +517,40 @@ def get_cyber_moe_stylesheet(accent: Optional[str] = None) -> str:
         border: none;
     }}
     QComboBox QAbstractItemView {{
-        background-color: {bg_surface};
-        border: 1px solid {border_highlight};
+        background-color: {bg_popover};
+        border: 1px solid rgba(255, 255, 255, 0.16);
         color: {text_primary};
         font-size: 12px;
         font-weight: 500;
-        selection-background-color: {act};
-        selection-color: {on_accent};
-        border-radius: 8px;
-        padding: 4px;
+        selection-background-color: transparent;
+        selection-color: #ffffff;
+        border-radius: 10px;
+        padding: 5px;
         outline: none;
     }}
     QComboBox QAbstractItemView::item {{
-        min-height: 25px;
-        padding: 3px 10px;
-        border-radius: 5px;
+        min-height: 28px;
+        padding: 4px 12px;
+        border-radius: 7px;
+        border: 1px solid transparent;
+        margin: 1px 0px;
+        color: {text_secondary};
     }}
-    QComboBox QAbstractItemView::item:hover,
+    QComboBox QAbstractItemView::item:hover {{
+        background-color: rgba(255, 255, 255, 0.09);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        color: #ffffff;
+    }}
     QComboBox QAbstractItemView::item:selected {{
-        background-color: {act};
-        color: {on_accent};
+        background-color: {tokens["accent_soft"]};
+        border: 1px solid {act};
+        color: #ffffff;
+        font-weight: 600;
+    }}
+    QComboBox QAbstractItemView::item:selected:hover {{
+        background-color: {menu_hover_bg};
+        border: 1px solid {hover_accent};
+        color: #ffffff;
     }}
 
     /* --- Context Menus & Tooltips --- */

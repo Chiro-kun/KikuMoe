@@ -606,3 +606,76 @@ def get_folder_pixmap(size: int = 16, color: str | None = None) -> QPixmap:
 
 def get_folder_icon(size: int = 16, color: str | None = None) -> QIcon:
     return QIcon(get_folder_pixmap(size, color))
+
+
+def get_minus_pixmap(size: int = 14, color: str | None = None) -> QPixmap:
+    """Generate crisp vector minus icon for stepper controls."""
+    resolved_color = color if color is not None else "#e2e6f3"
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<line x1="5" y1="12" x2="19" y2="12"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_minus_icon(size: int = 14, color: str | None = None) -> QIcon:
+    return QIcon(get_minus_pixmap(size, color))
+
+
+def get_plus_pixmap(size: int = 14, color: str | None = None) -> QPixmap:
+    """Generate crisp vector plus icon for stepper controls."""
+    resolved_color = color if color is not None else "#e2e6f3"
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<line x1="12" y1="5" x2="12" y2="19"/>'
+        '<line x1="5" y1="12" x2="19" y2="12"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_plus_icon(size: int = 14, color: str | None = None) -> QIcon:
+    return QIcon(get_plus_pixmap(size, color))
+
+
+def get_apps_pixmap(size: int = 14, color: str | None = None) -> QPixmap:
+    """Generate 2x2 rounded app grid icon for app-picker buttons."""
+    resolved_color = color if color is not None else "#e2e6f3"
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<rect x="3" y="3" width="7" height="7" rx="1.8"/>'
+        '<rect x="14" y="3" width="7" height="7" rx="1.8"/>'
+        '<rect x="3" y="14" width="7" height="7" rx="1.8"/>'
+        '<rect x="14" y="14" width="7" height="7" rx="1.8"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_apps_icon(size: int = 14, color: str | None = None) -> QIcon:
+    return QIcon(get_apps_pixmap(size, color))
+
+
+def get_refresh_pixmap(size: int = 14, color: str | None = None) -> QPixmap:
+    """Generate circular refresh icon."""
+    resolved_color = color if color is not None else "#e2e6f3"
+    svg = QByteArray(
+        f'<svg viewBox="0 0 24 24" fill="none" stroke="{resolved_color}" '
+        'stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" '
+        'xmlns="http://www.w3.org/2000/svg">'
+        '<polyline points="23 4 23 10 17 10"/>'
+        '<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>'
+        "</svg>".encode()
+    )
+    return _render_svg(svg, size)
+
+
+def get_refresh_icon(size: int = 14, color: str | None = None) -> QIcon:
+    return QIcon(get_refresh_pixmap(size, color))

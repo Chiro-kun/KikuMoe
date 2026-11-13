@@ -24,6 +24,7 @@ from PyQt6.QtCore import (
     QSize,
     Qt,
     QTimer,
+    QVariantAnimation,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
@@ -53,12 +54,16 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListView,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QStyle,
     QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -69,6 +74,10 @@ from core.constants import (
     APP_VERSION,
     DEFAULT_ACCENT_COLOR,
     DEFAULT_AMBIENT_MODE_ENABLED,
+    DEFAULT_DYNAMIC_VOLUME_APPS,
+    DEFAULT_DYNAMIC_VOLUME_ENABLED,
+    DEFAULT_DYNAMIC_VOLUME_LEVEL,
+    DEFAULT_DYNAMIC_VOLUME_MODE,
     DEFAULT_STATION,
     DEFAULT_THEME,
     DEFAULT_VISUALIZER_ENABLED,
@@ -83,6 +92,10 @@ from core.constants import (
     KEY_DEV_CONSOLE_SHOW_DEV,
     KEY_DISCORD_CLIENT_ID,
     KEY_DISCORD_RPC_ENABLED,
+    KEY_DYNAMIC_VOLUME_APPS,
+    KEY_DYNAMIC_VOLUME_ENABLED,
+    KEY_DYNAMIC_VOLUME_LEVEL,
+    KEY_DYNAMIC_VOLUME_MODE,
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
@@ -107,6 +120,12 @@ from core.constants import (
     UPDATE_CHANNEL_BETA,
     UPDATE_CHANNEL_STABLE,
 )
+from core.dynamic_volume import (
+    DYNAMIC_MODE_ANY_OPEN,
+    DYNAMIC_MODE_FOREGROUND,
+    list_suggested_running_apps,
+    parse_app_list,
+)
 from core.i18n import I18n
 from core.logger import PORTAUDIO_LOCK, silence_stderr
 from core.updater import UpdateCheckWorker
@@ -127,7 +146,14 @@ from ui.themes.cyber_moe import (
     surface_qcolor,
 )
 from ui.update_dialog import UpdateDialog
-from ui.vector_icons import get_update_icon
+from ui.vector_icons import (
+    get_apps_icon,
+    get_folder_icon,
+    get_minus_icon,
+    get_plus_icon,
+    get_refresh_icon,
+    get_update_icon,
+)
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
@@ -416,13 +442,18 @@ class BackToPlayerButton(QPushButton):
 
 class GlassComboDelegate(QStyledItemDelegate):
     """
-    Delegate for GlassComboBox popup items ensuring consistent row heights (>= 28px)
-    across all platforms and font metrics, eliminating vertical text overlapping.
+    Delegate for GlassComboBox popup items ensuring consistent row heights (>= 30px)
+    and clean focus-free painting so selected vs hovered states remain distinct.
     """
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        opt.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, opt, index)
 
     def sizeHint(self, option, index) -> QSize:
         sh = super().sizeHint(option, index)
-        return QSize(sh.width(), max(sh.height(), 28))
+        return QSize(sh.width(), max(sh.height(), 30))
 
 
 class GlassComboBox(QComboBox):
@@ -439,9 +470,14 @@ class GlassComboBox(QComboBox):
         self.setFixedHeight(30)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(1)
 
         list_view = QListView(self)
         list_view.setUniformItemSizes(True)
+        list_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        list_view.setTextElideMode(Qt.TextElideMode.ElideNone)
+        list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         list_view.setItemDelegate(GlassComboDelegate(list_view))
 
         font = QFont()
@@ -473,25 +509,40 @@ class GlassComboBox(QComboBox):
         self._list_view.setStyleSheet(
             f"""
             QListView {{
-                background-color: {PALETTE["bg_surface"]};
-                border: 1px solid {PALETTE["border_highlight"]};
-                border-radius: 8px;
+                background-color: {PALETTE["bg_popover"]};
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                border-radius: 10px;
                 color: {PALETTE["text_primary"]};
                 font-size: 12px;
                 font-weight: 500;
-                selection-background-color: {PALETTE["accent"]};
-                selection-color: {PALETTE["on_accent"]};
-                padding: 4px;
+                selection-background-color: transparent;
+                selection-color: #ffffff;
+                padding: 5px;
                 outline: none;
             }}
             QListView::item {{
-                min-height: 28px;
-                padding: 3px 10px;
-                border-radius: 5px;
+                min-height: 30px;
+                padding: 4px 12px;
+                border-radius: 7px;
+                border: 1px solid transparent;
+                margin: 1px 0px;
+                color: {PALETTE["text_secondary"]};
             }}
-            QListView::item:hover, QListView::item:selected {{
-                background-color: {PALETTE["accent"]};
-                color: {PALETTE["on_accent"]};
+            QListView::item:hover {{
+                background-color: rgba(255, 255, 255, 0.09);
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                color: #ffffff;
+            }}
+            QListView::item:selected {{
+                background-color: {PALETTE["accent_soft"]};
+                border: 1px solid {PALETTE["accent"]};
+                color: #ffffff;
+                font-weight: 600;
+            }}
+            QListView::item:selected:hover {{
+                background-color: {PALETTE["accent_menu_hover"]};
+                border: 1px solid {PALETTE["accent_hover"]};
+                color: #ffffff;
             }}
             """
         )
@@ -514,6 +565,14 @@ class GlassComboBox(QComboBox):
         self.update()
         view = self.view()
         if view is not None:
+            fm = view.fontMetrics()
+            max_item_w = 0
+            for i in range(self.count()):
+                w_item = fm.horizontalAdvance(self.itemText(i))
+                if w_item > max_item_w:
+                    max_item_w = w_item
+            needed_w = max(self.width(), min(360, max_item_w + 42))
+            view.setMinimumWidth(needed_w)
             popup = view.window()
             if popup is not None:
                 popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -628,6 +687,12 @@ class AnimatedToggleSwitch(QCheckBox):
         self._anim_timer.setInterval(16)
         self._anim_timer.timeout.connect(self._tick_anim)
         self.toggled.connect(self._on_toggled)
+
+    def sizeHint(self) -> QSize:
+        return QSize(200, 38)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(120, 38)
 
     def setChecked(self, a0: bool) -> None:
         super().setChecked(a0)
@@ -1118,7 +1183,7 @@ class SettingsDialog(QDialog):
         # ==================== PAGE 0: GENERALE & RIPRODUZIONE ====================
         page_gen = QWidget()
         gen_layout = QVBoxLayout(page_gen)
-        gen_layout.setContentsMargins(0, 2, 0, 2)
+        gen_layout.setContentsMargins(0, 2, 4, 12)
         gen_layout.setSpacing(8)
 
         card_prefs, prefs_lay = self._make_card(self.i18n.t("settings_radio_prefs_section"))
@@ -1303,7 +1368,7 @@ class SettingsDialog(QDialog):
         # ==================== PAGE 1: AUDIO & STREAM ====================
         page_audio = QWidget()
         audio_layout = QVBoxLayout(page_audio)
-        audio_layout.setContentsMargins(0, 2, 0, 2)
+        audio_layout.setContentsMargins(0, 2, 4, 12)
         audio_layout.setSpacing(8)
 
         card_engine, eng_lay = self._make_card(self.i18n.t("settings_audio_engine_section"))
@@ -1354,6 +1419,8 @@ class SettingsDialog(QDialog):
 
         self.btn_audio_refresh = QPushButton(self.i18n.t("settings_audio_refresh"))
         self.btn_audio_refresh.setObjectName("secondaryGlassBtn")
+        self.btn_audio_refresh.setIcon(get_refresh_icon(14))
+        self.btn_audio_refresh.setIconSize(QSize(14, 14))
         self.btn_audio_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_audio_refresh.clicked.connect(
             lambda: self._populate_audio_devices(async_mode=True, force_refresh=True)
@@ -1375,6 +1442,137 @@ class SettingsDialog(QDialog):
 
         audio_layout.addWidget(card_engine)
 
+        card_dynvol, dyn_lay = self._make_card(self.i18n.t("settings_dynamic_volume_section"))
+        self._card_dynvol_hdr = self._layout_first_widget(dyn_lay)
+
+        self.chk_dynamic_volume = AnimatedToggleSwitch(
+            self.i18n.t("settings_dynamic_volume_enable")
+        )
+        def_dyn_on = "true" if DEFAULT_DYNAMIC_VOLUME_ENABLED else "false"
+        self.chk_dynamic_volume.setChecked(
+            self.settings.value(KEY_DYNAMIC_VOLUME_ENABLED, def_dyn_on) == "true"
+        )
+        self.chk_dynamic_volume.setToolTip(self.i18n.t("settings_dynamic_volume_tip"))
+        dyn_lay.addWidget(self.chk_dynamic_volume)
+
+        self.dynvol_options_box = QWidget()
+        dyn_opts_lay = QVBoxLayout(self.dynvol_options_box)
+        dyn_opts_lay.setContentsMargins(0, 4, 0, 2)
+        dyn_opts_lay.setSpacing(6)
+
+        self.cmb_dynamic_volume_mode = GlassComboBox()
+        self.cmb_dynamic_volume_mode.addItem(
+            self.i18n.t("settings_dynamic_volume_mode_any"), userData=DYNAMIC_MODE_ANY_OPEN
+        )
+        self.cmb_dynamic_volume_mode.addItem(
+            self.i18n.t("settings_dynamic_volume_mode_fg"), userData=DYNAMIC_MODE_FOREGROUND
+        )
+        saved_dyn_mode = str(
+            self.settings.value(KEY_DYNAMIC_VOLUME_MODE, DEFAULT_DYNAMIC_VOLUME_MODE)
+            or DEFAULT_DYNAMIC_VOLUME_MODE
+        )
+        for i in range(self.cmb_dynamic_volume_mode.count()):
+            if self.cmb_dynamic_volume_mode.itemData(i) == saved_dyn_mode:
+                self.cmb_dynamic_volume_mode.setCurrentIndex(i)
+                break
+        self.cmb_dynamic_volume_mode.setFixedWidth(combo_w)
+        dyn_mode_row = self._make_field_row(
+            self.i18n.t("settings_dynamic_volume_mode"), self.cmb_dynamic_volume_mode
+        )
+        self._lbl_dynvol_mode = self._layout_first_widget(dyn_mode_row)
+        dyn_opts_lay.addLayout(dyn_mode_row)
+
+        self.spin_dynamic_volume_level = QSpinBox()
+        self.spin_dynamic_volume_level.setRange(5, 90)
+        self.spin_dynamic_volume_level.setSingleStep(5)
+        self.spin_dynamic_volume_level.setSuffix("%")
+        self.spin_dynamic_volume_level.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spin_dynamic_volume_level.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.spin_dynamic_volume_level.setFixedSize(76, 28)
+        self.spin_dynamic_volume_level.setToolTip(self.i18n.t("settings_dynamic_volume_level_tip"))
+        try:
+            saved_dyn_lvl = int(
+                self.settings.value(KEY_DYNAMIC_VOLUME_LEVEL, DEFAULT_DYNAMIC_VOLUME_LEVEL)
+            )
+        except (TypeError, ValueError):
+            saved_dyn_lvl = DEFAULT_DYNAMIC_VOLUME_LEVEL
+        self.spin_dynamic_volume_level.setValue(max(5, min(90, saved_dyn_lvl)))
+
+        self.btn_dynvol_minus = QPushButton()
+        self.btn_dynvol_minus.setObjectName("stepperBtn")
+        self.btn_dynvol_minus.setFixedSize(28, 28)
+        self.btn_dynvol_minus.setIcon(get_minus_icon(13))
+        self.btn_dynvol_minus.setIconSize(QSize(13, 13))
+        self.btn_dynvol_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dynvol_minus.clicked.connect(
+            lambda: self.spin_dynamic_volume_level.setValue(
+                max(5, self.spin_dynamic_volume_level.value() - 5)
+            )
+        )
+
+        self.btn_dynvol_plus = QPushButton()
+        self.btn_dynvol_plus.setObjectName("stepperBtn")
+        self.btn_dynvol_plus.setFixedSize(28, 28)
+        self.btn_dynvol_plus.setIcon(get_plus_icon(13))
+        self.btn_dynvol_plus.setIconSize(QSize(13, 13))
+        self.btn_dynvol_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dynvol_plus.clicked.connect(
+            lambda: self.spin_dynamic_volume_level.setValue(
+                min(90, self.spin_dynamic_volume_level.value() + 5)
+            )
+        )
+
+        dyn_lvl_row = QHBoxLayout()
+        dyn_lvl_row.setContentsMargins(0, 0, 0, 0)
+        dyn_lvl_row.setSpacing(6)
+        self._lbl_dynvol_level = QLabel(self.i18n.t("settings_dynamic_volume_level"))
+        self._lbl_dynvol_level.setObjectName("settingsFieldLabel")
+        dyn_lvl_row.addWidget(self._lbl_dynvol_level)
+        dyn_lvl_row.addStretch(1)
+        dyn_lvl_row.addWidget(self.btn_dynvol_minus)
+        dyn_lvl_row.addWidget(self.spin_dynamic_volume_level)
+        dyn_lvl_row.addWidget(self.btn_dynvol_plus)
+        dyn_opts_lay.addLayout(dyn_lvl_row)
+
+        self._lbl_dynvol_apps = QLabel(self.i18n.t("settings_dynamic_volume_apps"))
+        self._lbl_dynvol_apps.setObjectName("settingsFieldLabel")
+        dyn_opts_lay.addWidget(self._lbl_dynvol_apps)
+
+        dyn_apps_row = QHBoxLayout()
+        dyn_apps_row.setContentsMargins(0, 0, 0, 0)
+        dyn_apps_row.setSpacing(6)
+        self.txt_dynamic_volume_apps = QLineEdit(
+            str(
+                self.settings.value(KEY_DYNAMIC_VOLUME_APPS, DEFAULT_DYNAMIC_VOLUME_APPS)
+                or DEFAULT_DYNAMIC_VOLUME_APPS
+            ).strip()
+        )
+        self.txt_dynamic_volume_apps.setPlaceholderText(
+            self.i18n.t("settings_dynamic_volume_apps_placeholder")
+        )
+        self.txt_dynamic_volume_apps.setToolTip(self.i18n.t("settings_dynamic_volume_apps_tip"))
+        self.txt_dynamic_volume_apps.setFixedHeight(32)
+        dyn_apps_row.addWidget(self.txt_dynamic_volume_apps, 1)
+
+        self.btn_pick_dynamic_app = QPushButton(self.i18n.t("settings_dynamic_volume_pick_app"))
+        self.btn_pick_dynamic_app.setObjectName("secondaryGlassBtn")
+        self.btn_pick_dynamic_app.setIcon(get_apps_icon(14))
+        self.btn_pick_dynamic_app.setIconSize(QSize(14, 14))
+        self.btn_pick_dynamic_app.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pick_dynamic_app.clicked.connect(self._on_pick_dynamic_app_clicked)
+        dyn_apps_row.addWidget(self.btn_pick_dynamic_app)
+        dyn_opts_lay.addLayout(dyn_apps_row)
+
+        self._dynvol_anim: Optional[QVariantAnimation] = None
+        self._dynvol_opacity: Optional[QGraphicsOpacityEffect] = None
+        self._set_dynvol_options_expanded(self.chk_dynamic_volume.isChecked(), animate=False)
+        self.chk_dynamic_volume.toggled.connect(
+            lambda checked: self._set_dynvol_options_expanded(checked, animate=True)
+        )
+        dyn_lay.addWidget(self.dynvol_options_box)
+
+        audio_layout.addWidget(card_dynvol)
+
         card_net, net_lay = self._make_card(self.i18n.t("settings_network_libvlc_section"))
         net_hdr_item = net_lay.itemAt(0)
         self._card_net_hdr = net_hdr_item.widget() if net_hdr_item is not None else None
@@ -1387,9 +1585,11 @@ class SettingsDialog(QDialog):
         nc_row.addWidget(self._lbl_network_caching)
         nc_row.addStretch(1)
 
-        btn_nc_minus = QPushButton("−")
+        btn_nc_minus = QPushButton()
         btn_nc_minus.setObjectName("stepperBtn")
         btn_nc_minus.setFixedSize(28, 28)
+        btn_nc_minus.setIcon(get_minus_icon(13))
+        btn_nc_minus.setIconSize(QSize(13, 13))
         btn_nc_minus.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.spin_network_caching = QSpinBox()
@@ -1404,9 +1604,11 @@ class SettingsDialog(QDialog):
         except Exception:
             self.spin_network_caching.setValue(1000)
 
-        btn_nc_plus = QPushButton("+")
+        btn_nc_plus = QPushButton()
         btn_nc_plus.setObjectName("stepperBtn")
         btn_nc_plus.setFixedSize(28, 28)
+        btn_nc_plus.setIcon(get_plus_icon(13))
+        btn_nc_plus.setIconSize(QSize(13, 13))
         btn_nc_plus.setCursor(Qt.CursorShape.PointingHandCursor)
 
         btn_nc_minus.clicked.connect(
@@ -1434,10 +1636,13 @@ class SettingsDialog(QDialog):
         path_row.setSpacing(6)
         self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ""))
         self.txt_vlc_path.setPlaceholderText(self.i18n.t("settings_vlc_path_placeholder"))
+        self.txt_vlc_path.setFixedHeight(32)
         path_row.addWidget(self.txt_vlc_path, 1)
 
         self.btn_browse = QPushButton(self.i18n.t("settings_browse"))
         self.btn_browse.setObjectName("secondaryGlassBtn")
+        self.btn_browse.setIcon(get_folder_icon(14, "#e2e6f3"))
+        self.btn_browse.setIconSize(QSize(14, 14))
         self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_browse.clicked.connect(self._browse_vlc_path)
         path_row.addWidget(self.btn_browse)
@@ -1450,7 +1655,7 @@ class SettingsDialog(QDialog):
         # ==================== PAGE 2: TRAY & CONSOLE ====================
         page_sys = QWidget()
         sys_layout = QVBoxLayout(page_sys)
-        sys_layout.setContentsMargins(0, 2, 0, 2)
+        sys_layout.setContentsMargins(0, 2, 4, 12)
         sys_layout.setSpacing(8)
 
         card_tray, tray_lay = self._make_card(self.i18n.t("settings_tray_section"))
@@ -1681,7 +1886,7 @@ class SettingsDialog(QDialog):
         scroll.setObjectName("settingsPageScroll")
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setMinimumSize(0, 0)
         scroll.setWidget(page)
         self.pages.addWidget(scroll)
@@ -1887,6 +2092,7 @@ class SettingsDialog(QDialog):
                     ("_card_theme_hdr", "settings_appearance_section"),
                     ("_card_play_hdr", "settings_playback_section"),
                     ("_card_engine_hdr", "settings_audio_engine_section"),
+                    ("_card_dynvol_hdr", "settings_dynamic_volume_section"),
                     ("_card_net_hdr", "settings_network_libvlc_section"),
                     ("_card_tray_hdr", "settings_tray_section"),
                     ("_card_dev_hdr", "settings_dev_console_section"),
@@ -1906,6 +2112,9 @@ class SettingsDialog(QDialog):
                     ("_lbl_format", "settings_format"),
                     ("_lbl_audio_backend", "settings_audio_backend"),
                     ("_lbl_audio_output", "settings_audio_output"),
+                    ("_lbl_dynvol_mode", "settings_dynamic_volume_mode"),
+                    ("_lbl_dynvol_level", "settings_dynamic_volume_level"),
+                    ("_lbl_dynvol_apps", "settings_dynamic_volume_apps"),
                     ("_lbl_network_caching", "settings_network_caching"),
                     ("_lbl_vlc_path", "settings_vlc_path"),
                     ("_lbl_update_channel", "updates_channel_label"),
@@ -1958,6 +2167,26 @@ class SettingsDialog(QDialog):
                     self._lbl_force_audio_reset.setText(self.i18n.t("tt_force_stop"))
                 self.btn_force_audio_reset.setText(self.i18n.t("settings_force_reset_audio_btn"))
                 self.btn_force_audio_reset.setToolTip(self.i18n.t("settings_force_reset_audio_tip"))
+                if hasattr(self, "chk_dynamic_volume"):
+                    self.chk_dynamic_volume.setText(self.i18n.t("settings_dynamic_volume_enable"))
+                    self.chk_dynamic_volume.setToolTip(self.i18n.t("settings_dynamic_volume_tip"))
+                    for i, mode_key in enumerate(
+                        ("settings_dynamic_volume_mode_any", "settings_dynamic_volume_mode_fg")
+                    ):
+                        if i < self.cmb_dynamic_volume_mode.count():
+                            self.cmb_dynamic_volume_mode.setItemText(i, self.i18n.t(mode_key))
+                    self.spin_dynamic_volume_level.setToolTip(
+                        self.i18n.t("settings_dynamic_volume_level_tip")
+                    )
+                    self.txt_dynamic_volume_apps.setPlaceholderText(
+                        self.i18n.t("settings_dynamic_volume_apps_placeholder")
+                    )
+                    self.txt_dynamic_volume_apps.setToolTip(
+                        self.i18n.t("settings_dynamic_volume_apps_tip")
+                    )
+                    self.btn_pick_dynamic_app.setText(
+                        self.i18n.t("settings_dynamic_volume_pick_app")
+                    )
                 self.txt_vlc_path.setPlaceholderText(self.i18n.t("settings_vlc_path_placeholder"))
                 self.btn_browse.setText(self.i18n.t("settings_browse"))
 
@@ -2049,6 +2278,35 @@ class SettingsDialog(QDialog):
                     if self.cmb_audio_backend.currentIndex() != i:
                         self.cmb_audio_backend.setCurrentIndex(i)
                     break
+            if hasattr(self, "chk_dynamic_volume"):
+                def_dyn_on = "true" if DEFAULT_DYNAMIC_VOLUME_ENABLED else "false"
+                dyn_on = self.settings.value(KEY_DYNAMIC_VOLUME_ENABLED, def_dyn_on) == "true"
+                self.chk_dynamic_volume.blockSignals(True)
+                self.chk_dynamic_volume.setChecked(dyn_on)
+                self.chk_dynamic_volume.blockSignals(False)
+                self._set_dynvol_options_expanded(dyn_on, animate=False)
+                saved_dyn_mode = str(
+                    self.settings.value(KEY_DYNAMIC_VOLUME_MODE, DEFAULT_DYNAMIC_VOLUME_MODE)
+                    or DEFAULT_DYNAMIC_VOLUME_MODE
+                )
+                for i in range(self.cmb_dynamic_volume_mode.count()):
+                    if self.cmb_dynamic_volume_mode.itemData(i) == saved_dyn_mode:
+                        if self.cmb_dynamic_volume_mode.currentIndex() != i:
+                            self.cmb_dynamic_volume_mode.setCurrentIndex(i)
+                        break
+                try:
+                    saved_dyn_lvl = int(
+                        self.settings.value(KEY_DYNAMIC_VOLUME_LEVEL, DEFAULT_DYNAMIC_VOLUME_LEVEL)
+                    )
+                except (TypeError, ValueError):
+                    saved_dyn_lvl = DEFAULT_DYNAMIC_VOLUME_LEVEL
+                self.spin_dynamic_volume_level.setValue(max(5, min(90, saved_dyn_lvl)))
+                self.txt_dynamic_volume_apps.setText(
+                    str(
+                        self.settings.value(KEY_DYNAMIC_VOLUME_APPS, DEFAULT_DYNAMIC_VOLUME_APPS)
+                        or DEFAULT_DYNAMIC_VOLUME_APPS
+                    ).strip()
+                )
             self.chk_autoplay.setChecked(self.settings.value(KEY_AUTOPLAY, "false") == "true")
             self.chk_discord_rpc.setChecked(
                 self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
@@ -2355,6 +2613,26 @@ class SettingsDialog(QDialog):
             "tray_notifications": self.chk_tray_notifications.isChecked(),
             "audio_backend": self.cmb_audio_backend.currentData() or "auto",
             "audio_device": self.cmb_audio_device.currentData(),
+            "dynamic_volume_enabled": (
+                self.chk_dynamic_volume.isChecked()
+                if hasattr(self, "chk_dynamic_volume")
+                else DEFAULT_DYNAMIC_VOLUME_ENABLED
+            ),
+            "dynamic_volume_mode": (
+                self.cmb_dynamic_volume_mode.currentData()
+                if hasattr(self, "cmb_dynamic_volume_mode")
+                else DEFAULT_DYNAMIC_VOLUME_MODE
+            ),
+            "dynamic_volume_level": (
+                self.spin_dynamic_volume_level.value()
+                if hasattr(self, "spin_dynamic_volume_level")
+                else DEFAULT_DYNAMIC_VOLUME_LEVEL
+            ),
+            "dynamic_volume_apps": (
+                self.txt_dynamic_volume_apps.text().strip()
+                if hasattr(self, "txt_dynamic_volume_apps")
+                else DEFAULT_DYNAMIC_VOLUME_APPS
+            ),
             "update_startup": (
                 self.chk_update_startup.isChecked() if hasattr(self, "chk_update_startup") else True
             ),
@@ -2435,6 +2713,213 @@ class SettingsDialog(QDialog):
             self._restore_persisted_theme()
         self._accepted_close = False
         super().closeEvent(a0)
+
+    def _set_dynvol_options_expanded(self, expanded: bool, animate: bool = True) -> None:
+        if not hasattr(self, "dynvol_options_box"):
+            return
+        box = self.dynvol_options_box
+        prev_anim = getattr(self, "_dynvol_anim", None)
+        if prev_anim is not None:
+            try:
+                prev_anim.stop()
+                prev_anim.deleteLater()
+            except Exception:
+                pass
+            self._dynvol_anim = None
+
+        lay = box.layout()
+        target_h = lay.sizeHint().height() if lay is not None else box.sizeHint().height()
+        target_h = max(target_h, box.sizeHint().height(), 134)
+
+        if not animate:
+            box.setGraphicsEffect(None)
+            self._dynvol_opacity = None
+            box.setMaximumHeight(16777215 if expanded else 0)
+            box.setVisible(expanded)
+            return
+
+        effect = box.graphicsEffect()
+        if not isinstance(effect, QGraphicsOpacityEffect):
+            effect = QGraphicsOpacityEffect(box)
+            box.setGraphicsEffect(effect)
+        self._dynvol_opacity = effect
+
+        if expanded:
+            start_h = box.height() if box.isVisible() else 0
+            box.setMaximumHeight(start_h)
+            effect.setOpacity(0.0 if start_h == 0 else effect.opacity())
+            box.setVisible(True)
+            start_p, end_p = 0.0, 1.0
+        else:
+            start_h = box.height() if box.isVisible() else target_h
+            box.setMaximumHeight(start_h)
+            effect.setOpacity(1.0)
+            start_p, end_p = 1.0, 0.0
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(220)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.setStartValue(start_p)
+        anim.setEndValue(end_p)
+
+        def _on_step(val: object) -> None:
+            p = float(val) if isinstance(val, (int, float)) else 1.0
+            box.setMaximumHeight(max(0, int(round(target_h * p))))
+            effect.setOpacity(max(0.0, min(1.0, p)))
+
+        def _on_done() -> None:
+            self._dynvol_anim = None
+            box.setGraphicsEffect(None)
+            self._dynvol_opacity = None
+            if expanded:
+                box.setMaximumHeight(16777215)
+                box.setVisible(True)
+            else:
+                box.setMaximumHeight(0)
+                box.setVisible(False)
+
+        anim.valueChanged.connect(_on_step)
+        anim.finished.connect(_on_done)
+        self._dynvol_anim = anim
+        anim.start()
+
+    def _on_pick_dynamic_app_clicked(self) -> None:
+        if not hasattr(self, "txt_dynamic_volume_apps") or not hasattr(
+            self, "btn_pick_dynamic_app"
+        ):
+            return
+        prev_popup = getattr(self, "_dynamic_app_popup", None)
+        if prev_popup is not None:
+            try:
+                prev_popup.close()
+                prev_popup.deleteLater()
+            except Exception:
+                pass
+
+        existing = parse_app_list(self.txt_dynamic_volume_apps.text())
+        candidates = list_suggested_running_apps(exclude_names=existing)
+
+        popup = QFrame(
+            self,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
+        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup_lay = QVBoxLayout(popup)
+        popup_lay.setContentsMargins(0, 0, 0, 0)
+        popup_lay.setSpacing(0)
+
+        list_w = QListWidget(popup)
+        list_w.setObjectName("dynamicAppPickerList")
+        list_w.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        list_w.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        list_w.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        list_w.setTextElideMode(Qt.TextElideMode.ElideRight)
+        list_w.setUniformItemSizes(True)
+        list_w.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        list_w.setStyleSheet(
+            f"""
+            QListWidget {{
+                background-color: {PALETTE["bg_popover"]};
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                border-radius: 10px;
+                padding: 5px;
+                color: {PALETTE["text_primary"]};
+                font-size: 12px;
+                font-weight: 500;
+                outline: none;
+            }}
+            QListWidget::item {{
+                min-height: 28px;
+                padding: 3px 12px;
+                border-radius: 7px;
+                border: 1px solid transparent;
+                color: {PALETTE["text_secondary"]};
+            }}
+            QListWidget::item:hover {{
+                background-color: rgba(255, 255, 255, 0.09);
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                color: #ffffff;
+            }}
+            QListWidget::item:disabled {{
+                color: {PALETTE["text_muted"]};
+                background: transparent;
+                border-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 6px;
+                margin: 4px 2px 4px 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 0.22);
+                border-radius: 3px;
+                min-height: 24px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(255, 255, 255, 0.36);
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                height: 0px;
+                background: transparent;
+            }}
+            """
+        )
+
+        if not candidates:
+            empty_item = QListWidgetItem(self.i18n.t("settings_dynamic_volume_no_apps"))
+            empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty_item.setSizeHint(QSize(0, 32))
+            list_w.addItem(empty_item)
+        else:
+            for app_name in candidates:
+                item = QListWidgetItem(app_name)
+                item.setData(Qt.ItemDataRole.UserRole, app_name)
+                item.setSizeHint(QSize(0, 30))
+                list_w.addItem(item)
+
+        def _pick_item(clicked_item: QListWidgetItem) -> None:
+            if not (clicked_item.flags() & Qt.ItemFlag.ItemIsEnabled):
+                return
+            picked = str(clicked_item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            if picked:
+                cur_existing = parse_app_list(self.txt_dynamic_volume_apps.text())
+                updated = parse_app_list(
+                    f"{self.txt_dynamic_volume_apps.text()}, {picked}" if cur_existing else picked
+                )
+                self.txt_dynamic_volume_apps.setText(", ".join(updated))
+            popup.close()
+
+        list_w.itemClicked.connect(_pick_item)
+        popup_lay.addWidget(list_w)
+
+        row_count = max(1, list_w.count())
+        max_popup_h = 236
+        content_h = row_count * (32 if not candidates else 30) + 12
+        popup_h = min(max_popup_h, max(44, content_h))
+        popup_w = max(230, min(320, self.btn_pick_dynamic_app.width() + 56))
+        popup.resize(popup_w, popup_h)
+
+        anchor = self.btn_pick_dynamic_app.mapToGlobal(
+            QPoint(0, self.btn_pick_dynamic_app.height())
+        )
+        pos_x = anchor.x() + self.btn_pick_dynamic_app.width() - popup_w
+        pos_y = anchor.y() + 4
+        screen = self.btn_pick_dynamic_app.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            if pos_y + popup_h > avail.bottom():
+                above_y = self.btn_pick_dynamic_app.mapToGlobal(QPoint(0, 0)).y() - popup_h - 4
+                if above_y >= avail.top():
+                    pos_y = above_y
+            pos_x = max(avail.left() + 4, min(pos_x, avail.right() - popup_w - 4))
+            pos_y = max(avail.top() + 4, min(pos_y, avail.bottom() - popup_h - 4))
+
+        self._dynamic_app_popup = popup
+        popup.move(pos_x, pos_y)
+        popup.show()
 
     def _on_force_audio_reset_clicked(self) -> None:
         host = self._host_window or self.window()
@@ -2528,6 +3013,23 @@ class SettingsDialog(QDialog):
             )
         except Exception:
             pass
+        if hasattr(self, "chk_dynamic_volume"):
+            self.settings.setValue(
+                KEY_DYNAMIC_VOLUME_ENABLED,
+                "true" if self.chk_dynamic_volume.isChecked() else "false",
+            )
+            self.settings.setValue(
+                KEY_DYNAMIC_VOLUME_MODE,
+                self.cmb_dynamic_volume_mode.currentData() or DEFAULT_DYNAMIC_VOLUME_MODE,
+            )
+            self.settings.setValue(
+                KEY_DYNAMIC_VOLUME_LEVEL,
+                int(self.spin_dynamic_volume_level.value()),
+            )
+            self.settings.setValue(
+                KEY_DYNAMIC_VOLUME_APPS,
+                self.txt_dynamic_volume_apps.text().strip(),
+            )
         try:
             if self._devices_populated:
                 idx_data = self.cmb_audio_device.currentData()

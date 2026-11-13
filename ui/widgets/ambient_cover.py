@@ -311,7 +311,7 @@ class LiveEqualizerBadge(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setFixedSize(78, 24)
+        self.setFixedSize(72, 24)
         self._playing = False
         self._phase = 0.0
         self._accent = QColor(PALETTE["accent"])
@@ -365,7 +365,7 @@ class LiveEqualizerBadge(QWidget):
         # 4 equalizer bars on the left side of the pill
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(bar_col)
-        base_x = 10.0
+        base_x = 9.0
         cy = h / 2.0
         freqs = [1.0, 1.45, 0.85, 1.25]
         offsets = [0.0, 1.2, 2.5, 0.7]
@@ -385,7 +385,7 @@ class LiveEqualizerBadge(QWidget):
         painter.setFont(font)
         painter.setPen(text_col)
         painter.drawText(
-            QRectF(27.0, 0.0, w - 31.0, h),
+            QRectF(26.0, 0.0, w - 30.0, h),
             Qt.AlignmentFlag.AlignCenter,
             label,
         )

@@ -684,6 +684,33 @@ class PlaybackControls(QFrame):
         self.volume_label.setText(f"{value}%")
         self.speaker_btn.set_volume_state(value, self._is_muted)
 
+    def set_volume_display(
+        self, effective_pct: int, is_ducked: bool = False, tooltip: str = ""
+    ) -> None:
+        """Update the volume badge text and optional ducking accent without moving the slider."""
+        pct = max(0, min(100, int(effective_pct)))
+        self.volume_label.setText(f"{pct}%")
+        if is_ducked:
+            accent = PALETTE["accent"]
+            self.volume_label.setStyleSheet(
+                "background: rgba(236, 24, 108, 0.18);"
+                f" border: 1px solid {accent};"
+                " border-radius: 7px; padding: 2px 4px; color: #ffffff;"
+                " font-size: 11px; font-weight: 700;"
+            )
+            tip = tooltip or f"{pct}%"
+            self.volume_label.setToolTip(tip)
+            self.volume_slider.setToolTip(tip)
+        else:
+            self.volume_label.setStyleSheet(
+                "background: rgba(255, 255, 255, 0.06);"
+                " border: 1px solid rgba(255, 255, 255, 0.12);"
+                " border-radius: 7px; padding: 2px 4px; color: #e2e6f3;"
+                " font-size: 11px; font-weight: 700;"
+            )
+            self.volume_label.setToolTip("")
+            self.volume_slider.setToolTip(tooltip or f"{self.volume_slider.value()}%")
+
     def set_muted(self, muted: bool) -> None:
         self._is_muted = muted
         self.speaker_btn.setChecked(muted)
