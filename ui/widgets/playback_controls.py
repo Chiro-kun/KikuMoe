@@ -12,10 +12,8 @@ from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
-    QFont,
     QLinearGradient,
     QPainter,
-    QPainterPath,
     QPen,
     QPolygonF,
     QRadialGradient,
@@ -316,64 +314,6 @@ class StopButton(AnimatedVectorButton):
         painter.end()
 
 
-class ForceStopButton(AnimatedVectorButton):
-    """
-    36x36px circular Force Reset button:
-    - At rest: monochrome neutral gray (no color)
-    - On hover / press: vibrant magenta highlight
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None, size: int = 36):
-        super().__init__(parent)
-        self._active = False
-        self.setFixedSize(size, size)
-
-    def set_active(self, active: bool) -> None:
-        if self._active != active:
-            self._active = active
-            self.update()
-
-    def paintEvent(self, a0) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w = float(self.width())
-        h = float(self.height())
-        cx = w / 2.0
-        cy = h / 2.0
-        r = (w / 2.0) - 2.0
-
-        self._apply_scale_and_ripple(painter, cx, cy, r, QColor(PALETTE["accent"]))
-
-        if self._hover or self._pressed:
-            bg = accent_qcolor(45 if self._pressed else 30)
-            border = accent_qcolor(150)
-            bolt_col = QColor("#ffffff")
-        else:
-            bg = QColor(255, 255, 255, 12)
-            border = QColor(255, 255, 255, 24)
-            bolt_col = QColor("#b0b7cc" if self._active else "#6e748a")
-
-        painter.setBrush(bg)
-        painter.setPen(QPen(border, 1.0))
-        painter.drawEllipse(QPointF(cx, cy), r, r)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(bolt_col)
-        bolt = QPolygonF(
-            [
-                QPointF(cx + 1.5, cy - 7.0),
-                QPointF(cx - 4.5, cy + 0.8),
-                QPointF(cx - 0.3, cy + 0.8),
-                QPointF(cx - 1.8, cy + 7.0),
-                QPointF(cx + 4.5, cy - 0.8),
-                QPointF(cx + 0.3, cy - 0.8),
-            ]
-        )
-        painter.drawPolygon(bolt)
-        painter.end()
-
-
 class PrevButton(AnimatedVectorButton):
     """36x36px circular Previous Track button."""
 
@@ -502,152 +442,6 @@ class QueueButton(AnimatedVectorButton):
         painter.end()
 
 
-class SleepButton(AnimatedVectorButton):
-    """
-    42px circular button (or 88px pill when countdown is active):
-    - Active (ONLY when sleep timer countdown is running): colored magenta moon & border
-    - Inactive (when timer is off): monochrome neutral gray
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self._active = False
-        self._drawer_open = True
-        self._countdown_text = ""
-        self.setFixedSize(42, 42)
-
-    def set_drawer_open(self, is_open: bool) -> None:
-        if self._drawer_open != is_open:
-            self._drawer_open = is_open
-            self.update()
-
-    def set_countdown(self, active: bool, text: str = "") -> None:
-        self._active = active
-        self._countdown_text = text
-        if active and text:
-            self.setFixedSize(88, 42)
-        else:
-            self.setFixedSize(42, 42)
-        self.update()
-
-    def paintEvent(self, a0) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w = float(self.width())
-        h = float(self.height())
-        cx_btn = w / 2.0
-        cy = h / 2.0
-        radius = (h - 3.0) / 2.0
-        rect = QRectF(1.5, 1.5, w - 3.0, h - 3.0)
-        is_colored = self._active
-
-        self._apply_scale_and_ripple(painter, cx_btn, cy, radius, QColor(PALETTE["accent"]))
-
-        if is_colored:
-            bg = accent_qcolor(52 if self._hover else 36)
-            border = QColor(PALETTE["accent"])
-            icon_col = QColor("#ffffff" if self._hover else PALETTE["accent_hover"])
-        elif self._hover or self._pressed:
-            bg = accent_qcolor(28)
-            border = accent_qcolor(120)
-            icon_col = QColor("#ffffff")
-        else:
-            bg = QColor(255, 255, 255, 12)
-            border = QColor(255, 255, 255, 24)
-            icon_col = QColor("#9ea4ba" if self._drawer_open else "#6e748a")
-
-        painter.setBrush(bg)
-        painter.setPen(QPen(border, 1.0))
-        painter.drawRoundedRect(rect, radius, radius)
-
-        cx = 18.0 if (self._active and self._countdown_text) else w / 2.0
-        r_outer = 6.5
-        outer_path = QPainterPath()
-        outer_path.addEllipse(QPointF(cx, cy), r_outer, r_outer)
-
-        cut_path = QPainterPath()
-        cut_path.addEllipse(QPointF(cx + 3.2, cy - 2.2), r_outer * 0.88, r_outer * 0.88)
-
-        moon_path = outer_path.subtracted(cut_path)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(icon_col)
-        painter.drawPath(moon_path)
-
-        if self._active and self._countdown_text:
-            painter.setPen(QColor("#ffffff"))
-            font = QFont(self.font())
-            font.setPixelSize(11)
-            font.setBold(True)
-            painter.setFont(font)
-            text_rect = QRectF(30.0, 0.0, w - 36.0, h)
-            painter.drawText(
-                text_rect,
-                Qt.AlignmentFlag.AlignCenter,
-                self._countdown_text,
-            )
-
-        painter.end()
-
-
-class AutoplayPillButton(AnimatedVectorButton):
-    """
-    48x36px sculpted LED toggle pill button ('AUTO'):
-    - Active (checked): colored magenta border, green/magenta dot, bright text
-    - Inactive (unchecked): monochrome neutral gray
-    """
-
-    def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.setCheckable(True)
-        self.setFixedSize(48, 36)
-
-    def paintEvent(self, a0) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        w = float(self.width())
-        h = float(self.height())
-        cx = w / 2.0
-        cy = h / 2.0
-        rect = QRectF(1.5, 1.5, w - 3.0, h - 3.0)
-        radius = (h - 3.0) / 2.0
-        checked = self.isChecked()
-
-        self._apply_scale_and_ripple(painter, cx, cy, radius, QColor(PALETTE["accent"]))
-
-        if checked:
-            bg = accent_qcolor(48 if self._hover else 34)
-            border = QColor(PALETTE["accent"])
-            text_col = QColor("#ffffff")
-            dot_col = QColor(PALETTE["accent_hover"])
-        else:
-            bg = QColor(255, 255, 255, 22 if self._hover else 10)
-            border = QColor(255, 255, 255, 48 if self._hover else 22)
-            text_col = QColor("#c4c9dc" if self._hover else "#6e748a")
-            dot_col = QColor("#6e748a")
-
-        painter.setBrush(bg)
-        painter.setPen(QPen(border, 1.0))
-        painter.drawRoundedRect(rect, radius, radius)
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(dot_col)
-        painter.drawEllipse(QPointF(11.0, cy), 2.4, 2.4)
-
-        font = QFont(self.font())
-        font.setPixelSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(text_col)
-        painter.drawText(
-            QRectF(15.0, 0.0, w - 18.0, h),
-            Qt.AlignmentFlag.AlignCenter,
-            "AUTO",
-        )
-        painter.end()
-
-
 class SpeakerButton(AnimatedVectorButton):
     """
     Dynamic Speaker Button with optically centered speaker + sound wave geometry:
@@ -736,7 +530,6 @@ class PlaybackControls(QFrame):
     next_clicked = pyqtSignal()
     queue_clicked = pyqtSignal()
     force_stop_clicked = pyqtSignal()
-    sleep_toggle_clicked = pyqtSignal()
     volume_changed = pyqtSignal(int)
     mute_toggled = pyqtSignal(bool)
     autoplay_toggled = pyqtSignal(bool)
@@ -755,14 +548,10 @@ class PlaybackControls(QFrame):
         root.setContentsMargins(14, 10, 14, 10)
         root.setSpacing(8)
 
-        # 1. Sculpted Transport Deck: [Force ⚡]  [Stop ⏹]  ( HERO PLAY )  [Sleep 🌙]  [● AUTO]
+        # 1. Symmetric Transport Deck: [Stop] [Prev]  ( HERO PLAY )  [Next] [Queue]
         transport_row = QHBoxLayout()
         transport_row.setContentsMargins(0, 0, 0, 0)
-        transport_row.setSpacing(12)
-
-        self.btn_force_stop = ForceStopButton(size=36)
-        self.btn_force_stop.setToolTip(self._i18n.t("tt_force_stop"))
-        self.btn_force_stop.clicked.connect(self.force_stop_clicked.emit)
+        transport_row.setSpacing(0)
 
         self.btn_stop = StopButton(size=42)
         self.btn_stop.setToolTip(self._i18n.t("tt_stop_shortcut"))
@@ -786,31 +575,30 @@ class PlaybackControls(QFrame):
         self.btn_queue.setToolTip(self._i18n.t("tt_queue"))
         self.btn_queue.clicked.connect(self.queue_clicked.emit)
 
-        self.btn_sleep = SleepButton()
-        self.btn_sleep.setToolTip(self._i18n.t("tt_sleep_timer"))
-        self.btn_sleep.clicked.connect(self.sleep_toggle_clicked.emit)
-
-        self.btn_autoplay = AutoplayPillButton()
-        self.btn_autoplay.setToolTip(self._i18n.t("tt_autoplay"))
-        self.btn_autoplay.toggled.connect(self._on_autoplay_pill_toggled)
-
         # Keep hidden QCheckBox for full backward compatibility
         self.chk_autoplay = QCheckBox(self._i18n.t("settings_autoplay"))
         self.chk_autoplay.setVisible(False)
         self.chk_autoplay.toggled.connect(self._on_chk_autoplay_toggled)
 
-        transport_row.addStretch(1)
-        transport_row.addWidget(self.btn_force_stop)
-        transport_row.addWidget(self.btn_stop)
-        transport_row.addWidget(self.btn_prev)
-        transport_row.addSpacing(2)
+        left_wing = QHBoxLayout()
+        left_wing.setContentsMargins(0, 0, 0, 0)
+        left_wing.setSpacing(12)
+        left_wing.addStretch(1)
+        left_wing.addWidget(self.btn_stop)
+        left_wing.addWidget(self.btn_prev)
+        left_wing.addSpacing(2)
+
+        right_wing = QHBoxLayout()
+        right_wing.setContentsMargins(0, 0, 0, 0)
+        right_wing.setSpacing(12)
+        right_wing.addSpacing(2)
+        right_wing.addWidget(self.btn_next)
+        right_wing.addWidget(self.btn_queue)
+        right_wing.addStretch(1)
+
+        transport_row.addLayout(left_wing, 1)
         transport_row.addWidget(self.hero_play)
-        transport_row.addSpacing(2)
-        transport_row.addWidget(self.btn_next)
-        transport_row.addWidget(self.btn_queue)
-        transport_row.addWidget(self.btn_sleep)
-        transport_row.addWidget(self.btn_autoplay)
-        transport_row.addStretch(1)
+        transport_row.addLayout(right_wing, 1)
 
         root.addLayout(transport_row)
 
@@ -857,13 +645,11 @@ class PlaybackControls(QFrame):
     def apply_translations(self, i18n: I18n) -> None:
         """Update control tooltips and labels to match ``i18n``."""
         self._i18n = i18n
-        self.btn_force_stop.setToolTip(i18n.t("tt_force_stop"))
         self.btn_stop.setToolTip(i18n.t("tt_stop_shortcut"))
         self.btn_prev.setToolTip(i18n.t("tt_prev_track"))
         self.hero_play.setToolTip(i18n.t("tt_play_pause"))
         self.btn_next.setToolTip(i18n.t("tt_next_track"))
         self.btn_queue.setToolTip(i18n.t("tt_queue"))
-        self.btn_sleep.setToolTip(i18n.t("tt_sleep_timer"))
         self.speaker_btn.setToolTip(i18n.t("tt_mute_toggle"))
         self.set_autoplay_text(i18n.t("settings_autoplay"))
 
@@ -891,7 +677,6 @@ class PlaybackControls(QFrame):
         stream_active = is_playing and not is_paused
         self.hero_play.set_playing_state(is_playing, is_paused)
         self.btn_stop.set_active(stream_active)
-        self.btn_force_stop.set_active(stream_active)
 
     def set_volume(self, value: int) -> None:
         self._volume = value
@@ -905,42 +690,23 @@ class PlaybackControls(QFrame):
         self.speaker_btn.set_volume_state(self.volume_slider.value(), muted)
 
     def set_sleep_countdown(self, active: bool, remaining_sec: int = 0) -> None:
-        if active and remaining_sec > 0:
-            m, s = divmod(max(0, remaining_sec), 60)
-            self.btn_sleep.set_countdown(True, f"{m:02d}:{s:02d}")
-        else:
-            self.btn_sleep.set_countdown(False, "")
+        return
 
     def set_sleep_active(self, active: bool, text: str = "") -> None:
-        self.btn_sleep.set_countdown(active, text)
+        return
 
     def set_sleep_drawer_open(self, is_open: bool) -> None:
-        self.btn_sleep.set_drawer_open(is_open)
+        return
 
     def set_autoplay(self, enabled: bool) -> None:
         self.chk_autoplay.blockSignals(True)
         self.chk_autoplay.setChecked(enabled)
         self.chk_autoplay.blockSignals(False)
-        self.btn_autoplay.blockSignals(True)
-        self.btn_autoplay.setChecked(enabled)
-        self.btn_autoplay.blockSignals(False)
-        self.btn_autoplay.update()
 
     def set_autoplay_text(self, text: str) -> None:
         self.chk_autoplay.setText(text)
-        self.btn_autoplay.setToolTip(text)
-
-    def _on_autoplay_pill_toggled(self, checked: bool) -> None:
-        self.chk_autoplay.blockSignals(True)
-        self.chk_autoplay.setChecked(checked)
-        self.chk_autoplay.blockSignals(False)
-        self.autoplay_toggled.emit(checked)
 
     def _on_chk_autoplay_toggled(self, checked: bool) -> None:
-        self.btn_autoplay.blockSignals(True)
-        self.btn_autoplay.setChecked(checked)
-        self.btn_autoplay.blockSignals(False)
-        self.btn_autoplay.update()
         self.autoplay_toggled.emit(checked)
 
     def set_nav_enabled(self, prev_enabled: bool, next_enabled: bool) -> None:
@@ -955,9 +721,6 @@ class PlaybackControls(QFrame):
         self.btn_next.update()
         self.btn_queue.update()
         self.btn_stop.update()
-        self.btn_force_stop.update()
-        self.btn_sleep.update()
-        self.btn_autoplay.update()
         self.speaker_btn.update()
         self.volume_slider.update()
         self.update()

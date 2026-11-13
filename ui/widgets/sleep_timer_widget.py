@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QFont,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPen,
 )
 from PyQt6.QtWidgets import (
@@ -166,9 +167,88 @@ class _AnimatedCountdownBadge(QLabel):
         painter.end()
 
 
+class _SleepMoonIcon(QWidget):
+    """Crisp crescent moon glyph placed inline inside the SleepTimerWidget header."""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._active = False
+        self.setFixedSize(16, 16)
+
+    def set_active(self, active: bool) -> None:
+        if self._active != bool(active):
+            self._active = bool(active)
+            self.update()
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+        r_outer = 5.8
+        outer_path = QPainterPath()
+        outer_path.addEllipse(QPointF(cx, cy), r_outer, r_outer)
+        cut_path = QPainterPath()
+        cut_path.addEllipse(QPointF(cx + 2.8, cy - 2.0), r_outer * 0.86, r_outer * 0.86)
+        moon_path = outer_path.subtracted(cut_path)
+        col = QColor(PALETTE["accent_hover"] if self._active else "#9aa1b8")
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(col)
+        painter.drawPath(moon_path)
+        painter.end()
+
+
+class _CloseXBtn(_AnimatedSleepBtn):
+    """Subtle circular close button (×) to hide the SleepTimerWidget card."""
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__("", parent)
+        self._hovered = False
+        self.setFixedSize(22, 22)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, a0) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(a0)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w = float(self.width())
+        h = float(self.height())
+        cx = w / 2.0
+        cy = h / 2.0
+        r = (min(w, h) - 2.0) / 2.0
+
+        painter.translate(cx, cy)
+        painter.scale(self._scale, self._scale)
+        painter.translate(-cx, -cy)
+
+        bg = accent_qcolor(42) if self._hovered else QColor(255, 255, 255, 14)
+        border = accent_qcolor(150) if self._hovered else QColor(255, 255, 255, 28)
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.0))
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+
+        x_pen = QPen(QColor("#ffffff" if self._hovered else "#b4bbd1"), 1.65)
+        x_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(x_pen)
+        d = 3.2
+        painter.drawLine(QPointF(cx - d, cy - d), QPointF(cx + d, cy + d))
+        painter.drawLine(QPointF(cx + d, cy - d), QPointF(cx - d, cy + d))
+        painter.end()
+
+
 class SleepTimerWidget(QFrame):
     start_requested = pyqtSignal(int)
     cancel_requested = pyqtSignal()
+    drawer_toggled = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None, i18n: Optional[I18n] = None):
         super().__init__(parent)
@@ -187,10 +267,12 @@ class SleepTimerWidget(QFrame):
         card_layout.setContentsMargins(12, 8, 12, 9)
         card_layout.setSpacing(6)
 
-        # Header Row: Title + Countdown Badge + Close (x)
+        # Header Row: Moon + Title + Countdown Badge + Close Button (×)
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(6)
+
+        self.moon_icon = _SleepMoonIcon(self)
 
         self.title_label = QLabel(self._i18n.t("sleep_timer").upper())
         self.title_label.setObjectName("sectionTitleLabel")
@@ -203,15 +285,12 @@ class SleepTimerWidget(QFrame):
         self.badge_countdown.setObjectName("timeDisplayLabel")
         self.badge_countdown.setVisible(False)
 
-        self.btn_close = _AnimatedSleepBtn("×")
-        self.btn_close.setObjectName("pillButton")
-        self.btn_close.setFixedSize(21, 21)
-        self.btn_close.setStyleSheet(
-            "padding: 0px; border-radius: 10px; font-size: 13px; font-weight: 700;"
-        )
-        self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_close.clicked.connect(lambda: self.setVisible(False))
+        self.btn_close = _CloseXBtn(self)
+        self.btn_close.setToolTip(self._i18n.t("tt_sleep_toggle_drawer"))
+        self.btn_close.clicked.connect(self.close_drawer)
+        self.btn_toggle = self.btn_close
 
+        header_row.addWidget(self.moon_icon)
         header_row.addWidget(self.title_label)
         header_row.addStretch(1)
         header_row.addWidget(self.badge_countdown)
@@ -436,8 +515,15 @@ class SleepTimerWidget(QFrame):
             self.btn_start.setStyleSheet(active_colored_style)
             self.btn_cancel.setStyleSheet(disabled_neutral_style)
 
+    def close_drawer(self) -> None:
+        if self.isVisible():
+            self.setVisible(False)
+        self.drawer_toggled.emit(False)
+
     def toggle_visible(self) -> None:
-        self.setVisible(not self.isVisible())
+        new_vis = not self.isVisible()
+        self.setVisible(new_vis)
+        self.drawer_toggled.emit(new_vis)
 
     def _set_spin_and_start(self, minutes: int) -> None:
         self.spin_minutes.setValue(minutes)
@@ -452,6 +538,7 @@ class SleepTimerWidget(QFrame):
     def set_active_countdown(self, remaining_sec: int) -> None:
         was_active = self._is_active
         self._is_active = True
+        self.moon_icon.set_active(True)
         m, s = divmod(max(0, remaining_sec), 60)
         self.badge_countdown.setText(f"{m:02d}:{s:02d}")
         if not was_active:
@@ -469,6 +556,7 @@ class SleepTimerWidget(QFrame):
     def set_inactive(self) -> None:
         was_active = self._is_active
         self._is_active = False
+        self.moon_icon.set_active(False)
         self.badge_countdown.setVisible(False)
         self.btn_cancel.setEnabled(False)
         self.btn_start.setEnabled(True)
@@ -493,16 +581,21 @@ class SleepTimerWidget(QFrame):
         start_btn: str,
         cancel_btn: str,
         custom_minutes_tip: Optional[str] = None,
+        toggle_tip: Optional[str] = None,
     ) -> None:
         self.title_label.setText(title.upper())
         self.btn_start.setText(start_btn)
         self.btn_cancel.setText(cancel_btn)
         if custom_minutes_tip is not None:
             self.spin_minutes.setToolTip(custom_minutes_tip)
+        if toggle_tip is not None:
+            self.btn_close.setToolTip(toggle_tip)
 
     def refresh_theme(self) -> None:
         self._apply_step_button_styles()
         self._refresh_action_button_styles()
         self._refresh_chip_styles()
+        self.moon_icon.update()
+        self.btn_close.update()
         self.badge_countdown.update()
         self.update()

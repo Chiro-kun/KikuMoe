@@ -126,6 +126,7 @@ KEY_NETWORK_CACHING = "network_caching"
 # New settings keys
 KEY_SLEEP_MINUTES = "sleep_minutes"
 KEY_SLEEP_STOP_ON_END = "sleep_stop_on_end"
+KEY_SHOW_SLEEP_TIMER = "show_sleep_timer"
 KEY_DEV_CONSOLE_ENABLED = "dev_console_enabled"
 KEY_SESSION_TIMER_ENABLED = "session_timer_enabled"
 # Audio output selection

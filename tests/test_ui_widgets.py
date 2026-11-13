@@ -56,12 +56,39 @@ def test_playback_controls(qapp):
     ctrl.set_playing_state(is_playing=True, is_paused=False)
     assert ctrl.hero_play._is_playing is True
     assert ctrl.hero_play._is_paused is False
+    assert not hasattr(ctrl, "btn_force_stop")
+    assert not hasattr(ctrl, "btn_sleep")
+    assert not hasattr(ctrl, "btn_autoplay")
+
+    ctrl.resize(520, ctrl.sizeHint().height())
+    ctrl.show()
+    qapp.processEvents()
+    assert abs(ctrl.hero_play.geometry().center().x() - ctrl.rect().center().x()) <= 1
+    ctrl.close()
 
 
 def test_sleep_timer_widget(qapp):
     timer = SleepTimerWidget()
     timer.set_minutes(45)
     assert timer.get_minutes() == 45
+    assert hasattr(timer, "moon_icon")
+
+    toggled_states = []
+    timer.drawer_toggled.connect(toggled_states.append)
+    timer.show()
+    qapp.processEvents()
+    assert timer.isVisible() is True
+
+    # Clicking × hides the entire SleepTimerWidget block cleanly
+    timer.btn_close.click()
+    qapp.processEvents()
+    assert timer.isVisible() is False
+    assert toggled_states == [False]
+
+    timer.toggle_visible()
+    qapp.processEvents()
+    assert timer.isVisible() is True
+    assert toggled_states == [False, True]
 
     timer.set_active_countdown(1500)
     assert timer._is_active is True
@@ -72,6 +99,7 @@ def test_sleep_timer_widget(qapp):
     timer.set_inactive()
     assert timer._is_active is False
     assert timer.badge_countdown.isVisible() is False
+    timer.close()
 
 
 def test_status_footer(qapp):
@@ -228,8 +256,30 @@ def test_settings_dialog_and_toggles(qapp):
     dlg.pages.setCurrentIndex(1)
     assert dlg.pages.currentIndex() == 1
     assert hasattr(dlg, "chk_autoplay")
+    assert hasattr(dlg, "chk_show_sleep_timer")
     assert hasattr(dlg, "cmb_audio_backend")
+    assert hasattr(dlg, "btn_force_audio_reset")
     assert hasattr(dlg, "btn_ok")
+
+    reset_calls = []
+
+    class DummyResetHost(SettingsDialog.__bases__[0]):
+        def force_stop_all(self):
+            reset_calls.append(True)
+
+    host = DummyResetHost()
+    host.resize(400, 600)
+    host.show()
+    dlg_with_host = SettingsDialog(host, embedded=True)
+    dlg_with_host.resize(400, 600)
+    dlg_with_host.show()
+    qapp.processEvents()
+    dlg_with_host.btn_force_audio_reset.click()
+    assert reset_calls == [True]
+    assert dlg_with_host._apply_toast.isVisible()
+    dlg_with_host.close()
+    host.close()
+    dlg.close()
 
 
 def test_settings_apply_shows_and_restarts_toast(qapp, monkeypatch):
@@ -797,6 +847,57 @@ def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
     title_top = player.now_playing_title.mapTo(player, QPoint(0, 0)).y()
     assert title_top >= cover_bottom
     player.deleteLater()
+
+
+def test_closing_sleep_timer_shrinks_main_window_without_empty_gap(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint, QSettings
+
+    from ui import main_window
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(main_window.ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        main_window.ListenMoePlayer,
+        "_init_system_media",
+        lambda self: setattr(self, "system_media", None),
+    )
+
+    player = main_window.ListenMoePlayer()
+    try:
+        player.show()
+        qapp.processEvents()
+        open_height = player.height()
+        assert open_height >= 700
+        assert player.sleep_timer_widget.isVisible() is True
+
+        player.sleep_timer_widget.btn_close.click()
+        qapp.processEvents()
+
+        assert player.sleep_timer_widget.isVisible() is False
+        assert settings.value("show_sleep_timer") == "false"
+        assert player.height() <= open_height - 90
+        controls_bottom = player.playback_controls.mapTo(
+            player, QPoint(0, player.playback_controls.height())
+        ).y()
+        footer_top = player.status_footer.mapTo(player, QPoint(0, 0)).y()
+        assert footer_top - controls_bottom <= 16
+
+        # Restoring visibility from settings brings height back cleanly
+        settings.setValue("show_sleep_timer", "true")
+        player._sync_sleep_timer_visibility()
+        qapp.processEvents()
+        assert player.sleep_timer_widget.isVisible() is True
+        assert player.height() >= 700
+    finally:
+        player.deleteLater()
 
 
 def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatch):

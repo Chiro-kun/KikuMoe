@@ -86,6 +86,7 @@ from core.constants import (
     KEY_LIBVLC_PATH,
     KEY_NETWORK_CACHING,
     KEY_SESSION_TIMER_ENABLED,
+    KEY_SHOW_SLEEP_TIMER,
     KEY_SLEEP_STOP_ON_END,
     KEY_STATION,
     KEY_THEME,
@@ -1266,6 +1267,13 @@ class SettingsDialog(QDialog):
         self.chk_discord_rpc.toggled.connect(self.discord_id_row.setVisible)
         play_lay.addWidget(self.discord_id_row)
 
+        self.chk_show_sleep_timer = AnimatedToggleSwitch(self.i18n.t("settings_show_sleep_timer"))
+        self.chk_show_sleep_timer.setToolTip(self.i18n.t("settings_show_sleep_timer_tip"))
+        self.chk_show_sleep_timer.setChecked(
+            self.settings.value(KEY_SHOW_SLEEP_TIMER, "true") == "true"
+        )
+        play_lay.addWidget(self.chk_show_sleep_timer)
+
         self.chk_sleep_stop = AnimatedToggleSwitch(self.i18n.t("settings_sleep_stop_on_end"))
         self.chk_sleep_stop.setChecked(self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true")
         play_lay.addWidget(self.chk_sleep_stop)
@@ -1341,6 +1349,18 @@ class SettingsDialog(QDialog):
         )
         audio_dev_row.addWidget(self.btn_audio_refresh)
         eng_lay.addLayout(audio_dev_row)
+
+        self.btn_force_audio_reset = QPushButton(self.i18n.t("settings_force_reset_audio_btn"))
+        self.btn_force_audio_reset.setObjectName("secondaryGlassBtn")
+        self.btn_force_audio_reset.setFixedWidth(combo_w)
+        self.btn_force_audio_reset.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_force_audio_reset.setToolTip(self.i18n.t("settings_force_reset_audio_tip"))
+        self.btn_force_audio_reset.clicked.connect(self._on_force_audio_reset_clicked)
+        force_reset_row = self._make_field_row(
+            self.i18n.t("tt_force_stop"), self.btn_force_audio_reset
+        )
+        self._lbl_force_audio_reset = self._layout_first_widget(force_reset_row)
+        eng_lay.addLayout(force_reset_row)
 
         audio_layout.addWidget(card_engine)
 
@@ -1889,6 +1909,8 @@ class SettingsDialog(QDialog):
                 self.txt_discord_client_id.setPlaceholderText(
                     self.i18n.t("settings_discord_id_placeholder")
                 )
+                self.chk_show_sleep_timer.setText(self.i18n.t("settings_show_sleep_timer"))
+                self.chk_show_sleep_timer.setToolTip(self.i18n.t("settings_show_sleep_timer_tip"))
                 self.chk_sleep_stop.setText(self.i18n.t("settings_sleep_stop_on_end"))
                 self.chk_session_timer.setText(self.i18n.t("settings_session_timer_enable"))
                 self.chk_session_timer.setToolTip(self.i18n.t("settings_session_timer_tip"))
@@ -1906,6 +1928,10 @@ class SettingsDialog(QDialog):
                 if self.cmb_audio_device.count() > 0 and self.cmb_audio_device.itemData(0) is None:
                     self.cmb_audio_device.setItemText(0, self.i18n.t("settings_audio_default"))
                 self.btn_audio_refresh.setText(self.i18n.t("settings_audio_refresh"))
+                if isinstance(self._lbl_force_audio_reset, QLabel):
+                    self._lbl_force_audio_reset.setText(self.i18n.t("tt_force_stop"))
+                self.btn_force_audio_reset.setText(self.i18n.t("settings_force_reset_audio_btn"))
+                self.btn_force_audio_reset.setToolTip(self.i18n.t("settings_force_reset_audio_tip"))
                 self.txt_vlc_path.setPlaceholderText(self.i18n.t("settings_vlc_path_placeholder"))
                 self.btn_browse.setText(self.i18n.t("settings_browse"))
 
@@ -1998,6 +2024,9 @@ class SettingsDialog(QDialog):
                 self.settings.value(KEY_DISCORD_RPC_ENABLED, "false") == "true"
             )
             self.txt_discord_client_id.setText(str(self.settings.value(KEY_DISCORD_CLIENT_ID, "")))
+            self.chk_show_sleep_timer.setChecked(
+                self.settings.value(KEY_SHOW_SLEEP_TIMER, "true") == "true"
+            )
             self.chk_sleep_stop.setChecked(
                 self.settings.value(KEY_SLEEP_STOP_ON_END, "true") == "true"
             )
@@ -2277,6 +2306,7 @@ class SettingsDialog(QDialog):
             "autoplay": self.chk_autoplay.isChecked(),
             "discord_rpc": self.chk_discord_rpc.isChecked(),
             "discord_id": self.txt_discord_client_id.text().strip(),
+            "show_sleep_timer": self.chk_show_sleep_timer.isChecked(),
             "sleep_stop": self.chk_sleep_stop.isChecked(),
             "session_timer": self.chk_session_timer.isChecked(),
             "dev_console": self.chk_dev_console.isChecked(),
@@ -2373,6 +2403,14 @@ class SettingsDialog(QDialog):
         self._accepted_close = False
         super().closeEvent(a0)
 
+    def _on_force_audio_reset_clicked(self) -> None:
+        host = self._host_window or self.window()
+        if host is not None:
+            reset_fn = getattr(host, "force_stop_all", None)
+            if callable(reset_fn):
+                reset_fn()
+        self._show_apply_toast("settings_force_reset_audio_done")
+
     def _on_open_console(self):
         try:
             self._save_settings()
@@ -2404,6 +2442,9 @@ class SettingsDialog(QDialog):
             KEY_DISCORD_RPC_ENABLED, "true" if self.chk_discord_rpc.isChecked() else "false"
         )
         self.settings.setValue(KEY_DISCORD_CLIENT_ID, self.txt_discord_client_id.text().strip())
+        self.settings.setValue(
+            KEY_SHOW_SLEEP_TIMER, "true" if self.chk_show_sleep_timer.isChecked() else "false"
+        )
         self.settings.setValue(
             KEY_SLEEP_STOP_ON_END, "true" if self.chk_sleep_stop.isChecked() else "false"
         )

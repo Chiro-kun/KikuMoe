@@ -94,6 +94,7 @@ from core.constants import (
     KEY_MUTE,
     KEY_NETWORK_CACHING,
     KEY_SESSION_TIMER_ENABLED,
+    KEY_SHOW_SLEEP_TIMER,
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
     KEY_STATION,
@@ -183,6 +184,7 @@ from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 _IS_WIN32 = sys.platform == "win32"
 _IS_LINUX = sys.platform.startswith("linux")
 _MIN_WINDOW_HEIGHT = 700
+_MIN_WINDOW_HEIGHT_COMPACT = 592
 
 
 # Custom Progress Bar with Scrubber Playhead, Gradient Fill & 60 FPS Play/Buffer Animation
@@ -708,6 +710,15 @@ class ListenMoePlayer(QWidget):
             )
             self._icon_app_tray = self._icon_app
 
+    def _effective_min_window_height(self) -> int:
+        sleep_w = getattr(self, "sleep_timer_widget", None)
+        is_visible = (
+            sleep_w.isVisible()
+            if sleep_w is not None
+            else self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
+        )
+        return _MIN_WINDOW_HEIGHT if is_visible else _MIN_WINDOW_HEIGHT_COMPACT
+
     def _init_ui_base(self):
         """
         Sets up the basic window properties such as title, icon, geometry, and main layout.
@@ -716,8 +727,8 @@ class ListenMoePlayer(QWidget):
         # Use custom Cyber-Moe title bar with logo on all platforms (Windows & Linux)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 405, _MIN_WINDOW_HEIGHT
-        self.setMinimumSize(380, _MIN_WINDOW_HEIGHT)
+        fixed_w, fixed_h = 405, self._effective_min_window_height()
+        self.setMinimumSize(380, fixed_h)
         self.resize(fixed_w, fixed_h)
         self.setObjectName("mainWindowRoot")
         self._apply_window_title("")
@@ -1182,7 +1193,6 @@ class ListenMoePlayer(QWidget):
         self.playback_controls.next_clicked.connect(self.play_next_track)
         self.playback_controls.queue_clicked.connect(self.show_local_queue_dialog)
         self.playback_controls.force_stop_clicked.connect(self.force_stop_all)
-        self.playback_controls.sleep_toggle_clicked.connect(self._on_sleep_toggle_clicked)
         self.playback_controls.volume_changed.connect(self.change_volume)
         self.playback_controls.mute_toggled.connect(self.toggle_mute)
         self.playback_controls.autoplay_toggled.connect(self._on_autoplay_toggled)
@@ -1191,7 +1201,6 @@ class ListenMoePlayer(QWidget):
         self.play_button = self.playback_controls.hero_play
         self.pause_button = self.playback_controls.hero_play
         self.stop_button = self.playback_controls.btn_stop
-        self.force_stop_button = self.playback_controls.btn_force_stop
         self.volume_slider = self.playback_controls.volume_slider
         self.mute_button = self.playback_controls.speaker_btn
         self.volume_value_label = self.playback_controls.volume_label
@@ -1233,7 +1242,8 @@ class ListenMoePlayer(QWidget):
         self.sleep_timer_widget = SleepTimerWidget(i18n=self.i18n)
         self.sleep_timer_widget.start_requested.connect(self._on_sleep_start_requested)
         self.sleep_timer_widget.cancel_requested.connect(self.sleep_cancel_clicked)
-        self.sleep_timer_widget.btn_close.clicked.connect(self._sync_window_height_for_sleep_drawer)
+        self.sleep_timer_widget.drawer_toggled.connect(self._on_sleep_drawer_toggled)
+        self.sleep_timer_widget.setVisible(self._get_bool(KEY_SHOW_SLEEP_TIMER, True))
 
         # Backward compatibility attributes
         self.spin_sleep = self.sleep_timer_widget.spin_minutes
@@ -1663,7 +1673,7 @@ class ListenMoePlayer(QWidget):
             self._mini_mode = False
             self.mini_hud.hide()
             self.setMaximumSize(16777215, 16777215)
-            self.setMinimumSize(380, _MIN_WINDOW_HEIGHT)
+            self.setMinimumSize(380, self._effective_min_window_height())
             self._content_widget.show()
             grip = self.findChild(QSizeGrip)
             if grip is not None:
@@ -1821,7 +1831,9 @@ class ListenMoePlayer(QWidget):
         try:
             self.apply_theme()
             self.apply_translations()
-            min_h = max(_MIN_WINDOW_HEIGHT, self.minimumSizeHint().height())
+            effective_min_h = self._effective_min_window_height()
+            self.setMinimumSize(380, effective_min_h)
+            min_h = max(effective_min_h, self.minimumSizeHint().height())
             if self.height() < min_h:
                 self.resize(max(380, self.width()), min_h)
             self.backend_status_refresh.connect(self.update_vlc_status_label)
@@ -2557,13 +2569,40 @@ class ListenMoePlayer(QWidget):
     def _sync_window_height_for_sleep_drawer(self) -> None:
         try:
             if hasattr(self, "sleep_timer_widget"):
-                is_open = self.sleep_timer_widget.isVisible()
-                if hasattr(self, "playback_controls"):
-                    self.playback_controls.set_sleep_drawer_open(is_open)
-                extra = 95 if is_open else 0
-                base_h = 530 + CustomTitleBar.HEIGHT
-                target_h = max(base_h + extra, self.minimumSizeHint().height())
+                effective_min_h = self._effective_min_window_height()
+                self.setMinimumSize(380, effective_min_h)
+                for wid in (
+                    self.sleep_timer_widget,
+                    getattr(self, "_player_stage", None),
+                    getattr(self, "_view_stack", None),
+                    getattr(self, "_body_container", None),
+                    getattr(self, "_content_widget", None),
+                    self,
+                ):
+                    if wid is not None:
+                        wid_layout = wid.layout()
+                        if wid_layout is not None:
+                            wid_layout.activate()
+                        wid.updateGeometry()
+                target_h = max(effective_min_h, self.minimumSizeHint().height())
                 self.resize(self.width(), target_h)
+        except Exception:
+            pass
+
+    def _on_sleep_drawer_toggled(self, visible: bool) -> None:
+        try:
+            self.settings.setValue(KEY_SHOW_SLEEP_TIMER, "true" if visible else "false")
+            self._sync_window_height_for_sleep_drawer()
+        except Exception:
+            pass
+
+    def _sync_sleep_timer_visibility(self) -> None:
+        try:
+            if hasattr(self, "sleep_timer_widget"):
+                show_sleep = self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
+                if self.sleep_timer_widget.isVisible() != show_sleep:
+                    self.sleep_timer_widget.setVisible(show_sleep)
+                    self._sync_window_height_for_sleep_drawer()
         except Exception:
             pass
 
@@ -2856,6 +2895,7 @@ class ListenMoePlayer(QWidget):
                 start_btn=self.i18n.t("sleep_start"),
                 cancel_btn=self.i18n.t("sleep_cancel"),
                 custom_minutes_tip=self.i18n.t("sleep_custom_minutes_tip"),
+                toggle_tip=self.i18n.t("tt_sleep_toggle_drawer"),
             )
         if hasattr(self, "sleep_title"):
             self.sleep_title.setText(self.i18n.t("sleep_timer"))
@@ -3842,6 +3882,7 @@ class ListenMoePlayer(QWidget):
                                     notification_body=self.t("tray_audio_restarted")
                                 )
                             self._apply_prev_audio_idx = new_audio_idx
+                        self._sync_sleep_timer_visibility()
                         self.update_header_label()
                         self.update_tray_texts()
                     except Exception:
@@ -3871,6 +3912,8 @@ class ListenMoePlayer(QWidget):
 
             def _on_dialog_accepted():
                 self.apply_theme()
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_autoplay(self._get_bool(KEY_AUTOPLAY, False))
                 # Lingua: applica solo se effettivamente modificata
                 lang = self.settings.value(KEY_LANG, "it")
                 if lang != prev_lang:
@@ -3953,6 +3996,7 @@ class ListenMoePlayer(QWidget):
                     self.player.set_volume(self.volume_slider.value())
                     self.player.set_mute(self.mute_button.isChecked())
                     self.update_vlc_status_label()
+                self._sync_sleep_timer_visibility()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev_tray_enabled:

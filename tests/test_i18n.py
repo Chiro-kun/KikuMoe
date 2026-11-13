@@ -319,10 +319,12 @@ def test_widgets_render_en_and_retranslate() -> None:
         start_btn=I18N["it"]["sleep_start"],
         cancel_btn=I18N["it"]["sleep_cancel"],
         custom_minutes_tip=I18N["it"]["sleep_custom_minutes_tip"],
+        toggle_tip=I18N["it"]["tt_sleep_toggle_drawer"],
     )
     assert sleep_w.title_label.text() == I18N["it"]["sleep_timer"].upper()
     assert sleep_w.btn_start.text() == I18N["it"]["sleep_start"]
     assert sleep_w.spin_minutes.toolTip() == I18N["it"]["sleep_custom_minutes_tip"]
+    assert sleep_w.btn_close.toolTip() == I18N["it"]["tt_sleep_toggle_drawer"]
     sleep_w.close()
 
     # StationPillButton in EN -> retranslate IT

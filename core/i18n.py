@@ -163,6 +163,10 @@ I18N: dict[str, dict[str, str]] = {
         "sleep_remaining": "Sleep tra {time}",
         # Opzione: stop allo scadere Sleep Timer
         "settings_sleep_stop_on_end": "Alla scadenza Sleep Timer: ferma riproduzione",
+        "settings_show_sleep_timer": "Mostra pannello Sleep Timer",
+        "settings_show_sleep_timer_tip": (
+            "Mostra o nascondi il riquadro Sleep Timer nella finestra principale"
+        ),
         # Dev console
         "settings_dev_console": "Abilita console sviluppatore",
         "settings_dev_console_show_dev": "Mostra messaggi con tag [DEV]",
@@ -319,6 +323,7 @@ I18N: dict[str, dict[str, str]] = {
         "tt_next_track": "Brano successivo (F6)",
         "tt_queue": "Coda / Playlist (Q)",
         "tt_sleep_timer": "Sleep Timer",
+        "tt_sleep_toggle_drawer": "Nascondi Sleep Timer",
         "tt_autoplay": "Autoplay",
         "tt_mute_toggle": "Muto / Riattiva audio (M)",
         "sleep_custom_minutes_tip": "Minuti personalizzati",
@@ -345,6 +350,9 @@ I18N: dict[str, dict[str, str]] = {
         "settings_playback_section": "COMPORTAMENTO RIPRODUZIONE",
         "settings_discord_id_placeholder": "KikuMoe (predefinito)",
         "settings_audio_engine_section": "MOTORE AUDIO & USCITA",
+        "settings_force_reset_audio_btn": "Riavvia audio",
+        "settings_force_reset_audio_done": "Audio riavviato",
+        "settings_force_reset_audio_tip": "Forza l'arresto e la pulizia completa del backend audio",
         "settings_network_libvlc_section": "BUFFER DI RETE & LIBVLC",
         "settings_vlc_path_placeholder": "Auto / PATH di sistema",
         "settings_tray_section": "SYSTEM TRAY",
@@ -504,6 +512,8 @@ I18N: dict[str, dict[str, str]] = {
         "sleep_remaining": "Sleep in {time}",
         # Option: stop when Sleep Timer elapses
         "settings_sleep_stop_on_end": "When Sleep Timer elapses: stop playback",
+        "settings_show_sleep_timer": "Show Sleep Timer panel",
+        "settings_show_sleep_timer_tip": "Show or hide the Sleep Timer card on the main window",
         # Dev console
         "settings_dev_console": "Enable developer console",
         "settings_dev_console_show_dev": "Show messages tagged [DEV]",
@@ -659,6 +669,7 @@ I18N: dict[str, dict[str, str]] = {
         "tt_next_track": "Next Track (F6)",
         "tt_queue": "Queue / Playlist (Q)",
         "tt_sleep_timer": "Sleep Timer",
+        "tt_sleep_toggle_drawer": "Hide Sleep Timer",
         "tt_autoplay": "Autoplay",
         "tt_mute_toggle": "Mute / Unmute (M)",
         "sleep_custom_minutes_tip": "Custom minutes",
@@ -681,6 +692,9 @@ I18N: dict[str, dict[str, str]] = {
         "settings_playback_section": "PLAYBACK BEHAVIOR",
         "settings_discord_id_placeholder": "KikuMoe (default)",
         "settings_audio_engine_section": "AUDIO ENGINE & OUTPUT",
+        "settings_force_reset_audio_btn": "Reset audio",
+        "settings_force_reset_audio_done": "Audio reset",
+        "settings_force_reset_audio_tip": "Force stop and clean up the active audio backend",
         "settings_network_libvlc_section": "NETWORK BUFFER & LIBVLC",
         "settings_vlc_path_placeholder": "Auto / System PATH",
         "settings_tray_section": "SYSTEM TRAY",
