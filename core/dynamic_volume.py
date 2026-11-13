@@ -195,7 +195,10 @@ def _list_windows_windowed_process_names() -> list[str]:
     user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 
-    wnd_enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    win_functype = getattr(ctypes, "WINFUNCTYPE", None)
+    if win_functype is None:
+        return []
+    wnd_enum_proc = win_functype(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     names: list[str] = []
 
     def _on_window(hwnd: int, _lparam: int) -> bool:
