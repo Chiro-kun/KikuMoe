@@ -68,9 +68,11 @@ from core.constants import (
     APP_SETTINGS,
     APP_VERSION,
     DEFAULT_ACCENT_COLOR,
+    DEFAULT_AMBIENT_MODE_ENABLED,
     DEFAULT_STATION,
     DEFAULT_THEME,
     DEFAULT_VISUALIZER_ENABLED,
+    KEY_AMBIENT_MODE_ENABLED,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -1217,6 +1219,14 @@ class SettingsDialog(QDialog):
         self.custom_accent_row.setVisible(self.chk_custom_accent.isChecked())
         theme_lay.addWidget(self.custom_accent_row)
 
+        self.chk_ambient_mode = AnimatedToggleSwitch(self.i18n.t("settings_ambient_mode"))
+        def_amb = "true" if DEFAULT_AMBIENT_MODE_ENABLED else "false"
+        self.chk_ambient_mode.setChecked(
+            self.settings.value(KEY_AMBIENT_MODE_ENABLED, def_amb) == "true"
+        )
+        self.chk_ambient_mode.setToolTip(self.i18n.t("settings_ambient_mode_tip"))
+        theme_lay.addWidget(self.chk_ambient_mode)
+
         self.chk_visualizer = AnimatedToggleSwitch(self.i18n.t("settings_visualizer"))
         def_viz = "true" if DEFAULT_VISUALIZER_ENABLED else "false"
         self.chk_visualizer.setChecked(
@@ -1227,6 +1237,7 @@ class SettingsDialog(QDialog):
 
         self.cmb_theme.currentIndexChanged.connect(self._on_theme_combo_changed)
         self.chk_custom_accent.toggled.connect(self._on_custom_accent_toggled)
+        self.chk_ambient_mode.toggled.connect(self._on_ambient_mode_toggled)
         self.chk_visualizer.toggled.connect(self._on_visualizer_toggled)
         self.btn_accent_swatch.color_changed.connect(self._on_custom_accent_color_changed)
         self.btn_accent_reset.clicked.connect(self._on_reset_custom_accent)
@@ -1725,6 +1736,19 @@ class SettingsDialog(QDialog):
             return
         self._preview_current_theme()
 
+    def _on_ambient_mode_toggled(self, checked: bool) -> None:
+        if self._reloading_settings:
+            return
+        self.settings.setValue(KEY_AMBIENT_MODE_ENABLED, "true" if checked else "false")
+        host = self._host_window or self.window()
+        if (
+            host
+            and hasattr(host, "_content_widget")
+            and hasattr(host._content_widget, "set_ambient_enabled")
+        ):
+            host._content_widget.set_ambient_enabled(checked)
+        self.settings_changed.emit()
+
     def _on_visualizer_toggled(self, checked: bool) -> None:
         self.settings.setValue(KEY_VISUALIZER_ENABLED, "true" if checked else "false")
         host = self._host_window or self.window()
@@ -1900,6 +1924,8 @@ class SettingsDialog(QDialog):
                 )
                 self.btn_accent_reset.setText(self.i18n.t("settings_custom_accent_reset"))
                 self.btn_accent_reset.setToolTip(self.i18n.t("settings_custom_accent_reset_tip"))
+                self.chk_ambient_mode.setText(self.i18n.t("settings_ambient_mode"))
+                self.chk_ambient_mode.setToolTip(self.i18n.t("settings_ambient_mode_tip"))
                 self.chk_visualizer.setText(self.i18n.t("settings_visualizer"))
                 self.chk_visualizer.setToolTip(self.i18n.t("settings_visualizer_tip"))
 
@@ -1985,6 +2011,10 @@ class SettingsDialog(QDialog):
                 else get_preset_default_accent(saved_theme)
             )
             self.btn_accent_swatch.set_color(swatch_hex, emit_signal=False)
+            def_amb = "true" if DEFAULT_AMBIENT_MODE_ENABLED else "false"
+            self.chk_ambient_mode.setChecked(
+                self.settings.value(KEY_AMBIENT_MODE_ENABLED, def_amb) == "true"
+            )
 
             target_lang_idx = 0 if lang == "it" else 1
             if self.cmb_lang.currentIndex() != target_lang_idx:
@@ -2300,6 +2330,9 @@ class SettingsDialog(QDialog):
             "theme": self.cmb_theme.currentData() or DEFAULT_THEME,
             "custom_accent_enabled": self.chk_custom_accent.isChecked(),
             "custom_accent": self.btn_accent_swatch.color(),
+            "ambient_mode": (
+                self.chk_ambient_mode.isChecked() if hasattr(self, "chk_ambient_mode") else True
+            ),
             "visualizer": (
                 self.chk_visualizer.isChecked() if hasattr(self, "chk_visualizer") else True
             ),
@@ -2433,6 +2466,10 @@ class SettingsDialog(QDialog):
             "true" if self.chk_custom_accent.isChecked() else "false",
         )
         self.settings.setValue(KEY_CUSTOM_ACCENT, self.btn_accent_swatch.color())
+        if hasattr(self, "chk_ambient_mode"):
+            self.settings.setValue(
+                KEY_AMBIENT_MODE_ENABLED, "true" if self.chk_ambient_mode.isChecked() else "false"
+            )
         if hasattr(self, "chk_visualizer"):
             self.settings.setValue(
                 KEY_VISUALIZER_ENABLED, "true" if self.chk_visualizer.isChecked() else "false"

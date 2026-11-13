@@ -256,6 +256,7 @@ def test_settings_dialog_and_toggles(qapp):
     dlg.pages.setCurrentIndex(1)
     assert dlg.pages.currentIndex() == 1
     assert hasattr(dlg, "chk_autoplay")
+    assert hasattr(dlg, "chk_ambient_mode")
     assert hasattr(dlg, "chk_show_sleep_timer")
     assert hasattr(dlg, "cmb_audio_backend")
     assert hasattr(dlg, "btn_force_audio_reset")
@@ -896,6 +897,69 @@ def test_closing_sleep_timer_shrinks_main_window_without_empty_gap(qapp, tmp_pat
         qapp.processEvents()
         assert player.sleep_timer_widget.isVisible() is True
         assert player.height() >= 700
+    finally:
+        player.deleteLater()
+
+
+def test_set_album_cover_updates_full_bleed_ambient_backdrop(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from ui import main_window
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(main_window.ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        main_window.ListenMoePlayer,
+        "_init_system_media",
+        lambda self: setattr(self, "system_media", None),
+    )
+
+    player = main_window.ListenMoePlayer()
+    try:
+        player.apply_theme(force=True)
+        player.show()
+        qapp.processEvents()
+        neutral_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+
+        cover = QPixmap(160, 160)
+        cover.fill(QColor(255, 210, 40))
+        player._set_album_cover_pixmap(cover)
+        player._content_widget._fade_progress = 1.0
+        player._content_widget._invalidate_cache()
+        qapp.processEvents()
+
+        assert player._content_widget._blurred_source is not None
+        assert not player._content_widget._blurred_source.isNull()
+        assert not player.mini_hud.cover.pixmap().isNull()
+
+        bg_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+        assert bg_pixel.red() > neutral_pixel.red() + 40
+        assert bg_pixel.green() > neutral_pixel.green() + 40
+
+        # Disabling Ambient Mode switches backdrop back to neutral theme background
+        player._content_widget.set_ambient_enabled(False)
+        qapp.processEvents()
+        disabled_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+        assert disabled_pixel.red() == neutral_pixel.red()
+        assert disabled_pixel.green() == neutral_pixel.green()
+
+        # Re-enabling restores blurred cover backdrop immediately without re-setting cover
+        player._content_widget.set_ambient_enabled(True)
+        qapp.processEvents()
+        restored_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+        assert restored_pixel.red() > neutral_pixel.red() + 40
+
+        player._set_album_cover_pixmap(None)
+        assert player._content_widget._blurred_source is None
     finally:
         player.deleteLater()
 

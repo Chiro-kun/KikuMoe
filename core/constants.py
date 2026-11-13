@@ -183,6 +183,10 @@ DEFAULT_ACCENT_COLOR = "#ec186c"
 KEY_VISUALIZER_ENABLED = "visualizer_enabled"
 DEFAULT_VISUALIZER_ENABLED = False
 
+# Ambient Mode (Full-bleed blurred cover backdrop)
+KEY_AMBIENT_MODE_ENABLED = "ambient_mode_enabled"
+DEFAULT_AMBIENT_MODE_ENABLED = True
+
 # OTA Updates (GitHub Releases)
 KEY_UPDATE_CHECK_ON_STARTUP = "update_check_on_startup"
 KEY_UPDATE_CHANNEL = "update_channel"

@@ -70,10 +70,12 @@ from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
     APP_VERSION,
+    DEFAULT_AMBIENT_MODE_ENABLED,
     DEFAULT_DISCORD_CLIENT_ID,
     DEFAULT_STATION,
     DEFAULT_THEME,
     DEFAULT_VISUALIZER_ENABLED,
+    KEY_AMBIENT_MODE_ENABLED,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
@@ -760,6 +762,9 @@ class ListenMoePlayer(QWidget):
         # Full-bleed dynamic blurred cover canvas (covers the entire window including title bar)
         self._content_widget = FullBleedCanvas()
         self._content_widget.setObjectName("mainWindowRoot")
+        self._content_widget.set_ambient_enabled(
+            self._get_bool(KEY_AMBIENT_MODE_ENABLED, DEFAULT_AMBIENT_MODE_ENABLED)
+        )
         self._canvas_outer_layout = QVBoxLayout(self._content_widget)
         self._canvas_outer_layout.setContentsMargins(0, 0, 0, 0)
         self._canvas_outer_layout.setSpacing(0)
@@ -2501,10 +2506,9 @@ class ListenMoePlayer(QWidget):
                     if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
                         icon_path = os.path.join(self._icon_dir, icon_file)
                         if os.path.isfile(icon_path):
-                            self.ambient_cover.set_cover(QPixmap(icon_path))
+                            self._set_album_cover_pixmap(QPixmap(icon_path))
                 else:
-                    if hasattr(self, "ambient_cover"):
-                        self.ambient_cover.set_cover(None)
+                    self._set_album_cover_pixmap(None)
 
                 if clean_id == STATION_LOCAL:
                     curr_track = self.local_playlist.get_current_track()
@@ -2527,8 +2531,7 @@ class ListenMoePlayer(QWidget):
                         if hasattr(self, "now_playing_artist"):
                             self.now_playing_artist.setText(self._current_artist)
                             self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
-                        if hasattr(self, "ambient_cover"):
-                            self.ambient_cover.set_cover(None)
+                        self._set_album_cover_pixmap(None)
                         self._current_start_epoch = None
                         self._current_duration_seconds = 0
                         if hasattr(self, "song_progress"):
@@ -2603,6 +2606,17 @@ class ListenMoePlayer(QWidget):
                 if self.sleep_timer_widget.isVisible() != show_sleep:
                     self.sleep_timer_widget.setVisible(show_sleep)
                     self._sync_window_height_for_sleep_drawer()
+        except Exception:
+            pass
+
+    def _sync_ambient_mode(self) -> None:
+        try:
+            if hasattr(self, "_content_widget") and hasattr(
+                self._content_widget, "set_ambient_enabled"
+            ):
+                self._content_widget.set_ambient_enabled(
+                    self._get_bool(KEY_AMBIENT_MODE_ENABLED, DEFAULT_AMBIENT_MODE_ENABLED)
+                )
         except Exception:
             pass
 
@@ -3356,10 +3370,6 @@ class ListenMoePlayer(QWidget):
         try:
             if hasattr(self, "ambient_cover"):
                 self.ambient_cover.set_cover(pixmap)
-            if hasattr(self, "mini_hud") and self.mini_hud is not None:
-                self.mini_hud.set_cover_pixmap(pixmap)
-            if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
-                self.tray_mgr.set_cover_pixmap(pixmap)
             if hasattr(self, "_content_widget") and isinstance(
                 self._content_widget, FullBleedCanvas
             ):
@@ -3367,6 +3377,10 @@ class ListenMoePlayer(QWidget):
                     self.ambient_cover.ambient_color if hasattr(self, "ambient_cover") else None
                 )
                 self._content_widget.set_backdrop(pixmap, amb_col)
+            if hasattr(self, "mini_hud") and self.mini_hud is not None:
+                self.mini_hud.set_cover(pixmap)
+            if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
+                self.tray_mgr.set_cover_pixmap(pixmap)
             if hasattr(self, "_settings_dlg") and self._settings_dlg is not None:
                 try:
                     self._settings_dlg._sync_backdrop_from_parent()
@@ -3883,6 +3897,7 @@ class ListenMoePlayer(QWidget):
                                 )
                             self._apply_prev_audio_idx = new_audio_idx
                         self._sync_sleep_timer_visibility()
+                        self._sync_ambient_mode()
                         self.update_header_label()
                         self.update_tray_texts()
                     except Exception:
@@ -3997,6 +4012,7 @@ class ListenMoePlayer(QWidget):
                     self.player.set_mute(self.mute_button.isChecked())
                     self.update_vlc_status_label()
                 self._sync_sleep_timer_visibility()
+                self._sync_ambient_mode()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev_tray_enabled:

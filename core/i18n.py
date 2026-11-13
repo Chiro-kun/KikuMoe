@@ -343,6 +343,10 @@ I18N: dict[str, dict[str, str]] = {
         "updates_download_error": "Errore download: {error}",
         # Impostazioni (sezioni & controlli mancanti)
         "settings_radio_prefs_section": "PREFERENZE RADIO",
+        "settings_ambient_mode": "Ambient Mode (sfondo dinamico)",
+        "settings_ambient_mode_tip": (
+            "Mostra uno sfondo sfocato dinamico ispirato alla copertina dell'album"
+        ),
         "settings_visualizer": "Visualizzatore audio radiale",
         "settings_visualizer_tip": (
             "Mostra un alone audio-reattivo attorno alla copertina dell'album"
@@ -687,6 +691,10 @@ I18N: dict[str, dict[str, str]] = {
         "updates_download_error": "Download error: {error}",
         # Settings (sections & remaining controls)
         "settings_radio_prefs_section": "RADIO PREFERENCES",
+        "settings_ambient_mode": "Ambient Mode (dynamic backdrop)",
+        "settings_ambient_mode_tip": (
+            "Show a dynamic blurred background tinted by the album cover art"
+        ),
         "settings_visualizer": "Radial audio visualizer",
         "settings_visualizer_tip": "Show an audio-reactive halo around the album cover art",
         "settings_playback_section": "PLAYBACK BEHAVIOR",

@@ -66,6 +66,7 @@ class FullBleedCanvas(QWidget):
         self._prev_blurred: Optional[QPixmap] = None
         self._ambient_color: QColor = QColor(PALETTE["accent"])
         self._prev_ambient_color: QColor = QColor(PALETTE["accent"])
+        self._ambient_enabled: bool = True
         self._current_key: Optional[int] = None
         self._fade_progress: float = 1.0
         self._cached_frame: Optional[QPixmap] = None
@@ -194,6 +195,20 @@ class FullBleedCanvas(QWidget):
             painter.fillRect(self.rect(), g2)
         painter.restore()
 
+    def is_ambient_enabled(self) -> bool:
+        return self._ambient_enabled
+
+    def set_ambient_enabled(self, enabled: bool) -> None:
+        state = bool(enabled)
+        if self._ambient_enabled == state:
+            return
+        self._ambient_enabled = state
+        self._fade_timer.stop()
+        self._fade_progress = 1.0
+        self._prev_blurred = None
+        self._invalidate_cache()
+        self.update()
+
     def refresh_theme(self) -> None:
         if self._current_key is None:
             self._ambient_color = QColor(PALETTE["accent"])
@@ -213,14 +228,18 @@ class FullBleedCanvas(QWidget):
         painter.fillRect(target_rect, QColor(PALETTE["bg_canvas"]))
 
         ease = 1.0 - ((1.0 - self._fade_progress) ** 3)
-        if self._fade_progress < 1.0:
-            self._draw_backdrop_layer(painter, self._prev_blurred, w, h, 1.0 - ease)
-            self._draw_backdrop_layer(painter, self._blurred_source, w, h, ease)
+        if not self._ambient_enabled:
+            self._draw_backdrop_layer(painter, None, w, h, 1.0)
+            cur_amb = QColor(PALETTE["accent"])
         else:
-            self._draw_backdrop_layer(painter, self._blurred_source, w, h, 1.0)
+            if self._fade_progress < 1.0:
+                self._draw_backdrop_layer(painter, self._prev_blurred, w, h, 1.0 - ease)
+                self._draw_backdrop_layer(painter, self._blurred_source, w, h, ease)
+            else:
+                self._draw_backdrop_layer(painter, self._blurred_source, w, h, 1.0)
+            cur_amb = _lerp_color(self._prev_ambient_color, self._ambient_color, ease)
 
         # Ambient accent top-stage spotlight (smoothly lerped)
-        cur_amb = _lerp_color(self._prev_ambient_color, self._ambient_color, ease)
         spot = QRadialGradient(QPointF(w * 0.5, h * 0.26), w * 0.55)
         c_spot = QColor(cur_amb)
         c_spot.setAlpha(42)
@@ -262,8 +281,11 @@ class FullBleedCanvas(QWidget):
             is_max,
             PALETTE.get("theme_id"),
             PALETTE.get("accent"),
-            self._current_key,
-            self._ambient_color.rgba(),
+            self._ambient_enabled,
+            self._current_key if self._ambient_enabled else None,
+            self._ambient_color.rgba()
+            if self._ambient_enabled
+            else QColor(PALETTE["accent"]).rgba(),
         )
         if self._cached_frame is None or self._cached_frame_key != state_key:
             frame = QPixmap(max(1, int(round(w * dpr))), max(1, int(round(h * dpr))))
