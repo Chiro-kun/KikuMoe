@@ -110,6 +110,8 @@ def main() -> int:
         app.setApplicationName("KikuMoe")
         app.setDesktopFileName("me.chiro.kikumoe")
         window = ListenMoePlayer()
+        if not window.windowIcon().isNull():
+            app.setWindowIcon(window.windowIcon())
 
         def _quit_gracefully(*_: object) -> None:
             try:

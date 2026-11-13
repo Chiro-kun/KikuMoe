@@ -171,6 +171,7 @@ class MiniTrackProgress(QProgressBar):
         super().__init__(parent)
         self._seekable = False
         self._is_dragging = False
+        self._press_ratio = 0.0
 
     def set_seekable(self, seekable: bool) -> None:
         self._seekable = bool(seekable)
@@ -179,10 +180,14 @@ class MiniTrackProgress(QProgressBar):
         )
         self.update()
 
+    def _ratio_from_x(self, x: float) -> float:
+        w = max(1.0, float(self.width()))
+        return max(0.0, min(1.0, x / w))
+
     def mousePressEvent(self, event) -> None:
         if self._seekable and event.button() == Qt.MouseButton.LeftButton:
-            w = max(1.0, float(self.width()))
-            ratio = max(0.0, min(1.0, float(event.position().x()) / w))
+            ratio = self._ratio_from_x(float(event.position().x()))
+            self._press_ratio = ratio
             self._is_dragging = True
             self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
             self.seek_requested.emit(ratio)
@@ -192,8 +197,7 @@ class MiniTrackProgress(QProgressBar):
 
     def mouseMoveEvent(self, event) -> None:
         if self._seekable and self._is_dragging:
-            w = max(1.0, float(self.width()))
-            ratio = max(0.0, min(1.0, float(event.position().x()) / w))
+            ratio = self._ratio_from_x(float(event.position().x()))
             self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
             self.update()
             return
@@ -202,9 +206,10 @@ class MiniTrackProgress(QProgressBar):
     def mouseReleaseEvent(self, event) -> None:
         if self._seekable and self._is_dragging and event.button() == Qt.MouseButton.LeftButton:
             self._is_dragging = False
-            w = max(1.0, float(self.width()))
-            ratio = max(0.0, min(1.0, float(event.position().x()) / w))
-            self.seek_requested.emit(ratio)
+            ratio = self._ratio_from_x(float(event.position().x()))
+            if abs(ratio - self._press_ratio) > 0.002:
+                self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
+                self.seek_requested.emit(ratio)
             self.update()
             return
         super().mouseReleaseEvent(event)
@@ -379,9 +384,10 @@ class MiniHud(QWidget):
                 self._format_time(elapsed) if elapsed is not None else "--:--"
             )
             self.duration_label.setText(self._format_time(duration))
-            self.track_progress.setValue(
-                int(elapsed * 1000 / duration) if elapsed is not None else 0
-            )
+            if not getattr(self.track_progress, "_is_dragging", False):
+                self.track_progress.setValue(
+                    int(elapsed * 1000 / duration) if elapsed is not None else 0
+                )
         else:
             self.elapsed_label.setText(
                 self._format_time(elapsed) if elapsed is not None else "--:--"

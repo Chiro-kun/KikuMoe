@@ -65,14 +65,18 @@ class AnimatedVectorButton(QPushButton):
         self.update()
         super().leaveEvent(a0)
 
+    def trigger_click_animation(self) -> None:
+        """Start the 60 FPS click bounce and ripple animation (mouse press or shortcut)."""
+        self._anim_step = 1
+        self._anim_scale = 0.85
+        self._ripple_progress = 0.1
+        self._anim_timer.start()
+        self.update()
+
     def mousePressEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
-            self._anim_step = 1
-            self._anim_scale = 0.85
-            self._ripple_progress = 0.1
-            self._anim_timer.start()
-            self.update()
+            self.trigger_click_animation()
         super().mousePressEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:

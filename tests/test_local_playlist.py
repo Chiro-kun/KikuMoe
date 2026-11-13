@@ -413,3 +413,216 @@ def test_track_label_click_in_local_empty_mode():
     # Simulate mouse press on hover group
     group.mousePressEvent(press_ev)
     assert len(group_clicked) == 1
+
+
+def test_shortcuts_trigger_button_animations():
+    from PyQt6.QtWidgets import QApplication, QLabel, QWidget
+
+    from ui.main_window import ListenMoePlayer
+    from ui.widgets.playback_controls import PlaybackControls
+    from ui.widgets.segmented_switch import SettingsIconButton
+
+    _app = QApplication.instance() or QApplication([])
+
+    controls = PlaybackControls()
+    for btn in (
+        controls.hero_play,
+        controls.btn_stop,
+        controls.speaker_btn,
+        controls.btn_next,
+        controls.btn_prev,
+        controls.btn_queue,
+    ):
+        assert btn._anim_step == 0
+        btn.trigger_click_animation()
+        assert btn._anim_step == 1
+        assert btn._anim_timer.isActive()
+        btn._anim_timer.stop()
+
+    settings_btn = SettingsIconButton()
+    assert settings_btn._anim_step == 0
+    settings_btn.trigger_click_animation()
+    assert settings_btn._anim_step == 1
+    assert settings_btn._anim_timer.isActive()
+    settings_btn._anim_timer.stop()
+
+    host = QWidget()
+    triggered: list[bool] = []
+    shortcut = ListenMoePlayer._register_shortcut(
+        host,
+        "Space",
+        lambda: triggered.append(True),
+        button_getter=lambda: controls.hero_play,
+    )
+    controls.hero_play._anim_step = 0
+    shortcut.activated.emit()
+    assert triggered == [True]
+    assert controls.hero_play._anim_step == 1
+    controls.hero_play._anim_timer.stop()
+    controls.close()
+    settings_btn.close()
+    host.close()
+    assert QLabel is not None
+
+
+def test_local_mode_updates_elapsed_and_remaining_labels():
+    import time
+    from types import SimpleNamespace
+
+    from PyQt6.QtWidgets import QApplication, QLabel
+
+    from core.i18n import I18n
+    from ui.main_window import ListenMoePlayer
+
+    _app = QApplication.instance() or QApplication([])
+
+    pos = {"t": 45.0}
+    fake_player = SimpleNamespace(get_time=lambda: pos["t"])
+    fake = SimpleNamespace(
+        player=fake_player,
+        i18n=I18n("it"),
+        t=lambda k: k,
+        _current_title="Local Song",
+        _current_artist="Local Artist",
+        _current_cover_ref=None,
+        _current_duration_seconds=180,
+        _current_start_epoch=time.time(),
+        _clock_sync_offset=0.0,
+        song_elapsed_label=QLabel("0:00"),
+        song_time_label=QLabel("--:--"),
+        now_playing_title=QLabel(),
+        now_playing_artist=QLabel(),
+        now_playing_changed=SimpleNamespace(emit=lambda _t: None),
+        _is_local_mode=lambda: True,
+        _format_mmss=lambda s: ListenMoePlayer._format_mmss(None, s),
+        _apply_window_title=lambda _t: None,
+        _request_album_cover=lambda _c: None,
+    )
+    fake._get_local_playback_seconds = lambda: ListenMoePlayer._get_local_playback_seconds(fake)
+
+    ListenMoePlayer.update_now_playing_label(fake)
+    assert fake.song_elapsed_label.text() == "0:45"
+    assert fake.song_time_label.text() == "2:15"
+
+    pos["t"] = 120.0
+    ListenMoePlayer.update_now_playing_label(fake)
+    assert fake.song_elapsed_label.text() == "2:00"
+    assert fake.song_time_label.text() == "1:00"
+
+
+def test_app_icon_is_square_and_non_stretched():
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSize
+    from PyQt6.QtGui import QIcon
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.main_window import ListenMoePlayer
+
+    _app = QApplication.instance() or QApplication([])
+
+    icon_path = Path(__file__).resolve().parent.parent / "icons" / "Kikumoe - no txt.png"
+    raw_icon = QIcon(str(icon_path))
+    assert not raw_icon.isNull()
+
+    helper = SimpleNamespace()
+    helper._trim_transparent_margins = lambda pm, alpha_threshold=0: (
+        ListenMoePlayer._trim_transparent_margins(helper, pm, alpha_threshold)
+    )
+    helper._build_square_icon = lambda ic, sizes, fill_ratio=1.0: (
+        ListenMoePlayer._build_square_icon(helper, ic, sizes, fill_ratio)
+    )
+    squared = ListenMoePlayer._make_icon_square(helper, raw_icon)
+    assert not squared.isNull()
+
+    for sz in (16, 20, 24, 32, 40, 48, 64, 128, 256):
+        pm = squared.pixmap(sz, sz)
+        assert pm.size() == QSize(sz, sz)
+
+
+def test_seek_bar_click_emits_once_and_updates_immediately():
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QPointF, Qt
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtWidgets import QApplication
+
+    from ui.main_window import ListenMoePlayer, SmoothProgressBar
+    from ui.widgets.mini_hud import MiniTrackProgress
+
+    _app = QApplication.instance() or QApplication([])
+
+    for bar in (SmoothProgressBar(), MiniTrackProgress()):
+        bar.resize(200, 16)
+        if hasattr(bar, "setRange"):
+            bar.setRange(0, 1000)
+        else:
+            bar.setMaximum(1000)
+        bar.set_seekable(True)
+
+        emitted: list[float] = []
+        bar.seek_requested.connect(emitted.append)
+
+        press = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(100.0, 8.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        release_same = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(100.0, 8.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        bar.mousePressEvent(press)
+        bar.mouseReleaseEvent(release_same)
+        assert len(emitted) == 1
+
+        move = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(160.0, 8.0),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        release_drag = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(160.0, 8.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        bar.mousePressEvent(press)
+        bar.mouseMoveEvent(move)
+        assert len(emitted) == 2
+        bar.mouseReleaseEvent(release_drag)
+        assert len(emitted) == 3
+        assert emitted[-1] > emitted[0]
+
+    # Verify _apply_local_seek holds target against stale async backend timestamps briefly
+    pos = {"t": 12.0}
+    seek_calls: list[float] = []
+    bar = SmoothProgressBar()
+    bar.setMaximum(180_000)
+    fake = SimpleNamespace(
+        player=SimpleNamespace(
+            seek=lambda s: seek_calls.append(s),
+            get_time=lambda: pos["t"],
+        ),
+        song_progress=bar,
+        lyrics_panel=SimpleNamespace(set_position=lambda _s: None),
+        song_elapsed_label=SimpleNamespace(setText=lambda _t: None),
+        song_time_label=SimpleNamespace(setText=lambda _t: None),
+        _current_duration_seconds=180,
+        _format_mmss=lambda s: ListenMoePlayer._format_mmss(None, s),
+        log=SimpleNamespace(warning=lambda *a, **kw: None),
+    )
+    ListenMoePlayer._apply_local_seek(fake, 72.0, duration_sec=180)
+    assert seek_calls == [72.0]
+    assert ListenMoePlayer._get_local_playback_seconds(fake) == 72.0
+    pos["t"] = 72.5
+    assert ListenMoePlayer._get_local_playback_seconds(fake) == 72.5

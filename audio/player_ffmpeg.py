@@ -97,6 +97,9 @@ class PlayerFFmpeg:
         self._bytes_streamed: int = 0
         self._stream_sample_rate: int = 48000
         self._is_local_file: bool = False
+        self._ffmpeg_verified: bool = False
+        self._seek_seq: int = 0
+        self._seek_pending: bool = False
         self.log = get_logger("PlayerFFmpeg")
         self._ffmpeg_bin = _find_ffmpeg_bin()
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.11.0")
@@ -200,6 +203,7 @@ class PlayerFFmpeg:
     def reinitialize(
         self, libvlc_path: str | None = None, network_caching_ms: int | None = None
     ) -> bool:
+        self._ffmpeg_verified = False
         self._init_audio()
         return self.is_ready()
 
@@ -215,6 +219,8 @@ class PlayerFFmpeg:
 
     def _check_ffmpeg(self) -> bool:
         """Check if ffmpeg is available."""
+        if getattr(self, "_ffmpeg_verified", False):
+            return True
         try:
             bin_to_check = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
             if _IS_WIN32:
@@ -232,7 +238,10 @@ class PlayerFFmpeg:
                 timeout=5,
                 **kwargs,
             )
-            return result.returncode == 0
+            ok = result.returncode == 0
+            if ok:
+                self._ffmpeg_verified = True
+            return ok
         except Exception:
             return False
 
@@ -334,6 +343,8 @@ class PlayerFFmpeg:
                 self._is_local_file = os.path.isfile(safe_url)
                 self._current_seek_offset = 0.0
                 self._bytes_streamed = 0
+                self._seek_seq += 1
+                self._seek_pending = False
                 self._stop_requested = False
                 self._stop_event.clear()
                 self._playing = True
@@ -368,6 +379,7 @@ class PlayerFFmpeg:
             # Signal worker to stop
             with self._state_lock:
                 self._stop_requested = True
+                self._seek_pending = False
                 self._stop_event.set()
                 self._playing = False
                 self._paused = False
@@ -470,33 +482,37 @@ class PlayerFFmpeg:
         """Seek to target timestamp in seconds for local audio playback."""
         if not self.is_ready() or not self._is_local_file:
             return False
+        target = max(0.0, float(seconds))
         with self._state_lock:
             cur_stream = self._current_stream
-            if not cur_stream or not self._playing:
+            if not cur_stream or not self._playing or self._stop_event.is_set():
                 return False
-            self._current_seek_offset = max(0.0, float(seconds))
+            self._current_seek_offset = target
             self._bytes_streamed = 0
-
-        self.stop()
-        with self._state_lock:
-            self._current_stream = cur_stream
-            self._stop_requested = False
-            self._stop_event.clear()
-            self._playing = True
-
-        self._stream_thread = threading.Thread(target=self._stream_worker, args=(cur_stream,))
-        self._stream_thread.daemon = True
-        self._stream_thread.start()
+            self._seek_seq += 1
+            self._seek_pending = True
+            proc = self._ffmpeg_process
+        # Kill only the active decoder subprocess so _stream_worker restarts at
+        # the new offset immediately without blocking the UI thread or reopening audio.
+        if proc is not None:
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+            except Exception:
+                pass
         return True
 
     def get_time(self) -> float | None:
         """Return current playback position in seconds."""
         if not self._playing:
             return 0.0
+        with self._state_lock:
+            offset = self._current_seek_offset
+            streamed = self._bytes_streamed
         bytes_per_sec = self._stream_sample_rate * 2 * 2
         if bytes_per_sec > 0:
-            return self._current_seek_offset + (self._bytes_streamed / bytes_per_sec)
-        return self._current_seek_offset
+            return offset + (streamed / bytes_per_sec)
+        return offset
 
     def get_duration(self) -> float | None:
         """Return track duration if known."""
@@ -721,6 +737,9 @@ class PlayerFFmpeg:
 
         with self._state_lock:
             paused = self._paused
+            write_seek_seq = self._seek_seq
+            if self._seek_pending:
+                return
         if self._muted or paused:
             try:
                 stream.write(b"\x00" * n_bytes, exception_on_underflow=False)
@@ -753,9 +772,34 @@ class PlayerFFmpeg:
 
         try:
             stream.write(chunk_to_write, exception_on_underflow=False)
-            self._bytes_streamed += len(chunk_to_write)
+            with self._state_lock:
+                if not self._seek_pending and self._seek_seq == write_seek_seq:
+                    self._bytes_streamed += len(chunk_to_write)
         except Exception as e:
             self.log.debug("[DEBUG] _write_audio_chunk: error writing chunk: %s", e)
+
+    def _is_seek_interrupted(self, seek_seq_at_start: int) -> bool:
+        """Return True if a newer seek has superseded the active decoder pass."""
+        with self._state_lock:
+            return bool(self._seek_pending or self._seek_seq != seek_seq_at_start)
+
+    def _flush_prebuffer(
+        self, prebuffer: list[bytes], seek_seq_at_start: int, has_emitted_playing: bool
+    ) -> tuple[bool, bool]:
+        """Emit initial playing state if needed and drain buffered PCM chunks."""
+        if not has_emitted_playing:
+            has_emitted_playing = True
+            self._emit("paused" if self.is_paused() else "playing", None)
+        interrupted = False
+        for pre_chunk in prebuffer:
+            if self._stop_event.is_set():
+                break
+            if self._is_seek_interrupted(seek_seq_at_start):
+                interrupted = True
+                break
+            self._write_audio_chunk(pre_chunk)
+        prebuffer.clear()
+        return interrupted, has_emitted_playing
 
     def _stream_worker(self, url: str) -> None:
         self.log.debug("[DEBUG] _stream_worker: started for url: %s", url)
@@ -826,330 +870,401 @@ class PlayerFFmpeg:
                     safe_url
                 ]
 
-            # Tenta in sequenza ogni URL candidato finché non si ricevono dati
+            # Tenta in sequenza ogni URL candidato finché non si ricevono dati;
+            # per i file locali gestisce anche eventuali restart da seek senza riaprire PyAudio.
+            has_emitted_playing = False
             started_streaming = False
             forced_error = False
-            for attempt_idx, cur_url in enumerate(candidates):
-                if self._stop_event.is_set():
-                    break
-                try:
-                    self.log.debug(
-                        "[DEBUG] _stream_worker: attempt %d with url: %s", attempt_idx + 1, cur_url
-                    )
-                except Exception:
-                    pass
-
-                # FFmpeg command to decode stream and output raw audio at full 100% scale
-                is_mp3 = False
-                try:
-                    uu = cur_url.lower()
-                    is_mp3 = ("/mp3" in uu) or uu.endswith(".mp3")
-                except Exception:
-                    is_mp3 = False
-
-                ffmpeg_bin = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
-                ffmpeg_cmd = [
-                    ffmpeg_bin,
-                    "-hide_banner",
-                    "-nostdin",
-                ]
-                if not is_local:
-                    ffmpeg_cmd.extend(
-                        [
-                            "-rw_timeout",
-                            "15000000",
-                            "-user_agent",
-                            self._user_agent,
-                            "-reconnect",
-                            "1",
-                            "-reconnect_streamed",
-                            "1",
-                            "-reconnect_at_eof",
-                            "1",
-                            "-reconnect_delay_max",
-                            "2",
-                            "-reconnect_on_network_error",
-                            "1",
-                        ]
-                    )
-                else:
-                    if self._current_seek_offset > 0:
-                        ffmpeg_cmd.extend(["-ss", f"{self._current_seek_offset:.3f}"])
-
-                # Apply MP3-specific headers (some servers expect audio/mpeg Accept)
-                if is_mp3:
+            while not self._stop_event.is_set():
+                started_streaming = False
+                forced_error = False
+                seek_restarted = False
+                last_seek_seq = 0
+                for attempt_idx, cur_url in enumerate(candidates):
+                    if self._stop_event.is_set():
+                        break
+                    with self._state_lock:
+                        seek_offset = self._current_seek_offset
+                        seek_seq_at_start = self._seek_seq
+                        last_seek_seq = seek_seq_at_start
+                        self._seek_pending = False
                     try:
-                        ffmpeg_cmd.extend(
-                            [
-                                "-headers",
-                                "Accept: audio/mpeg\r\nIcy-MetaData: 0\r\n",
-                            ]
+                        self.log.debug(
+                            "[DEBUG] _stream_worker: attempt %d with url: %s",
+                            attempt_idx + 1,
+                            cur_url,
                         )
-                        self.log.debug("[DEBUG] _stream_worker: applying MP3-specific headers")
                     except Exception:
                         pass
 
-                # Input URL
-                ffmpeg_cmd.extend(["-i", cur_url])
+                    # FFmpeg command to decode stream and output raw audio at full 100% scale
+                    is_mp3 = False
+                    try:
+                        uu = cur_url.lower()
+                        is_mp3 = ("/mp3" in uu) or uu.endswith(".mp3")
+                    except Exception:
+                        is_mp3 = False
 
-                # Output format: raw PCM s16le to stdout matching negotiated stream_rate
-                ffmpeg_cmd.extend(
-                    [
-                        "-vn",
-                        "-probesize",
-                        "32768",
-                        "-analyzeduration",
-                        "0",
-                        "-f",
-                        "s16le",
-                        "-ar",
-                        str(stream_rate),
-                        "-ac",
-                        "2",
-                        "-acodec",
-                        "pcm_s16le",
-                        "-loglevel",
-                        "error",
-                        "-",
+                    ffmpeg_bin = getattr(self, "_ffmpeg_bin", None) or _find_ffmpeg_bin()
+                    ffmpeg_cmd = [
+                        ffmpeg_bin,
+                        "-hide_banner",
+                        "-nostdin",
                     ]
-                )
-
-                # Launch ffmpeg process with OS pipe buffering (64KB)
-                with self._state_lock:
-                    self._ffmpeg_process = None
-                try:
-                    kwargs: dict = {}
-                    if _IS_WIN32:
-                        kwargs["creationflags"] = getattr(
-                            subprocess, "CREATE_NO_WINDOW", 0x08000000
+                    if not is_local:
+                        ffmpeg_cmd.extend(
+                            [
+                                "-probesize",
+                                "32768",
+                                "-analyzeduration",
+                                "0",
+                                "-rw_timeout",
+                                "15000000",
+                                "-user_agent",
+                                self._user_agent,
+                                "-reconnect",
+                                "1",
+                                "-reconnect_streamed",
+                                "1",
+                                "-reconnect_at_eof",
+                                "1",
+                                "-reconnect_delay_max",
+                                "2",
+                                "-reconnect_on_network_error",
+                                "1",
+                            ]
                         )
-                    self.log.debug("[DEBUG] _stream_worker: launching ffmpeg: %r", ffmpeg_cmd)
-                    self._ffmpeg_process = subprocess.Popen(
-                        ffmpeg_cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        stdin=subprocess.DEVNULL,
-                        bufsize=65536,
-                        **kwargs,
+                    elif seek_offset > 0:
+                        ffmpeg_cmd.extend(["-ss", f"{seek_offset:.3f}"])
+
+                    # Apply MP3-specific headers (some servers expect audio/mpeg Accept)
+                    if is_mp3:
+                        try:
+                            ffmpeg_cmd.extend(
+                                [
+                                    "-headers",
+                                    "Accept: audio/mpeg\r\nIcy-MetaData: 0\r\n",
+                                ]
+                            )
+                            self.log.debug("[DEBUG] _stream_worker: applying MP3-specific headers")
+                        except Exception:
+                            pass
+
+                    # Input URL
+                    ffmpeg_cmd.extend(["-i", cur_url])
+
+                    # Output format: raw PCM s16le to stdout matching negotiated stream_rate
+                    ffmpeg_cmd.extend(
+                        [
+                            "-vn",
+                            "-f",
+                            "s16le",
+                            "-ar",
+                            str(stream_rate),
+                            "-ac",
+                            "2",
+                            "-acodec",
+                            "pcm_s16le",
+                            "-loglevel",
+                            "error",
+                            "-",
+                        ]
                     )
-                    self.log.debug(
-                        "[DEBUG] _stream_worker: ffmpeg process started, pid: %s",
-                        self._ffmpeg_process.pid,
+
+                    # Launch ffmpeg process with OS pipe buffering (64KB)
+                    with self._state_lock:
+                        self._ffmpeg_process = None
+                    try:
+                        kwargs: dict = {}
+                        if _IS_WIN32:
+                            kwargs["creationflags"] = getattr(
+                                subprocess, "CREATE_NO_WINDOW", 0x08000000
+                            )
+                        self.log.debug("[DEBUG] _stream_worker: launching ffmpeg: %r", ffmpeg_cmd)
+                        self._ffmpeg_process = subprocess.Popen(
+                            ffmpeg_cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            stdin=subprocess.DEVNULL,
+                            bufsize=65536,
+                            **kwargs,
+                        )
+                        self.log.debug(
+                            "[DEBUG] _stream_worker: ffmpeg process started, pid: %s",
+                            self._ffmpeg_process.pid,
+                        )
+                    except Exception as e:
+                        self.log.error(
+                            "[BACKEND] PlayerFFmpeg: failed to launch ffmpeg process: %s", e
+                        )
+                        self._ffmpeg_process = None
+                        continue
+
+                    # Loop di lettura dei dati
+                    # Chunk size = 8192 bytes (2048 frames stereo 16-bit, circa 43ms a 48kHz)
+                    chunk_size = 8192
+                    empty_reads = 0
+                    stall_timeout = 10.0
+                    last_data_ts = time.time()
+                    prebuffer: list[bytes] = []
+                    # Local seeks use a minimal 2-chunk prebuffer (~85ms) with active PortAudio
+                    prebuffer_target_bytes = (
+                        (chunk_size * 2)
+                        if (is_local and seek_offset > 0)
+                        else (stream_rate * 4 // 4)
                     )
-                except Exception as e:
-                    self.log.error("[BACKEND] PlayerFFmpeg: failed to launch ffmpeg process: %s", e)
-                    self._ffmpeg_process = None
-                    continue
 
-                # Loop di lettura dei dati
-                # Chunk size = 8192 bytes (2048 frames stereo 16-bit, circa 43ms a 48kHz)
-                chunk_size = 8192
-                empty_reads = 0
-                stall_timeout = 10.0
-                last_data_ts = time.time()
-                prebuffer: list[bytes] = []
-                # Bufferizza circa 0.25s di audio prima di avviare l'emissione (elimina crackle)
-                prebuffer_target_bytes = stream_rate * 4 // 4
+                    # Watchdog di stallo: forza riavvio di ffmpeg se i dati si fermano
+                    watchdog_stop = threading.Event()
+                    forced_error_ref = {"v": False}
 
-                # Watchdog di stallo: se non arrivano dati per troppo tempo, forza riavvio di ffmpeg
-                watchdog_stop = threading.Event()
-                forced_error_ref = {"v": False}
+                    def _stall_watchdog_local(
+                        _watchdog_stop=watchdog_stop,
+                        _forced_error_ref=forced_error_ref,
+                    ):
+                        _last_wd_log = [0]
+                        while not _watchdog_stop.is_set():
+                            if self._stop_event.is_set():
+                                break
+                            with self._state_lock:
+                                p = self._ffmpeg_process
+                            try:
+                                ended = (p is None) or (p.poll() is not None)
+                            except Exception:
+                                ended = True
+                            if ended:
+                                break
+                            try:
+                                delta = time.time() - last_data_ts
+                            except Exception:
+                                delta = stall_timeout + 1
 
-                def _stall_watchdog_local():
-                    _last_wd_log = [0]
-                    while not watchdog_stop.is_set():
-                        if self._stop_event.is_set():
+                            now_int = int(time.time())
+                            if now_int != _last_wd_log[0] and now_int % 5 == 0:
+                                _last_wd_log[0] = now_int
+                                try:
+                                    self.log.debug(
+                                        "[DEBUG] _stall_watchdog: delta=%.1f s, pid=%s, started=%s",
+                                        delta,
+                                        p.pid if p else "None",
+                                        started_streaming,
+                                    )
+                                except Exception:
+                                    pass
+
+                            if delta > stall_timeout:
+                                try:
+                                    self.log.debug(
+                                        "[DEBUG] _stall_watchdog: stall detected (%.2fs > %.2fs), "
+                                        "terminating ffmpeg",
+                                        delta,
+                                        stall_timeout,
+                                    )
+                                except Exception:
+                                    pass
+                                _forced_error_ref["v"] = True
+                                if p is not None:
+                                    try:
+                                        p.terminate()
+                                        p.wait(timeout=1.0)
+                                    except Exception:
+                                        try:
+                                            p.kill()
+                                        except Exception:
+                                            pass
+                                break
+                            if _watchdog_stop.wait(0.5):
+                                break
+
+                    watchdog_thread = threading.Thread(target=_stall_watchdog_local, daemon=True)
+                    try:
+                        watchdog_thread.start()
+                    except Exception:
+                        pass
+
+                    while True:
+                        if self._is_seek_interrupted(seek_seq_at_start):
+                            seek_restarted = True
+                            prebuffer.clear()
                             break
                         with self._state_lock:
-                            p = self._ffmpeg_process
-                        try:
-                            ended = (p is None) or (p.poll() is not None)
-                        except Exception:
-                            ended = True
-                        if ended:
+                            if self._stop_event.is_set():
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: stop event set, breaking loop"
+                                )
+                                break
+                            proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
+                        if proc is None:
+                            self.log.debug("[DEBUG] _stream_worker: ffmpeg process missing")
+                            forced_error = True
                             break
-                        try:
-                            delta = time.time() - last_data_ts
-                        except Exception:
-                            delta = stall_timeout + 1
-
-                        now_int = int(time.time())
-                        if now_int != _last_wd_log[0] and now_int % 5 == 0:
-                            _last_wd_log[0] = now_int
+                        if proc.poll() is not None:
+                            if self._is_seek_interrupted(seek_seq_at_start):
+                                seek_restarted = True
+                                prebuffer.clear()
+                                break
+                            code = proc.poll()
+                            err = b""
                             try:
-                                self.log.debug(
-                                    "[DEBUG] _stall_watchdog: delta=%.1f s, pid=%s, started=%s",
-                                    delta,
-                                    p.pid if p else "None",
-                                    started_streaming,
+                                if proc.stderr:
+                                    err = proc.stderr.read() or b""  # type: ignore[assignment]
+                            except Exception as e:
+                                self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
+                            err_text = err.decode(errors="ignore").strip()
+                            if code not in (0, None) or err_text:
+                                self.log.error(
+                                    "[BACKEND] PlayerFFmpeg: FFmpeg process exited "
+                                    "with code %s: %s",
+                                    code,
+                                    err_text or "no stderr output",
                                 )
+                            else:
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: ffmpeg process ended "
+                                    "normally (code: %s)",
+                                    code,
+                                )
+                            try:
+                                if "forced_error_ref" in locals() and forced_error_ref.get("v"):
+                                    forced_error = True
                             except Exception:
                                 pass
-
-                        if delta > stall_timeout:
-                            try:
-                                self.log.debug(
-                                    "[DEBUG] _stall_watchdog: stall detected (%.2fs > %.2fs), "
-                                    "terminating ffmpeg",
-                                    delta,
-                                    stall_timeout,
-                                )
-                            except Exception:
-                                pass
-                            forced_error_ref["v"] = True
-                            if p is not None:
+                            if not forced_error:
                                 try:
-                                    p.terminate()
-                                    p.wait(timeout=1.0)
+                                    if code not in (0, None):
+                                        forced_error = True
+                                    elif err and err.strip():
+                                        forced_error = True
                                 except Exception:
-                                    try:
-                                        p.kill()
-                                    except Exception:
-                                        pass
-                            break
-                        time.sleep(0.5)
-
-                watchdog_thread = threading.Thread(target=_stall_watchdog_local, daemon=True)
-                try:
-                    watchdog_thread.start()
-                except Exception:
-                    pass
-
-                while True:
-                    with self._state_lock:
-                        if self._stop_event.is_set():
-                            self.log.debug("[DEBUG] _stream_worker: stop event set, breaking loop")
-                            break
-                        proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
-                    if proc is None:
-                        self.log.debug("[DEBUG] _stream_worker: ffmpeg process missing")
-                        forced_error = True
-                        break
-                    if proc.poll() is not None:
-                        code = proc.poll()
-                        err = b""
-                        try:
-                            if proc.stderr:
-                                err = proc.stderr.read() or b""  # type: ignore[assignment]
-                        except Exception as e:
-                            self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
-                        err_text = err.decode(errors="ignore").strip()
-                        if code not in (0, None) or err_text:
-                            self.log.error(
-                                "[BACKEND] PlayerFFmpeg: FFmpeg process exited with code %s: %s",
-                                code,
-                                err_text or "no stderr output",
-                            )
-                        else:
-                            self.log.debug(
-                                "[DEBUG] _stream_worker: ffmpeg process ended normally (code: %s)",
-                                code,
-                            )
-                        try:
-                            if "forced_error_ref" in locals() and forced_error_ref.get("v"):
-                                forced_error = True
-                        except Exception:
-                            pass
-                        if not forced_error:
-                            try:
-                                if code not in (0, None):
-                                    forced_error = True
-                                elif err and err.strip():
-                                    forced_error = True
-                            except Exception:
-                                pass
-                        break
-
-                    if proc.stdout is None:
-                        self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
-                        forced_error = True
-                        break
-
-                    try:
-                        chunk = proc.stdout.read(chunk_size)
-                    except Exception as e:
-                        self.log.debug(
-                            "[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e
-                        )
-                        forced_error = True
-                        break
-
-                    if not chunk:
-                        empty_reads += 1
-                        if proc.poll() is None:
-                            if empty_reads % 20 == 0:
-                                self.log.debug(
-                                    "[DEBUG] _stream_worker: empty chunk (x%d), waiting...",
-                                    empty_reads,
+                                    pass
+                            if (
+                                not forced_error
+                                and not started_streaming
+                                and is_local
+                                and (prebuffer or seek_offset > 0)
+                            ):
+                                started_streaming = True
+                                seek_restarted, has_emitted_playing = self._flush_prebuffer(
+                                    prebuffer, seek_seq_at_start, has_emitted_playing
                                 )
-                            time.sleep(0.05)
-                            continue
-                        else:
-                            self.log.debug(
-                                "[DEBUG] _stream_worker: ffmpeg stdout EOF after process ended"
-                            )
                             break
 
-                    # Ricevuto chunk di dati validi
-                    empty_reads = 0
-                    last_data_ts = time.time()
+                        if proc.stdout is None:
+                            self.log.debug("[DEBUG] _stream_worker: ffmpeg stdout is None")
+                            forced_error = True
+                            break
 
-                    n_bytes = (len(chunk) // 2) * 2
-                    if n_bytes == 0:
-                        time.sleep(0.01)
-                        continue
-                    data: bytes = chunk[:n_bytes]  # type: ignore[assignment]
-
-                    # Jitter buffer iniziale: accumula dati prima di iniziare la riproduzione
-                    if not started_streaming:
-                        prebuffer.append(data)
-                        if sum(len(c) for c in prebuffer) >= prebuffer_target_bytes:
-                            started_streaming = True
+                        try:
+                            chunk = proc.stdout.read(chunk_size)
+                        except Exception as e:
                             self.log.debug(
-                                "[DEBUG] _stream_worker: pre-buffer filled (%d B), playing",
-                                sum(len(c) for c in prebuffer),
+                                "[DEBUG] _stream_worker: exception reading ffmpeg stdout: %s", e
                             )
-                            self._emit("paused" if self.is_paused() else "playing", None)
-                            for pre_chunk in prebuffer:
-                                if self._stop_event.is_set():
+                            if self._is_seek_interrupted(seek_seq_at_start):
+                                seek_restarted = True
+                                prebuffer.clear()
+                                break
+                            forced_error = True
+                            break
+
+                        if not chunk:
+                            if self._is_seek_interrupted(seek_seq_at_start):
+                                seek_restarted = True
+                                prebuffer.clear()
+                                break
+                            empty_reads += 1
+                            if proc.poll() is None:
+                                if empty_reads % 20 == 0:
+                                    self.log.debug(
+                                        "[DEBUG] _stream_worker: empty chunk (x%d), waiting...",
+                                        empty_reads,
+                                    )
+                                time.sleep(0.05)
+                                continue
+                            else:
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: ffmpeg stdout EOF after process ended"
+                                )
+                                if (
+                                    not started_streaming
+                                    and is_local
+                                    and proc.poll() == 0
+                                    and (prebuffer or seek_offset > 0)
+                                ):
+                                    started_streaming = True
+                                    seek_restarted, has_emitted_playing = self._flush_prebuffer(
+                                        prebuffer, seek_seq_at_start, has_emitted_playing
+                                    )
+                                break
+
+                        # Ricevuto chunk di dati validi
+                        empty_reads = 0
+                        last_data_ts = time.time()
+
+                        n_bytes = (len(chunk) // 2) * 2
+                        if n_bytes == 0:
+                            time.sleep(0.01)
+                            continue
+                        data: bytes = chunk[:n_bytes]  # type: ignore[assignment]
+
+                        # Jitter buffer iniziale: accumula dati prima di iniziare la riproduzione
+                        if not started_streaming:
+                            prebuffer.append(data)
+                            if sum(len(c) for c in prebuffer) >= prebuffer_target_bytes:
+                                started_streaming = True
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: pre-buffer filled (%d B), playing",
+                                    sum(len(c) for c in prebuffer),
+                                )
+                                seek_restarted, has_emitted_playing = self._flush_prebuffer(
+                                    prebuffer, seek_seq_at_start, has_emitted_playing
+                                )
+                                if seek_restarted:
                                     break
-                                self._write_audio_chunk(pre_chunk)
-                            prebuffer.clear()
-                        continue
+                            continue
 
-                    # Riproduzione standard continua con gestione volume e buffer safety
-                    self._write_audio_chunk(data)
+                        # Riproduzione standard continua con gestione volume e buffer safety
+                        self._write_audio_chunk(data)
 
-                # prova a spegnere il watchdog
-                try:
-                    watchdog_stop.set()
-                    if "watchdog_thread" in locals() and watchdog_thread.is_alive():
-                        watchdog_thread.join(timeout=1.0)
-                except Exception:
-                    pass
-                # Propaga eventuale errore forzato dal watchdog per questo tentativo
-                try:
-                    if "forced_error_ref" in locals() and forced_error_ref.get("v"):
-                        forced_error = True
-                except Exception:
-                    pass
-
-                # Fine tentativo: se non abbiamo iniziato a ricevere dati,
-                # chiudi il processo e prova il prossimo
-                with self._state_lock:
-                    proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
-                if proc and proc.poll() is None and not started_streaming:
+                    # prova a spegnere il watchdog
                     try:
-                        proc.terminate()
-                        proc.wait(timeout=1.0)
+                        watchdog_stop.set()
+                        if "watchdog_thread" in locals() and watchdog_thread.is_alive():
+                            watchdog_thread.join(timeout=1.0)
                     except Exception:
+                        pass
+                    # Propaga eventuale errore forzato dal watchdog per questo tentativo
+                    try:
+                        if (
+                            not seek_restarted
+                            and "forced_error_ref" in locals()
+                            and forced_error_ref.get("v")
+                        ):
+                            forced_error = True
+                    except Exception:
+                        pass
+
+                    # Fine tentativo: chiudi il processo se non ancora terminato
+                    with self._state_lock:
+                        proc: Any = self._ffmpeg_process  # type: ignore[no-redef]
+                    if proc and proc.poll() is None and (not started_streaming or seek_restarted):
                         try:
                             proc.kill()
+                            proc.wait(timeout=0.5)
                         except Exception:
                             pass
-                # Se abbiamo iniziato lo streaming, interrompi la catena di fallback
-                if started_streaming or self._stop_event.is_set():
-                    break
+                    if seek_restarted or self._is_seek_interrupted(seek_seq_at_start):
+                        seek_restarted = True
+                        break
+                    # Se abbiamo iniziato lo streaming, interrompi la catena di fallback
+                    if started_streaming or self._stop_event.is_set():
+                        break
+
+                if (
+                    seek_restarted or self._is_seek_interrupted(last_seek_seq)
+                ) and not self._stop_event.is_set():
+                    continue
+                break
 
             # Post-loop: gestione esiti
             self.log.debug("[DEBUG] _stream_worker: cleaning up ffmpeg process")

@@ -200,6 +200,7 @@ class SmoothProgressBar(QWidget):
         self._live_mode = False
         self._seekable = False
         self._is_dragging = False
+        self._press_ratio = 0.0
         self._launch_progress = 1.0
         self._pulse_ring = 1.0
         self._shimmer_phase = 0.0
@@ -292,15 +293,18 @@ class SmoothProgressBar(QWidget):
         )
         self.update()
 
+    def _ratio_from_x(self, x: float) -> float:
+        margin_x = 7.0
+        usable_w = max(1.0, float(self.width()) - 2 * margin_x)
+        return max(0.0, min(1.0, (x - margin_x) / usable_w))
+
     def mousePressEvent(self, event) -> None:
         if self._seekable and event.button() == Qt.MouseButton.LeftButton:
-            margin_x = 7.0
-            usable_w = max(1.0, float(self.width()) - 2 * margin_x)
-            pos_x = float(event.position().x()) - margin_x
-            ratio = max(0.0, min(1.0, pos_x / usable_w))
+            ratio = self._ratio_from_x(float(event.position().x()))
+            self._press_ratio = ratio
             self._is_dragging = True
-            target_val = int(ratio * self._max)
-            self.setValue(target_val)
+            self._display_ratio = ratio
+            self.setValue(int(ratio * self._max))
             self.seek_requested.emit(ratio)
             self.update()
             return
@@ -308,12 +312,9 @@ class SmoothProgressBar(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         if self._seekable and self._is_dragging:
-            margin_x = 7.0
-            usable_w = max(1.0, float(self.width()) - 2 * margin_x)
-            pos_x = float(event.position().x()) - margin_x
-            ratio = max(0.0, min(1.0, pos_x / usable_w))
-            target_val = int(ratio * self._max)
-            self.setValue(target_val)
+            ratio = self._ratio_from_x(float(event.position().x()))
+            self._display_ratio = ratio
+            self.setValue(int(ratio * self._max))
             self.update()
             return
         super().mouseMoveEvent(event)
@@ -321,11 +322,11 @@ class SmoothProgressBar(QWidget):
     def mouseReleaseEvent(self, event) -> None:
         if self._seekable and self._is_dragging and event.button() == Qt.MouseButton.LeftButton:
             self._is_dragging = False
-            margin_x = 7.0
-            usable_w = max(1.0, float(self.width()) - 2 * margin_x)
-            pos_x = float(event.position().x()) - margin_x
-            ratio = max(0.0, min(1.0, pos_x / usable_w))
-            self.seek_requested.emit(ratio)
+            ratio = self._ratio_from_x(float(event.position().x()))
+            if abs(ratio - self._press_ratio) > 0.002:
+                self._display_ratio = ratio
+                self.setValue(int(ratio * self._max))
+                self.seek_requested.emit(ratio)
             self.update()
             return
         super().mouseReleaseEvent(event)
@@ -671,7 +672,7 @@ class ListenMoePlayer(QWidget):
             self._icon_channel = self._icon_channel_raw
             self._icon_codec = self._icon_codec_raw
             self._icon_quit = self._icon_quit_raw
-            self._icon_app = self._icon_app_raw
+            self._icon_app = self._make_icon_square(self._icon_app_raw)
             self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
 
         except Exception as e:
@@ -1145,10 +1146,7 @@ class ListenMoePlayer(QWidget):
         if not self.lyrics_button.isChecked() or self._ui_paused:
             return
         if self._is_local_mode():
-            if hasattr(self, "player") and self.player:
-                t = getattr(self.player, "get_time", lambda: 0.0)()
-                if t is not None and t >= 0:
-                    self.lyrics_panel.set_position(float(t))
+            self.lyrics_panel.set_position(self._get_local_playback_seconds())
             return
         epoch = self._current_start_epoch
         duration = self._current_duration_seconds
@@ -1559,10 +1557,12 @@ class ListenMoePlayer(QWidget):
         self._mini_timer = QTimer(self)
         self._mini_timer.setInterval(500)
         self._mini_timer.timeout.connect(self._sync_mini_hud)
-        self._mini_shortcut = QShortcut(QKeySequence("F9"), self)
-        self._mini_shortcut.activated.connect(self.toggle_mini_hud)
-        self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
-        self._settings_shortcut.activated.connect(self._shortcut_settings)
+        self._mini_shortcut = self._register_shortcut("F9", self.toggle_mini_hud)
+        self._settings_shortcut = self._register_shortcut(
+            "Ctrl+,",
+            self._shortcut_settings,
+            button_getter=lambda: getattr(self, "settings_button", None),
+        )
 
         self.mini_button = MiniIconButton("mini", self._title_bar)
         self.mini_button.setFixedSize(28, 28)
@@ -1593,12 +1593,7 @@ class ListenMoePlayer(QWidget):
         self.mini_hud.artist.set_text(self._current_artist or "")
         duration = self._current_duration_seconds
         if self._is_local_mode():
-            curr_t = 0.0
-            if hasattr(self, "player") and self.player:
-                t = getattr(self.player, "get_time", lambda: 0.0)()
-                if t is not None:
-                    curr_t = float(t)
-            elapsed = curr_t
+            elapsed = self._get_local_playback_seconds()
             self.mini_hud.track_progress.set_seekable(True)
         else:
             self.mini_hud.track_progress.set_seekable(False)
@@ -1863,27 +1858,104 @@ class ListenMoePlayer(QWidget):
                 QTimer.singleShot(400, self.prompt_select_local_music)
 
             # Global Keyboard Shortcuts (Class scope)
-            QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._vol_down)
-            QShortcut(QKeySequence(Qt.Key.Key_Plus), self).activated.connect(self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Minus), self).activated.connect(self._vol_down)
-            QShortcut(QKeySequence("="), self).activated.connect(self._vol_up)
+            self._register_shortcut(Qt.Key.Key_Up, self._vol_up)
+            self._register_shortcut(Qt.Key.Key_Down, self._vol_down)
+            self._register_shortcut(Qt.Key.Key_Plus, self._vol_up)
+            self._register_shortcut(Qt.Key.Key_Minus, self._vol_down)
+            self._register_shortcut("=", self._vol_up)
 
-            # Legacy/Specific Shortcuts
-            QShortcut(QKeySequence("Space"), self).activated.connect(self.pause_resume)
-            QShortcut(QKeySequence("S"), self).activated.connect(self.stop_stream)
-            QShortcut(QKeySequence("M"), self).activated.connect(self.toggle_mute_shortcut)
-            QShortcut(QKeySequence(Qt.Key.Key_MediaNext), self).activated.connect(
-                self.play_next_track
+            # Playback & Navigation Shortcuts (trigger button animations just like clicks)
+            self._register_shortcut(
+                "Space",
+                self.pause_resume,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "hero_play", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
             )
-            QShortcut(QKeySequence(Qt.Key.Key_MediaPrevious), self).activated.connect(
-                self.play_previous_track
+            self._register_shortcut(
+                "S",
+                self.stop_stream,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_stop", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
             )
-            QShortcut(QKeySequence("F6"), self).activated.connect(self.play_next_track)
-            QShortcut(QKeySequence("F5"), self).activated.connect(self.play_previous_track)
-            QShortcut(QKeySequence("Ctrl+L"), self).activated.connect(self.show_local_queue_dialog)
+            self._register_shortcut(
+                "M",
+                self.toggle_mute_shortcut,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "speaker_btn", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                Qt.Key.Key_MediaNext,
+                self.play_next_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_next", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                Qt.Key.Key_MediaPrevious,
+                self.play_previous_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_prev", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "F6",
+                self.play_next_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_next", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "F5",
+                self.play_previous_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_prev", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "Ctrl+L",
+                self.show_local_queue_dialog,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_queue", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
         except Exception:
             pass
+
+    def _register_shortcut(self, key: Any, handler: Any, button_getter: Any = None) -> QShortcut:
+        """Bind a window shortcut and animate the associated UI button if present."""
+        shortcut = QShortcut(QKeySequence(key), self)
+
+        def _on_activated() -> None:
+            if button_getter is not None:
+                try:
+                    btn = button_getter()
+                    if btn is not None and hasattr(btn, "trigger_click_animation"):
+                        btn.trigger_click_animation()
+                except Exception:
+                    pass
+            handler()
+
+        shortcut.activated.connect(_on_activated)
+        return shortcut
 
     # ------------------- Volume Helpers -------------------
 
@@ -2561,13 +2633,9 @@ class ListenMoePlayer(QWidget):
             self._update_lyrics_position()
 
             if self._is_local_mode():
-                curr_t = 0.0
-                if hasattr(self, "player") and self.player:
-                    t = getattr(self.player, "get_time", lambda: 0.0)()
-                    if t is not None:
-                        curr_t = float(t)
+                curr_t = self._get_local_playback_seconds()
                 dur = getattr(self, "_current_duration_seconds", None) or 0
-                if dur > 0:
+                if dur > 0 and not getattr(self.song_progress, "_is_dragging", False):
                     self.song_progress.setValue(int(min(curr_t, dur) * 1000))
                 current_int_sec = int(curr_t)
                 if current_int_sec != getattr(self, "_last_integer_second", -1):
@@ -3315,23 +3383,26 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def _make_tray_icon(self, icon: QIcon) -> QIcon:
-        """Build a tray-friendly square icon that stays large without cropping."""
+    def _build_square_icon(
+        self, icon: QIcon, sizes: tuple[int, ...], fill_ratio: float = 1.0
+    ) -> QIcon:
+        """Trim transparent margins and render centered square icons for multiple target sizes."""
         try:
             if icon is None or icon.isNull():
                 return icon
 
             source_pm = None
             try:
-                sizes = icon.availableSizes()
-                if sizes:
-                    best = max(sizes, key=lambda s: int(s.width()) * int(s.height()))
+                avail = icon.availableSizes()
+                if avail:
+                    best = max(avail, key=lambda s: int(s.width()) * int(s.height()))
                     source_pm = icon.pixmap(best)
             except Exception:
                 source_pm = None
 
             if source_pm is None or source_pm.isNull():
-                source_pm = icon.pixmap(512, 512)
+                max_target = max(sizes) if sizes else 512
+                source_pm = icon.pixmap(max_target, max_target)
             if source_pm.isNull():
                 return icon
             source_pm.setDevicePixelRatio(1.0)
@@ -3341,9 +3412,8 @@ class ListenMoePlayer(QWidget):
                 trimmed.setDevicePixelRatio(1.0)
                 source_pm = trimmed
 
-            tray_icon = QIcon()
-            fill_ratio = 0.95
-            for sz in (16, 20, 24, 32, 48, 64):
+            square_icon = QIcon()
+            for sz in sizes:
                 target_side = max(1, int(round(sz * fill_ratio)))
                 fitted = source_pm.scaled(
                     target_side,
@@ -3367,11 +3437,15 @@ class ListenMoePlayer(QWidget):
                     finally:
                         painter.end()
                 if not canvas.isNull():
-                    tray_icon.addPixmap(canvas)
+                    square_icon.addPixmap(canvas)
 
-            return tray_icon if not tray_icon.isNull() else icon
+            return square_icon if not square_icon.isNull() else icon
         except Exception:
             return icon
+
+    def _make_tray_icon(self, icon: QIcon) -> QIcon:
+        """Build a tray-friendly square icon that stays large without cropping."""
+        return self._build_square_icon(icon, sizes=(16, 20, 24, 32, 48, 64), fill_ratio=0.95)
 
     def _trim_transparent_margins(self, pixmap: QPixmap, alpha_threshold: int = 0) -> QPixmap:
         """Trim outer transparent pixels so tiny tray sizes keep more visible content."""
@@ -3430,47 +3504,10 @@ class ListenMoePlayer(QWidget):
             return pixmap
 
     def _make_icon_square(self, icon: QIcon, size: int = 512) -> QIcon:
-        """Adds transparent padding to non-square icons to prevent stretching,
-        after cropping existing transparent whitespace to maximize visible area."""
-        try:
-            if icon.isNull():
-                return icon
-            # Use a large base pixmap to preserve quality
-            pixmap = icon.pixmap(size, size)
-            if pixmap.isNull():
-                return icon
-            pixmap.setDevicePixelRatio(1.0)
-
-            # --- Autocrop transparent whitespace ---
-            try:
-                cropped = self._trim_transparent_margins(pixmap, alpha_threshold=8)
-                if cropped is not None and not cropped.isNull():
-                    pixmap = cropped
-                    pixmap.setDevicePixelRatio(1.0)
-            except Exception:
-                pass
-
-            w, h = pixmap.width(), pixmap.height()
-            if w == h:
-                return QIcon(pixmap)
-
-            # Create a square transparent canvas based on the largest dimension
-            max_side = max(w, h)
-            square_pm = QPixmap(max_side, max_side)
-            square_pm.fill(Qt.GlobalColor.transparent)
-
-            # Center the original (now cropped) pixmap onto the square canvas
-            painter = QPainter(square_pm)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            x = (max_side - w) // 2
-            y = (max_side - h) // 2
-            painter.drawPixmap(x, y, pixmap)
-            painter.end()
-
-            return QIcon(square_pm)
-        except Exception:
-            return icon
+        """Pad non-square app icons onto square transparent canvases for taskbar and window use."""
+        base_sizes = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+        sizes = base_sizes if size in base_sizes else (*base_sizes, size)
+        return self._build_square_icon(icon, sizes=sizes, fill_ratio=1.0)
 
     def _set_buffer_bar_indeterminate(self, active: bool) -> None:
         try:
@@ -4266,7 +4303,14 @@ class ListenMoePlayer(QWidget):
                     dur = int(self._current_duration_seconds)
                 except Exception:
                     dur = None
-                if dur and self._current_start_epoch is not None:
+                if dur and self._is_local_mode():
+                    curr_t = self._get_local_playback_seconds()
+                    elapsed_sec = max(0, min(int(curr_t), dur))
+                    remaining_sec = max(0, dur - elapsed_sec)
+                    mmss = self._format_mmss(remaining_sec)
+                    if hasattr(self, "song_elapsed_label"):
+                        self.song_elapsed_label.setText(self._format_mmss(elapsed_sec))
+                elif dur and self._current_start_epoch is not None:
                     try:
                         import time
 
@@ -5017,6 +5061,52 @@ class ListenMoePlayer(QWidget):
             str(self.settings.value(KEY_STATION, DEFAULT_STATION)).lower().strip() == STATION_LOCAL
         )
 
+    def _get_local_playback_seconds(self) -> float:
+        """Return current local track playback position in seconds (non-negative)."""
+        if hasattr(self, "player") and self.player:
+            t = getattr(self.player, "get_time", lambda: 0.0)()
+            if t is not None:
+                raw_t = max(0.0, float(t))
+                hold_until = getattr(self, "_seek_hold_until", 0.0)
+                if hold_until > 0.0:
+                    hold_target = getattr(self, "_seek_hold_target", raw_t)
+                    if time.monotonic() < hold_until and abs(raw_t - hold_target) > 1.5:
+                        return float(hold_target)
+                    self._seek_hold_until = 0.0
+                return raw_t
+        return 0.0
+
+    def _apply_local_seek(self, target_sec: float, duration_sec: Optional[float] = None) -> None:
+        """Seek local playback to target_sec and synchronize UI state without bouncing."""
+        dur = (
+            duration_sec
+            if duration_sec is not None
+            else getattr(self, "_current_duration_seconds", 0)
+        )
+        clamped = max(0.0, float(target_sec))
+        if dur and dur > 0:
+            clamped = min(float(dur), clamped)
+        if hasattr(self, "player") and self.player:
+            try:
+                self.player.seek(clamped)
+            except Exception as e:
+                self.log.warning(f"[UI] Seek failed: {e}")
+        self._seek_hold_target = clamped
+        self._seek_hold_until = time.monotonic() + 0.35
+        self._last_integer_second = int(clamped)
+        if dur and dur > 0:
+            self.song_progress._display_ratio = clamped / float(dur)
+        else:
+            self.song_progress._display_ratio = 0.0
+        self.song_progress.setValue(int(clamped * 1000))
+        if hasattr(self, "lyrics_panel") and self.lyrics_panel:
+            self.lyrics_panel.set_position(clamped)
+        if hasattr(self, "song_elapsed_label"):
+            self.song_elapsed_label.setText(self._format_mmss(int(clamped)))
+        if hasattr(self, "song_time_label") and dur and dur > 0:
+            rem = max(0, int(float(dur) - clamped))
+            self.song_time_label.setText(self._format_mmss(rem))
+
     def play_next_track(self) -> None:
         """Advances to the next track in the local queue and starts playback."""
         if not self._is_local_mode():
@@ -5033,17 +5123,10 @@ class ListenMoePlayer(QWidget):
         """Returns to previous track (or restarts current track if >3s in)."""
         if not self._is_local_mode():
             return
-        curr_time = 0.0
-        if hasattr(self, "player") and self.player:
-            t = getattr(self.player, "get_time", lambda: 0.0)()
-            if t is not None:
-                curr_time = float(t)
+        curr_time = self._get_local_playback_seconds()
         if curr_time > 3.0:
             try:
-                self.player.seek(0.0)
-                self.song_progress.setValue(0)
-                if hasattr(self, "lyrics_panel") and self.lyrics_panel:
-                    self.lyrics_panel.set_position(0.0)
+                self._apply_local_seek(0.0)
                 return
             except Exception:
                 pass
@@ -5130,20 +5213,8 @@ class ListenMoePlayer(QWidget):
         if not track or track.duration_seconds <= 0:
             return
         target_sec = max(0.0, min(track.duration_seconds, ratio * track.duration_seconds))
-        if hasattr(self, "player") and self.player:
-            try:
-                self.player.seek(target_sec)
-                self.log.info(f"[UI] Local seek to {target_sec:.2f}s ({ratio * 100:.1f}%)")
-            except Exception as e:
-                self.log.warning(f"[UI] Seek failed: {e}")
-        self.song_progress.setValue(int(target_sec * 1000))
-        if hasattr(self, "lyrics_panel") and self.lyrics_panel:
-            self.lyrics_panel.set_position(target_sec)
-        if hasattr(self, "song_elapsed_label"):
-            self.song_elapsed_label.setText(self._format_mmss(int(target_sec)))
-        if hasattr(self, "song_time_label"):
-            rem = max(0, int(track.duration_seconds - target_sec))
-            self.song_time_label.setText(f"-{self._format_mmss(rem)}")
+        self._apply_local_seek(target_sec, duration_sec=track.duration_seconds)
+        self.log.info(f"[UI] Local seek to {target_sec:.2f}s ({ratio * 100:.1f}%)")
 
     def _on_local_track_changed(self, track: Optional[LocalTrackInfo]) -> None:
         """Updates UI display, cover art, and lyrics cascade when local track changes."""

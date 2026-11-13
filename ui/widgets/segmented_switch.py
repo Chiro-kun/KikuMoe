@@ -210,12 +210,16 @@ class SettingsIconButton(QPushButton):
         self.update()
         super().leaveEvent(a0)
 
+    def trigger_click_animation(self) -> None:
+        """Start the gear bounce and spin animation (mouse press or shortcut)."""
+        self._anim_step = 1
+        self._scale = 0.84
+        self._anim_timer.start()
+        self.update()
+
     def mousePressEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
-            self._anim_step = 1
-            self._scale = 0.84
-            self._anim_timer.start()
-            self.update()
+            self.trigger_click_animation()
         super().mousePressEvent(e)
 
     def _tick_anim(self) -> None:
