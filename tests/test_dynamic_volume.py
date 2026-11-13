@@ -381,7 +381,10 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
         # Compact windowed mode: badges never overflow/clip past bottom of stage
         player.resize(420, 700)
         qapp.processEvents()
-        assert player.status_footer.y() + player.status_footer.height() <= player._player_stage.height()
+        assert (
+            player.status_footer.y() + player.status_footer.height()
+            <= player._player_stage.height()
+        )
 
         # Wide windowed mode below hero height threshold: badges anchor edge-to-edge at footer
         player.resize(1100, 760)
@@ -391,7 +394,10 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
             player.status_footer.y() + player.status_footer.height()
             <= player._player_stage.height()
         )
-        assert player.status_footer.y() + player.status_footer.height() <= player._player_stage.height()
+        assert (
+            player.status_footer.y() + player.status_footer.height()
+            <= player._player_stage.height()
+        )
         assert player._stage_column.width() == 760
 
         player.resize(940, 860)
@@ -401,7 +407,10 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
             player.status_footer.y() + player.status_footer.height()
             <= player._player_stage.height()
         )
-        assert player.status_footer.y() + player.status_footer.height() <= player._player_stage.height()
+        assert (
+            player.status_footer.y() + player.status_footer.height()
+            <= player._player_stage.height()
+        )
 
         footer_start_y = player.status_footer.mapTo(player, QPoint(0, 0)).y()
         footer_start_w = player.status_footer.width()
