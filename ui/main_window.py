@@ -2310,7 +2310,12 @@ class ListenMoePlayer(QWidget):
         stage_h = player_stage.height()
         if stage_w <= 0 or stage_h <= 0:
             return
-        footer_h = max(24, footer.sizeHint().height())
+        footer_h = max(
+            30,
+            footer.minimumHeight(),
+            footer.minimumSizeHint().height(),
+            footer.sizeHint().height(),
+        )
 
         # Un-docked footer bar spans full stage width (aligned with top_bar wings)
         footer_x = 0
@@ -2345,7 +2350,16 @@ class ListenMoePlayer(QWidget):
         dock_sp = getattr(self, "_footer_dock_spacer", None)
         layout = getattr(self, "_layout", None)
 
-        footer_h = max(24, footer.sizeHint().height()) if footer is not None else 28
+        footer_h = (
+            max(
+                30,
+                footer.minimumHeight(),
+                footer.minimumSizeHint().height(),
+                footer.sizeHint().height(),
+            )
+            if footer is not None
+            else 30
+        )
         gap = layout.spacing() if layout is not None else 7
         is_hero = bool(getattr(self, "_stage_mode_hero", False))
 
