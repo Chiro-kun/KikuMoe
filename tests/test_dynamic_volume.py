@@ -370,14 +370,22 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
     player = main_window.ListenMoePlayer()
     try:
         player.show()
+        # Wide windowed mode below hero height threshold: badges anchor edge-to-edge at footer
+        player.resize(1100, 760)
+        qapp.processEvents()
+        assert player.status_footer.width() == player._player_stage.width()
+        assert player._stage_column.width() == 760
+
         player.resize(940, 860)
         qapp.processEvents()
+        assert player.status_footer.width() == player._player_stage.width()
 
         footer_start_y = player.status_footer.mapTo(player, QPoint(0, 0)).y()
+        footer_start_w = player.status_footer.width()
         footer_start_bottom = footer_start_y + player.status_footer.height()
         assert player.height() - footer_start_bottom <= 16
 
-        # Crossing into hero stage (960x820) must smoothly animate the badges upward
+        # Crossing into hero stage (960x820) must smoothly animate badges up & inward
         player.resize(970, 860)
         qapp.processEvents()
         assert player._stage_hero_anim.state() == QVariantAnimation.State.Running
@@ -385,24 +393,30 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
         player._on_stage_hero_anim_changed(0.5)
         qapp.processEvents()
         footer_mid_y = player.status_footer.mapTo(player, QPoint(0, 0)).y()
+        footer_mid_w = player.status_footer.width()
 
-        QTest.qWait(320)
+        QTest.qWait(300)
         qapp.processEvents()
         assert player._stage_hero_anim.state() == QVariantAnimation.State.Stopped
         assert player._stage_hero_blend == 1.0
         footer_end_y = player.status_footer.mapTo(player, QPoint(0, 0)).y()
+        footer_end_w = player.status_footer.width()
         assert footer_end_y < footer_mid_y < footer_start_y
+        assert footer_end_w == player._stage_column.width() == 760
+        assert footer_end_w < footer_mid_w < player._player_stage.width()
+        assert footer_start_w > footer_end_w
         assert player.height() - (footer_end_y + player.status_footer.height()) > 20
 
-        # Shrinking back below hero stage must animate the badges back down
+        # Shrinking back below hero stage must animate badges back down & full-width
         player.resize(940, 860)
         qapp.processEvents()
         assert player._stage_hero_anim.state() == QVariantAnimation.State.Running
 
-        QTest.qWait(320)
+        QTest.qWait(300)
         qapp.processEvents()
         assert player._stage_hero_anim.state() == QVariantAnimation.State.Stopped
         assert player._stage_hero_blend == 0.0
+        assert player.status_footer.width() == player._player_stage.width()
         footer_restored_bottom = (
             player.status_footer.mapTo(player, QPoint(0, 0)).y() + player.status_footer.height()
         )

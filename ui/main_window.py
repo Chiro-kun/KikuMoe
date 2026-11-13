@@ -15,6 +15,7 @@ from PyQt6.QtCore import (
     QEvent,
     QPoint,
     QPointF,
+    QRect,
     QRectF,
     QSettings,
     QSize,
@@ -799,7 +800,7 @@ class ListenMoePlayer(QWidget):
         self._player_stage_outer.setContentsMargins(0, 0, 0, 0)
         self._player_stage_outer.setSpacing(0)
         self._stage_outer_top_spacer = QSpacerItem(
-            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
         )
         self._player_stage_outer.addSpacerItem(self._stage_outer_top_spacer)
 
@@ -810,17 +811,19 @@ class ListenMoePlayer(QWidget):
         self._layout.setSpacing(7)
         self._player_stage_outer.addWidget(self._stage_column)
         self._stage_outer_bottom_spacer = QSpacerItem(
-            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
         )
         self._player_stage_outer.addSpacerItem(self._stage_outer_bottom_spacer)
+        self._footer_dock_spacer: QSpacerItem | None = None
         self._stage_mode_hero: bool | None = None
-        self._stage_was_extra_v = False
         self._stage_hero_blend = 0.0
         self._stage_hero_anim = QVariantAnimation(self)
-        self._stage_hero_anim.setDuration(240)
+        self._stage_hero_anim.setDuration(220)
         self._stage_hero_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         self._stage_hero_anim.valueChanged.connect(self._on_stage_hero_anim_changed)
         self._stage_hero_anim.finished.connect(self._on_stage_hero_anim_finished)
+        self._player_stage.installEventFilter(self)
+        self._stage_column.installEventFilter(self)
         self._view_stack.addWidget(self._player_stage)
 
         self._canvas_outer_layout.addWidget(self._body_container, 1)
@@ -938,11 +941,6 @@ class ListenMoePlayer(QWidget):
         self.lyrics_panel = LyricsPanel()
         self.lyrics_panel.hide()
         self._artwork_row.addWidget(self.lyrics_panel, 1)
-        self._stage_top_fill = QWidget()
-        self._stage_top_fill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._stage_top_fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self._stage_top_fill.setVisible(False)
-        self._layout.addWidget(self._stage_top_fill, 1)
         self._layout.addLayout(self._artwork_row)
         self.lyrics_provider = LyricsProvider(self)
         self.lyrics_provider.finished.connect(self._on_lyrics_result)
@@ -1169,7 +1167,8 @@ class ListenMoePlayer(QWidget):
         if outer is not None:
             avail_w = max(340, cur_win_w - 32)
             side_pad = max(0, (avail_w - cur_stage_w) // 2)
-            outer.setContentsMargins(side_pad, 0, side_pad, 0)
+            _, _, _, cur_bottom = outer.getContentsMargins()
+            outer.setContentsMargins(side_pad, 0, side_pad, cur_bottom)
         self.ambient_cover.setMaximumWidth(
             round(start_cover + (end_cover - start_cover) * progress)
         )
@@ -1177,6 +1176,7 @@ class ListenMoePlayer(QWidget):
         self._lyrics_effect.setOpacity(start_op + (end_op - start_op) * progress)
         if start_width != end_width:
             self.resize(cur_win_w, self.height())
+        self._sync_status_footer_geometry()
 
     def _finish_lyrics_transition(self):
         if not self._lyrics_transition_values:
@@ -1295,11 +1295,6 @@ class ListenMoePlayer(QWidget):
         self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
 
         self._layout.addWidget(self.playback_controls)
-        self._stage_mid_fill = QWidget()
-        self._stage_mid_fill.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self._stage_mid_fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self._stage_mid_fill.setVisible(False)
-        self._layout.addWidget(self._stage_mid_fill, 1)
 
     def _init_progress_section(self):
         """
@@ -1345,18 +1340,22 @@ class ListenMoePlayer(QWidget):
             self.sleep_timer_widget.set_minutes(30)
 
         self._layout.addWidget(self.sleep_timer_widget)
+        self._footer_dock_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        self._layout.addSpacerItem(self._footer_dock_spacer)
 
     def _init_footer_section(self):
         """Initializes the StatusFooter showing audio backend, codec, and session timer."""
-        self.status_footer = StatusFooter()
+        self.status_footer = StatusFooter(self._player_stage)
+        self.status_footer.raise_()
         self.footer_bar = self.status_footer
         self.session_label = self.status_footer.session_label
         self.session_label.setText(self.i18n.t("session_timer", time="00:00"))
 
         fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
         self.status_footer.set_format(fmt)
-
-        self._layout.addWidget(self.status_footer)
+        self._sync_status_footer_geometry()
 
     def _create_player(self, on_event):
         """
@@ -2264,6 +2263,19 @@ class ListenMoePlayer(QWidget):
         super().resizeEvent(a0)
         self._update_responsive_stage()
 
+    def eventFilter(self, a0, a1) -> bool:
+        try:
+            if (
+                a1 is not None
+                and a1.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.LayoutRequest)
+                and a0
+                in (getattr(self, "_player_stage", None), getattr(self, "_stage_column", None))
+            ):
+                self._sync_status_footer_geometry()
+        except Exception:
+            pass
+        return super().eventFilter(a0, a1)
+
     def _on_stage_hero_anim_changed(self, value) -> None:
         if getattr(self, "_mini_mode", False):
             anim = getattr(self, "_stage_hero_anim", None)
@@ -2274,89 +2286,89 @@ class ListenMoePlayer(QWidget):
             self._stage_hero_blend = max(0.0, min(1.0, float(value)))
         except (TypeError, ValueError):
             return
-        self._apply_stage_hero_layout()
+        self._sync_status_footer_geometry()
 
     def _on_stage_hero_anim_finished(self) -> None:
         if getattr(self, "_mini_mode", False):
             return
         is_hero = bool(getattr(self, "_stage_mode_hero", False))
         self._stage_hero_blend = 1.0 if is_hero else 0.0
-        self._apply_stage_hero_layout()
+        self._sync_status_footer_geometry()
 
-    def _apply_stage_hero_layout(self) -> None:
+    def _sync_status_footer_geometry(self) -> None:
+        footer = getattr(self, "status_footer", None)
+        player_stage = getattr(self, "_player_stage", None)
+        stage_col = getattr(self, "_stage_column", None)
+        if (
+            footer is None
+            or player_stage is None
+            or stage_col is None
+            or getattr(self, "_mini_mode", False)
+        ):
+            return
+        stage_w = player_stage.width()
+        stage_h = player_stage.height()
+        if stage_w <= 0 or stage_h <= 0:
+            return
+        footer_h = max(24, footer.sizeHint().height())
+
+        # Un-docked footer bar spans full stage width (aligned with top_bar wings)
+        footer_x = 0
+        footer_w = stage_w
+        footer_y = max(0, stage_h - footer_h)
+
+        # Hero docked slot aligns horizontally with player controls inside _stage_column
+        col_geo = stage_col.geometry()
+        if col_geo.width() > 0 and col_geo.height() > 0:
+            docked_x = col_geo.x()
+            docked_w = col_geo.width()
+            docked_y = max(0, col_geo.y() + col_geo.height() - footer_h)
+        else:
+            docked_x, docked_y, docked_w = footer_x, footer_y, footer_w
+
+        blend = max(0.0, min(1.0, float(getattr(self, "_stage_hero_blend", 0.0))))
+        target = QRect(
+            round(footer_x + (docked_x - footer_x) * blend),
+            round(footer_y + (docked_y - footer_y) * blend),
+            round(footer_w + (docked_w - footer_w) * blend),
+            footer_h,
+        )
+        if footer.geometry() != target:
+            footer.setGeometry(target)
+        footer.raise_()
+
+    def _apply_stage_hero_layout(self, side_pad: int) -> None:
         outer = getattr(self, "_player_stage_outer", None)
         if outer is None:
             return
-        top_sp = getattr(self, "_stage_outer_top_spacer", None)
-        bot_sp = getattr(self, "_stage_outer_bottom_spacer", None)
-        top_fill = getattr(self, "_stage_top_fill", None)
-        mid_fill = getattr(self, "_stage_mid_fill", None)
-        stage_col = getattr(self, "_stage_column", None)
-        player_stage = getattr(self, "_player_stage", None)
+        footer = getattr(self, "status_footer", None)
+        dock_sp = getattr(self, "_footer_dock_spacer", None)
         layout = getattr(self, "_layout", None)
 
-        extra_v = bool(getattr(self, "_stage_was_extra_v", False))
-        blend = max(0.0, min(1.0, float(getattr(self, "_stage_hero_blend", 0.0))))
+        footer_h = max(24, footer.sizeHint().height()) if footer is not None else 28
+        gap = layout.spacing() if layout is not None else 7
+        is_hero = bool(getattr(self, "_stage_mode_hero", False))
 
-        if blend >= 0.999:
-            if top_sp is not None:
-                top_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-            if bot_sp is not None:
-                bot_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-            if stage_col is not None:
-                stage_col.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            for fill in (top_fill, mid_fill):
-                if fill is not None:
-                    fill.setMinimumHeight(0)
-                    fill.setMaximumHeight(16777215)
-                    fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-                    fill.setVisible(False)
-        elif blend <= 0.001:
-            if top_sp is not None:
-                top_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            if bot_sp is not None:
-                bot_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            if stage_col is not None:
-                stage_col.setSizePolicy(
-                    QSizePolicy.Policy.Expanding,
-                    QSizePolicy.Policy.Expanding if extra_v else QSizePolicy.Policy.Preferred,
+        changed = False
+        if dock_sp is not None:
+            want_dock_h = (footer_h + gap) if is_hero else 0
+            if dock_sp.sizeHint().height() != want_dock_h:
+                dock_sp.changeSize(
+                    0, want_dock_h, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
                 )
-            for fill in (top_fill, mid_fill):
-                if fill is not None:
-                    fill.setMinimumHeight(0)
-                    fill.setMaximumHeight(16777215)
-                    fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-                    fill.setVisible(extra_v)
-        else:
-            stage_h = player_stage.height() if player_stage is not None else 0
-            if stage_h <= 0:
-                stage_h = max(0, self.height() - CustomTitleBar.HEIGHT - 44)
-            content_h = 0
-            if stage_col is not None:
-                for fill in (top_fill, mid_fill):
-                    if fill is not None:
-                        fill.setVisible(True)
-                        fill.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-                        fill.setFixedHeight(0)
-                if layout is not None:
-                    layout.invalidate()
-                content_h = stage_col.sizeHint().height()
-            half_slack = max(0, (stage_h - content_h) // 2)
-            fill_h = round(half_slack * (1.0 - blend))
-            for fill in (top_fill, mid_fill):
-                if fill is not None:
-                    fill.setVisible(fill_h > 0)
-                    fill.setFixedHeight(max(0, fill_h))
-            if stage_col is not None:
-                stage_col.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            if top_sp is not None:
-                top_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
-            if bot_sp is not None:
-                bot_sp.changeSize(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+                changed = True
 
-        outer.invalidate()
-        if layout is not None:
-            layout.invalidate()
+        want_bottom = 0 if is_hero else (footer_h + 7)
+        cur_left, _, cur_right, cur_bottom = outer.getContentsMargins()
+        if cur_left != side_pad or cur_right != side_pad or cur_bottom != want_bottom:
+            outer.setContentsMargins(side_pad, 0, side_pad, want_bottom)
+            changed = True
+
+        if changed:
+            outer.invalidate()
+            if layout is not None:
+                layout.invalidate()
+        self._sync_status_footer_geometry()
 
     def _update_responsive_stage(self) -> None:
         """Keep the player compact at default size and frame a centered hero stage in fullscreen."""
@@ -2374,7 +2386,6 @@ class ListenMoePlayer(QWidget):
             lyrics_open = lyrics_panel is not None and not lyrics_panel.isHidden()
             max_col_w = 980 if lyrics_open else 760
             side_pad = max(0, (avail_w - max_col_w) // 2)
-            outer.setContentsMargins(side_pad, 0, side_pad, 0)
 
             if self.width() < 680 and self.height() < 780:
                 target_cover = 180
@@ -2424,10 +2435,7 @@ class ListenMoePlayer(QWidget):
                 or self.isMaximized()
                 or (self.width() >= 960 and self.height() >= 820)
             )
-            extra_v = self.height() > (self._effective_min_window_height() + 8)
             prev_hero = getattr(self, "_stage_mode_hero", None)
-            was_extra_v = bool(getattr(self, "_stage_was_extra_v", False))
-            self._stage_was_extra_v = extra_v
             anim = getattr(self, "_stage_hero_anim", None)
 
             if prev_hero is None or not self.isVisible():
@@ -2435,31 +2443,26 @@ class ListenMoePlayer(QWidget):
                 self._stage_hero_blend = 1.0 if is_hero_stage else 0.0
                 if anim is not None and anim.state() == QVariantAnimation.State.Running:
                     anim.stop()
-                self._apply_stage_hero_layout()
+                self._apply_stage_hero_layout(side_pad)
                 return
 
             if prev_hero != is_hero_stage:
                 self._stage_mode_hero = is_hero_stage
                 target_blend = 1.0 if is_hero_stage else 0.0
-                should_animate = anim is not None and (
-                    (is_hero_stage and (was_extra_v or 0.01 < self._stage_hero_blend < 0.99))
-                    or (not is_hero_stage and (extra_v or 0.01 < self._stage_hero_blend < 0.99))
-                )
-                if should_animate and anim is not None:
+                self._apply_stage_hero_layout(side_pad)
+                if anim is not None:
                     if anim.state() == QVariantAnimation.State.Running:
                         anim.stop()
                     anim.setStartValue(float(getattr(self, "_stage_hero_blend", 0.0)))
                     anim.setEndValue(target_blend)
                     anim.start()
                 else:
-                    if anim is not None and anim.state() == QVariantAnimation.State.Running:
-                        anim.stop()
                     self._stage_hero_blend = target_blend
-                self._apply_stage_hero_layout()
+                self._sync_status_footer_geometry()
             else:
                 if anim is None or anim.state() != QVariantAnimation.State.Running:
                     self._stage_hero_blend = 1.0 if is_hero_stage else 0.0
-                self._apply_stage_hero_layout()
+                self._apply_stage_hero_layout(side_pad)
         except Exception:
             pass
 
