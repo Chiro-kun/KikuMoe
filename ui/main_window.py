@@ -549,6 +549,8 @@ class ListenMoePlayer(QWidget):
         self._current_start_epoch: Optional[float] = None
         self._current_cover_ref: Optional[str] = None
         self._current_cover_url: Optional[str] = None
+        self._current_cover_bytes_digest: Optional[bytes] = None
+        self._current_local_cover_sig: Optional[tuple[str, str, int, int]] = None
         self._cover_cache: Dict[str, QPixmap] = {}
         self._cover_download_lock = threading.Lock()
         self._cover_download_inflight: Set[str] = set()
@@ -2808,6 +2810,8 @@ class ListenMoePlayer(QWidget):
                     self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
                 self._current_cover_url = None
                 self._current_cover_ref = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
                 cfg = get_station_config(clean_id)
                 if hasattr(self, "stream_tag_label") and self.stream_tag_label:
                     tag_suffix = "PLAYLIST" if clean_id == STATION_LOCAL else "STREAM"
@@ -2821,8 +2825,6 @@ class ListenMoePlayer(QWidget):
                         icon_path = os.path.join(self._icon_dir, icon_file)
                         if os.path.isfile(icon_path):
                             self._set_album_cover_pixmap(QPixmap(icon_path))
-                else:
-                    self._set_album_cover_pixmap(None)
 
                 if clean_id == STATION_LOCAL:
                     curr_track = self.local_playlist.get_current_track()
@@ -3546,16 +3548,49 @@ class ListenMoePlayer(QWidget):
                     else cover_ref
                 )
                 if os.path.isfile(local_file):
-                    self._current_cover_url = cover_ref
-                    pix = QPixmap(local_file)
-                    if not pix.isNull():
-                        self._set_album_cover_pixmap(pix)
+                    try:
+                        st = os.stat(local_file)
+                        local_sig: Optional[tuple[str, str, int, int]] = (
+                            cover_ref,
+                            local_file,
+                            int(st.st_mtime_ns),
+                            int(st.st_size),
+                        )
+                    except OSError:
+                        local_sig = None
+
+                    if local_sig is not None and local_sig == getattr(
+                        self, "_current_local_cover_sig", None
+                    ):
                         return
+
+                    raw_bytes: Optional[bytes] = None
+                    try:
+                        with open(local_file, "rb") as f:
+                            raw_bytes = f.read((4 * 1024 * 1024) + 1)
+                    except OSError:
+                        raw_bytes = None
+
+                    if raw_bytes and len(raw_bytes) <= (4 * 1024 * 1024):
+                        digest = hashlib.blake2b(raw_bytes, digest_size=16).digest()
+                        if digest == getattr(self, "_current_cover_bytes_digest", None):
+                            self._current_cover_url = cover_ref
+                            self._current_local_cover_sig = local_sig
+                            return
+                        pix = QPixmap()
+                        if pix.loadFromData(raw_bytes) and not pix.isNull():
+                            self._current_cover_url = cover_ref
+                            self._current_local_cover_sig = local_sig
+                            self._current_cover_bytes_digest = digest
+                            self._set_album_cover_pixmap(pix)
+                            return
 
             cover_url = self._normalize_album_cover_url(cover_ref)
             if cover_url == self._current_cover_url:
                 return
             self._current_cover_url = cover_url
+            self._current_local_cover_sig = None
+            self._current_cover_bytes_digest = None
 
             if not cover_url:
                 self._set_album_cover_pixmap(None)
@@ -3699,6 +3734,9 @@ class ListenMoePlayer(QWidget):
 
     def _set_album_cover_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         try:
+            if pixmap is None or pixmap.isNull():
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
             if hasattr(self, "ambient_cover"):
                 self.ambient_cover.set_cover(pixmap)
             if hasattr(self, "_content_widget") and isinstance(
@@ -5694,6 +5732,9 @@ class ListenMoePlayer(QWidget):
             self._current_duration_seconds = None
             self._current_start_epoch = None
             self._current_cover_ref = None
+            self._current_cover_url = None
+            self._current_cover_bytes_digest = None
+            self._current_local_cover_sig = None
             self.song_progress.setValue(0)
             self.song_progress.set_seekable(False)
             self.playback_controls.set_nav_enabled(False, False)
@@ -5733,15 +5774,22 @@ class ListenMoePlayer(QWidget):
         )
         self.playback_controls.set_nav_enabled(has_prev, has_next)
 
-        # Update album art
+        # Update album art (deduplicate identical embedded/sidecar bytes across tracks)
         if track.cover_bytes:
-            pix = QPixmap()
-            pix.loadFromData(track.cover_bytes)
-            if not pix.isNull():
-                self._set_album_cover_pixmap(pix)
-            else:
-                self._set_album_cover_pixmap(None)
+            digest = hashlib.blake2b(track.cover_bytes, digest_size=16).digest()
+            if digest != getattr(self, "_current_cover_bytes_digest", None):
+                pix = QPixmap()
+                if pix.loadFromData(track.cover_bytes) and not pix.isNull():
+                    self._current_cover_bytes_digest = digest
+                    self._current_local_cover_sig = None
+                    self._set_album_cover_pixmap(pix)
+                else:
+                    self._current_cover_ref = None
+                    self._current_cover_url = None
+                    self._set_album_cover_pixmap(None)
         else:
+            self._current_cover_ref = None
+            self._current_cover_url = None
             self._set_album_cover_pixmap(None)
 
         # 3-level lyrics cascade

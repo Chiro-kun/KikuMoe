@@ -6,18 +6,23 @@ shuffle/repeat toggles, drag & drop loading, and instant seeking playback.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QIcon,
     QPainter,
+    QPainterPath,
     QPen,
+    QPixmap,
 )
 from PyQt6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
     QFrame,
@@ -28,6 +33,10 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -39,7 +48,7 @@ from core.local_playlist import LocalPlaylistManager
 from core.now_playing import _format_mmss
 from ui.custom_titlebar import CustomTitleBar
 from ui.dialog_animations import CyberMoeDialogAnimationMixin
-from ui.themes.cyber_moe import PALETTE
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 from ui.vector_icons import (
     get_folder_icon,
     get_music_note_icon,
@@ -51,6 +60,126 @@ from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 _IS_WIN32 = sys.platform == "win32"
 
 
+class _QueueItemDelegate(QStyledItemDelegate):
+    """Draw hover/selection item chrome without painting DisplayRole text over TrackItemWidget."""
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        opt.icon = QIcon()
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        if style is not None:
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+
+class _QueueTrackThumb(QWidget):
+    """48x48 HiDPI-safe rounded cover art thumbnail with stylized music note fallback."""
+
+    _SIZE = 48
+
+    def __init__(
+        self,
+        cover_bytes: bytes | None = None,
+        is_playing: bool = False,
+        thumb_cache: dict[tuple[bytes, int], QPixmap] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setFixedSize(self._SIZE, self._SIZE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._cover_bytes = cover_bytes
+        self._is_playing = is_playing
+        self._cache = thumb_cache
+        self._scaled_pixmap: QPixmap | None = None
+        self._cached_target_px = 0
+
+    def has_cover_art(self) -> bool:
+        """Return True if embedded cover bytes decode into a non-null pixmap."""
+        return self._resolve_pixmap() is not None
+
+    def _resolve_pixmap(self) -> QPixmap | None:
+        if not self._cover_bytes:
+            return None
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        target_px = max(self._SIZE, round(self._SIZE * dpr))
+        if self._scaled_pixmap is not None and self._cached_target_px == target_px:
+            return self._scaled_pixmap
+
+        digest = hashlib.blake2b(self._cover_bytes, digest_size=8).digest()
+        cache_key = (digest, target_px)
+        if self._cache is not None and cache_key in self._cache:
+            self._scaled_pixmap = self._cache[cache_key]
+            self._cached_target_px = target_px
+            return self._scaled_pixmap
+
+        raw = QPixmap()
+        if not raw.loadFromData(self._cover_bytes) or raw.isNull():
+            return None
+        scaled = raw.scaled(
+            target_px,
+            target_px,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        cx = max(0, (scaled.width() - target_px) // 2)
+        cy = max(0, (scaled.height() - target_px) // 2)
+        cropped = scaled.copy(cx, cy, target_px, target_px)
+        cropped.setDevicePixelRatio(dpr)
+        if self._cache is not None:
+            if len(self._cache) >= 256:
+                self._cache.clear()
+            self._cache[cache_key] = cropped
+        self._scaled_pixmap = cropped
+        self._cached_target_px = target_px
+        return cropped
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        rect = QRectF(0.5, 0.5, float(self._SIZE - 1), float(self._SIZE - 1))
+        pix = self._resolve_pixmap()
+
+        if pix is not None and not pix.isNull():
+            painter.save()
+            path = QPainterPath()
+            path.addRoundedRect(rect, 8.0, 8.0)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pix)
+            painter.restore()
+
+            border_pen = (
+                QPen(accent_qcolor(210), 1.4)
+                if self._is_playing
+                else QPen(QColor(255, 255, 255, 28), 1.0)
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(border_pen)
+            painter.drawRoundedRect(rect, 8.0, 8.0)
+        else:
+            painter.setBrush(
+                surface_qcolor(170, "bg_surface") if not self._is_playing else accent_qcolor(36)
+            )
+            painter.setPen(
+                QPen(accent_qcolor(190), 1.3) if self._is_playing else QPen(accent_qcolor(70), 1.0)
+            )
+            painter.drawRoundedRect(rect, 8.0, 8.0)
+
+            accent = QColor(PALETTE["accent_hover"] if self._is_playing else PALETTE["accent"])
+            pen = QPen(accent, 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(19.5, 29.0), QPointF(19.5, 16.0))
+            painter.drawLine(QPointF(19.5, 16.0), QPointF(29.5, 13.0))
+            painter.drawLine(QPointF(29.5, 13.0), QPointF(29.5, 26.0))
+            painter.setBrush(accent)
+            painter.drawEllipse(QPointF(17.0, 29.0), 3.2, 2.6)
+            painter.drawEllipse(QPointF(27.0, 26.0), 3.2, 2.6)
+
+        painter.end()
+
+
 class TrackItemWidget(QWidget):
     """Rich Cyber-Deck item row for a single track in the queue."""
 
@@ -59,6 +188,7 @@ class TrackItemWidget(QWidget):
         track: LocalTrackInfo,
         index: int,
         is_playing: bool = False,
+        thumb_cache: dict[tuple[bytes, int], QPixmap] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -67,41 +197,54 @@ class TrackItemWidget(QWidget):
         self.is_playing = is_playing
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 8, 14, 8)
+        layout.setSpacing(12)
 
         # Index / Playing indicator
         self.idx_label = QLabel(f"{index + 1:02d}")
-        self.idx_label.setFixedWidth(24)
+        self.idx_label.setFixedWidth(28)
         self.idx_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if is_playing:
             self.idx_label.setText("▶")
             self.idx_label.setStyleSheet(
-                f"color: {PALETTE['accent']}; font-weight: bold; font-size: 11px;"
+                f"color: {PALETTE['accent']}; font-weight: bold; font-size: 13px;"
+                " background: transparent;"
             )
         else:
             self.idx_label.setStyleSheet(
-                f"color: {PALETTE['text_muted']}; font-size: 11px; font-weight: 600;"
+                f"color: {PALETTE['text_muted']}; font-size: 13px; font-weight: 600;"
+                " background: transparent;"
             )
         layout.addWidget(self.idx_label)
+
+        # Artwork Thumbnail
+        self.thumb = _QueueTrackThumb(
+            track.cover_bytes, is_playing=is_playing, thumb_cache=thumb_cache, parent=self
+        )
+        layout.addWidget(self.thumb)
 
         # Metadata column
         meta_col = QVBoxLayout()
         meta_col.setContentsMargins(0, 0, 0, 0)
-        meta_col.setSpacing(2)
+        meta_col.setSpacing(3)
 
         self.title_lbl = QLabel(track.display_title())
+        self.title_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.title_lbl.setStyleSheet(
             f"color: {PALETTE['accent_hover'] if is_playing else PALETTE['text_primary']}; "
-            "font-size: 12px; font-weight: 700;"
+            "font-size: 14px; font-weight: 700; background: transparent;"
         )
 
         artist_text = track.display_artist()
         if track.album:
             artist_text += f" • {track.album}"
         self.artist_lbl = QLabel(artist_text)
+        self.artist_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.artist_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.artist_lbl.setStyleSheet(
-            f"color: {PALETTE['text_secondary']}; font-size: 10px; font-weight: 500;"
+            f"color: {PALETTE['text_secondary']}; font-size: 12px; font-weight: 500;"
+            " background: transparent;"
         )
 
         meta_col.addWidget(self.title_lbl)
@@ -114,7 +257,8 @@ class TrackItemWidget(QWidget):
         )
         self.dur_lbl = QLabel(dur_str)
         self.dur_lbl.setStyleSheet(
-            f"color: {PALETTE['text_muted']}; font-size: 11px; font-weight: 600;"
+            f"color: {PALETTE['text_muted']}; font-size: 12px; font-weight: 600;"
+            " background: transparent;"
         )
         layout.addWidget(self.dur_lbl)
 
@@ -141,11 +285,12 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             | Qt.WindowType.WindowSystemMenuHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(520, 580)
-        self.setMinimumSize(420, 400)
+        self.resize(580, 640)
+        self.setMinimumSize(460, 440)
 
         self._drag_start_pos: QPoint | None = None
         self._filtered_indices: list[int] = []
+        self._thumb_cache: dict[tuple[bytes, int], QPixmap] = {}
 
         self._init_ui()
         self._connect_signals()
@@ -194,8 +339,8 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             f"  border: 1px solid {PALETTE['border_card']};"
             "  border-radius: 8px;"
             f"  color: {PALETTE['text_primary']};"
-            "  padding: 6px 10px;"
-            "  font-size: 11px;"
+            "  padding: 7px 12px;"
+            "  font-size: 12px;"
             "}"
             f"QLineEdit:focus {{"
             f"  border-color: {PALETTE['accent']};"
@@ -223,6 +368,8 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         # Queue List Widget
         self.list_widget = QListWidget()
         self.list_widget.setObjectName("queueList")
+        self.list_widget.setItemDelegate(_QueueItemDelegate(self.list_widget))
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list_widget.setStyleSheet(
             f"QListWidget#queueList {{"
             f"  background-color: {PALETTE['bg_subtle']};"
@@ -310,7 +457,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
 
         self.stats_lbl = QLabel(self.i18n.t("local_tracks_zero"))
         self.stats_lbl.setStyleSheet(
-            f"color: {PALETTE['text_muted']}; font-size: 11px; font-weight: 600;"
+            f"color: {PALETTE['text_muted']}; font-size: 12px; font-weight: 600;"
         )
         bottom_row.addWidget(self.stats_lbl)
         bottom_row.addStretch(1)
@@ -360,8 +507,8 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             f"  border: 1px solid {border};"
             "  border-radius: 8px;"
             f"  color: {color};"
-            "  padding: 5px 12px;"
-            "  font-size: 11px;"
+            "  padding: 6px 13px;"
+            "  font-size: 12px;"
             "  font-weight: 600;"
             "}"
             f"QPushButton:hover {{"
@@ -405,9 +552,11 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
 
             self._filtered_indices.append(idx)
             item = QListWidgetItem(track.display_title())
-            item.setSizeHint(QSize(0, 48))
+            item.setSizeHint(QSize(0, 68))
             is_playing = idx == curr_idx
-            widget = TrackItemWidget(track, idx, is_playing=is_playing)
+            widget = TrackItemWidget(
+                track, idx, is_playing=is_playing, thumb_cache=self._thumb_cache
+            )
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, widget)
 

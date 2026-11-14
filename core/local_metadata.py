@@ -6,6 +6,7 @@ for MP3 (ID3v1/ID3v2), FLAC, OGG/Opus, M4A/AAC, and WAV files using standard lib
 
 from __future__ import annotations
 
+import base64
 import io
 import struct
 from dataclasses import dataclass
@@ -268,6 +269,26 @@ def _estimate_mp3_duration(f: io.BufferedReader, file_size: int, info: LocalTrac
 # =========================================================================
 
 
+def _parse_flac_picture_payload(data: bytes, info: LocalTrackInfo) -> None:
+    """Parse a FLAC/Vorbis PICTURE payload into ``info.cover_bytes``."""
+    try:
+        offset = 4  # 4B picture type
+        mime_len = struct.unpack(">I", data[offset : offset + 4])[0]
+        offset += 4
+        mime = data[offset : offset + mime_len].decode("ascii", errors="ignore")
+        offset += mime_len
+        desc_len = struct.unpack(">I", data[offset : offset + 4])[0]
+        offset += 4 + desc_len + 16
+        data_len = struct.unpack(">I", data[offset : offset + 4])[0]
+        offset += 4
+        pic_data = data[offset : offset + data_len]
+        if pic_data:
+            info.cover_bytes = pic_data
+            info.cover_mime = mime or "image/jpeg"
+    except Exception:
+        pass
+
+
 def _parse_flac(f: io.BufferedReader, info: LocalTrackInfo) -> None:
     """Parse native FLAC STREAMINFO, VORBIS_COMMENT, and PICTURE blocks."""
     f.seek(0)
@@ -299,23 +320,7 @@ def _parse_flac(f: io.BufferedReader, info: LocalTrackInfo) -> None:
             _parse_vorbis_comments(data, info)
         elif block_type == 6 and not info.cover_bytes:
             # PICTURE
-            try:
-                # 4B picture type, 4B mime len, mime, 4B desc len, desc, 16B props, data len, data
-                offset = 4
-                mime_len = struct.unpack(">I", data[offset : offset + 4])[0]
-                offset += 4
-                mime = data[offset : offset + mime_len].decode("ascii", errors="ignore")
-                offset += mime_len
-                desc_len = struct.unpack(">I", data[offset : offset + 4])[0]
-                offset += 4 + desc_len + 16
-                data_len = struct.unpack(">I", data[offset : offset + 4])[0]
-                offset += 4
-                pic_data = data[offset : offset + data_len]
-                if pic_data:
-                    info.cover_bytes = pic_data
-                    info.cover_mime = mime or "image/jpeg"
-            except Exception:
-                pass
+            _parse_flac_picture_payload(data, info)
 
         if is_last:
             break
@@ -348,6 +353,11 @@ def _parse_vorbis_comments(data: bytes, info: LocalTrackInfo) -> None:
                     info.album = val
                 elif key_upper in ("LYRICS", "UNSYNCEDLYRICS") and not info.lyrics:
                     info.lyrics = val
+                elif key_upper == "METADATA_BLOCK_PICTURE" and not info.cover_bytes:
+                    try:
+                        _parse_flac_picture_payload(base64.b64decode(val), info)
+                    except Exception:
+                        pass
     except Exception:
         pass
 
@@ -541,6 +551,45 @@ def _find_sidecar_lrc(file_path: str) -> str | None:
     return None
 
 
+_SIDECAR_COVER_NAMES = (
+    "cover.jpg",
+    "cover.jpeg",
+    "cover.png",
+    "cover.webp",
+    "folder.jpg",
+    "folder.jpeg",
+    "folder.png",
+    "folder.webp",
+)
+_SIDECAR_MIME_MAP = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def _find_sidecar_cover(file_path: str) -> tuple[bytes, str] | None:
+    """Find companion cover art image (cover.*/folder.*) in the same directory."""
+    parent = Path(file_path).parent
+    try:
+        entries = {p.name.lower(): p for p in parent.iterdir() if p.is_file()}
+    except Exception:
+        return None
+    for name in _SIDECAR_COVER_NAMES:
+        cand = entries.get(name)
+        if cand is None:
+            continue
+        try:
+            if cand.stat().st_size <= 10 * 1024 * 1024:
+                data = cand.read_bytes()
+                if data:
+                    return data, _SIDECAR_MIME_MAP.get(cand.suffix.lower(), "image/jpeg")
+        except Exception:
+            continue
+    return None
+
+
 def extract_track_metadata(file_path: str) -> LocalTrackInfo:
     """Extract complete metadata, album art, and lyrics from an audio file.
 
@@ -570,6 +619,11 @@ def extract_track_metadata(file_path: str) -> LocalTrackInfo:
                 _parse_wav(f, file_size, info)
     except Exception:
         pass
+
+    if not info.cover_bytes:
+        sidecar_cover = _find_sidecar_cover(file_path)
+        if sidecar_cover is not None:
+            info.cover_bytes, info.cover_mime = sidecar_cover
 
     # Sidecar .lrc has highest precedence for lyrics
     sidecar_lrc = _find_sidecar_lrc(file_path)

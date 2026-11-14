@@ -687,3 +687,153 @@ def test_picker_defaults_to_music_folder_on_first_run(tmp_path: Path, monkeypatc
     finally:
         queue_dlg.close()
         prompt_dlg.close()
+
+
+def test_local_queue_dialog_shows_thumbnails_and_no_text_overlap(tmp_path: Path, monkeypatch):
+    from PyQt6.QtCore import QBuffer, QIODevice, QSettings
+    from PyQt6.QtGui import QColor, QImage
+    from PyQt6.QtWidgets import QApplication
+
+    import core.local_playlist as lp_mod
+    from core.local_metadata import extract_track_metadata
+    from ui.local_queue_dialog import LocalQueueDialog, TrackItemWidget, _QueueItemDelegate
+
+    _app = QApplication.instance() or QApplication([])
+
+    settings = QSettings(str(tmp_path / "queue_thumb.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(lp_mod, "QSettings", lambda *args: settings)
+
+    # Create valid 48x48 PNG bytes in memory
+    img = QImage(48, 48, QImage.Format.Format_ARGB32)
+    img.fill(QColor(236, 24, 108))
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    png_bytes = buf.data().data()
+
+    album_dir = tmp_path / "album"
+    album_dir.mkdir()
+    (album_dir / "cover.png").write_bytes(png_bytes)
+    wav_file = album_dir / "Artist Name - Sidecar Song.wav"
+    wav_file.write_bytes(b"RIFF" + b"\x00" * 40)
+
+    extracted = extract_track_metadata(str(wav_file))
+    assert extracted.cover_bytes == png_bytes
+
+    mgr = LocalPlaylistManager()
+    mgr.clear()
+    mgr._tracks = [
+        extracted,
+        LocalTrackInfo(
+            file_path="no_cover.mp3",
+            title="Fallback Track",
+            artist="Fallback Artist",
+            cover_bytes=None,
+        ),
+    ]
+    mgr._current_index = 0
+
+    dlg = LocalQueueDialog(mgr)
+    try:
+        dlg.show()
+        _app.processEvents()
+        assert isinstance(dlg.list_widget.itemDelegate(), _QueueItemDelegate)
+        assert dlg.list_widget.count() == 2
+        item0 = dlg.list_widget.item(0)
+        item1 = dlg.list_widget.item(1)
+        assert item0 is not None
+        assert item1 is not None
+        assert "Sidecar Song" in item0.text()
+
+        row0 = dlg.list_widget.itemWidget(item0)
+        row1 = dlg.list_widget.itemWidget(item1)
+        assert isinstance(row0, TrackItemWidget)
+        assert isinstance(row1, TrackItemWidget)
+        assert row0.thumb.width() == 48
+        assert row0.thumb.height() == 48
+        assert row0.thumb.has_cover_art() is True
+        assert row1.thumb.has_cover_art() is False
+        assert len(dlg._thumb_cache) == 1
+        assert row0.thumb.x() >= row0.idx_label.x() + row0.idx_label.width()
+    finally:
+        dlg.close()
+
+
+def test_request_album_cover_does_not_reload_unchanged_local_file(tmp_path: Path):
+    from types import SimpleNamespace
+    from typing import Any
+
+    from PyQt6.QtCore import QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QImage
+    from PyQt6.QtWidgets import QApplication
+
+    from network.image_cache import normalize_cover_url
+    from network.providers.local_provider import LocalProvider
+    from ui.main_window import ListenMoePlayer
+
+    _app = QApplication.instance() or QApplication([])
+
+    def make_png(color: QColor) -> bytes:
+        img = QImage(32, 32, QImage.Format.Format_ARGB32)
+        img.fill(color)
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        img.save(buf, "PNG")
+        return bytes(buf.data().data())
+
+    png_a = make_png(QColor(236, 24, 108))
+    png_b = make_png(QColor(80, 180, 255))
+
+    cover_path = tmp_path / "cover.png"
+    cover_path.write_bytes(png_a)
+    cover_uri = cover_path.as_uri()
+
+    applied: list[object] = []
+    fake: Any = SimpleNamespace(
+        _current_cover_url=None,
+        _current_cover_bytes_digest=None,
+        _current_local_cover_sig=None,
+        _cover_cache={},
+        _normalize_album_cover_url=normalize_cover_url,
+        _set_album_cover_pixmap=lambda pm: applied.append(pm),
+    )
+
+    # Repeated 1s timer polls for the exact same local cover must not re-apply the pixmap.
+    ListenMoePlayer._request_album_cover(fake, cover_uri)
+    ListenMoePlayer._request_album_cover(fake, cover_uri)
+    ListenMoePlayer._request_album_cover(fake, cover_uri)
+    assert len(applied) == 1
+
+    # LocalProvider emits a file URI for the exact same bytes already loaded by bytes digest:
+    # must skip re-decoding and keep the active pixmap intact.
+    cover_copy = tmp_path / "copy.png"
+    cover_copy.write_bytes(png_a)
+    ListenMoePlayer._request_album_cover(fake, cover_copy.as_uri())
+    assert len(applied) == 1
+
+    # Different cover bytes MUST update cleanly.
+    cover_b = tmp_path / "cover_b.png"
+    cover_b.write_bytes(png_b)
+    ListenMoePlayer._request_album_cover(fake, cover_b.as_uri())
+    assert len(applied) == 2
+
+    # LocalProvider reuses URI for identical bytes and changes URI + cleans up old file on new art.
+    emitted: list[str | None] = []
+    provider = LocalProvider(
+        on_now_playing=lambda _t, _a, _d, _s, c: emitted.append(c),
+        on_error_text=lambda _e: None,
+    )
+    provider._is_running = True
+    t1 = LocalTrackInfo(file_path="a.mp3", cover_bytes=png_a, cover_mime="image/png")
+    t2 = LocalTrackInfo(file_path="b.mp3", cover_bytes=png_a, cover_mime="image/png")
+    t3 = LocalTrackInfo(file_path="c.mp3", cover_bytes=png_b, cover_mime="image/png")
+    provider._on_track_changed(t1)
+    first_cache = provider._cover_cache_file
+    assert first_cache is not None and first_cache.exists()
+    provider._on_track_changed(t2)
+    assert emitted[0] == emitted[1]
+    provider._on_track_changed(t3)
+    assert emitted[2] != emitted[0]
+    assert not first_cache.exists()
+    if provider._cover_cache_file is not None:
+        provider._cover_cache_file.unlink(missing_ok=True)

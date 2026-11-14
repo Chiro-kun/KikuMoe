@@ -6,6 +6,7 @@ track metadata, temporary cover art assets, and timeline notifications.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import tempfile
 import time
@@ -42,6 +43,7 @@ class LocalProvider(BaseMetadataProvider):
         )
         self.playlist_manager = playlist_manager
         self._cover_cache_file: Path | None = None
+        self._cover_digest: bytes | None = None
 
         if self.playlist_manager is not None:
             self.playlist_manager.track_changed.connect(self._on_track_changed)
@@ -65,14 +67,29 @@ class LocalProvider(BaseMetadataProvider):
         cover_path_str: str | None = None
         if track.cover_bytes:
             try:
+                digest = hashlib.blake2b(track.cover_bytes, digest_size=12).digest()
                 suffix = ".png" if track.cover_mime == "image/png" else ".jpg"
-                if self._cover_cache_file is None:
+                if (
+                    digest != self._cover_digest
+                    or self._cover_cache_file is None
+                    or not self._cover_cache_file.exists()
+                ):
+                    old_file = self._cover_cache_file
                     tmp = tempfile.NamedTemporaryFile(
-                        delete=False, suffix=suffix, prefix="kikumoe_cover_"
+                        delete=False,
+                        suffix=suffix,
+                        prefix=f"kikumoe_cover_{digest.hex()[:10]}_",
                     )
                     tmp.close()
-                    self._cover_cache_file = Path(tmp.name)
-                self._cover_cache_file.write_bytes(track.cover_bytes)
+                    new_file = Path(tmp.name)
+                    new_file.write_bytes(track.cover_bytes)
+                    self._cover_cache_file = new_file
+                    self._cover_digest = digest
+                    if old_file is not None and old_file != new_file:
+                        try:
+                            old_file.unlink(missing_ok=True)
+                        except OSError:
+                            pass
                 cover_path_str = self._cover_cache_file.as_uri()
             except Exception as e:
                 logger.debug("Failed caching local cover image: %s", e)
