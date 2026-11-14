@@ -455,3 +455,61 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
         assert player.height() - footer_restored_bottom <= 16
     finally:
         player.deleteLater()
+
+
+def test_controller_unducks_promptly_with_default_poll_timer_and_skips_empty_apps(qapp):
+    state = {"running": set(), "fg": ""}
+    ctrl = DynamicVolumeController(
+        list_processes_fn=lambda: set(state["running"]),
+        foreground_process_fn=lambda: state["fg"],
+    )
+    try:
+        assert ctrl._poll_timer.interval() <= 250
+        assert ctrl._ramp_timer.interval() * ctrl._ramp_steps <= 250
+
+        # Empty app list -> poll timer stays idle even when enabled
+        ctrl.configure(True, "", 25, DYNAMIC_MODE_ANY_OPEN)
+        assert ctrl._poll_timer.isActive() is False
+
+        # Configured app -> shared poll timer monitors both start and exit
+        ctrl.configure(True, "game.exe", 25, DYNAMIC_MODE_ANY_OPEN)
+        assert ctrl._poll_timer.isActive() is True
+
+        state["running"] = {"game"}
+        QTest.qWait(650)
+        assert ctrl.is_ducked() is True
+        assert abs(ctrl.current_factor() - 0.25) < 1e-6
+
+        # Selected process exits -> unducking completes via the same poll timer within <= 650ms
+        state["running"] = set()
+        QTest.qWait(650)
+        assert ctrl.is_ducked() is False
+        assert ctrl.active_app() == ""
+        assert abs(ctrl.current_factor() - 1.0) < 1e-6
+    finally:
+        ctrl.stop()
+
+
+def test_read_linux_proc_name_ignores_zombies_and_falls_back_to_comm(tmp_path):
+    from core.dynamic_volume import _read_linux_proc_name
+
+    live_dir = tmp_path / "101"
+    live_dir.mkdir()
+    (live_dir / "stat").write_text("101 (my game (1)) S 1 101 101 0 -1\n", encoding="utf-8")
+    assert _read_linux_proc_name(str(live_dir)) == "my game (1)"
+
+    zombie_dir = tmp_path / "102"
+    zombie_dir.mkdir()
+    (zombie_dir / "stat").write_text("102 (game) Z 1 102 102 0 -1\n", encoding="utf-8")
+    (zombie_dir / "comm").write_text("game\n", encoding="utf-8")
+    assert _read_linux_proc_name(str(zombie_dir)) == ""
+
+    dead_dir = tmp_path / "103"
+    dead_dir.mkdir()
+    (dead_dir / "stat").write_text("103 (game) X 1 103 103 0 -1\n", encoding="utf-8")
+    assert _read_linux_proc_name(str(dead_dir)) == ""
+
+    comm_only_dir = tmp_path / "104"
+    comm_only_dir.mkdir()
+    (comm_only_dir / "comm").write_text("discord\n", encoding="utf-8")
+    assert _read_linux_proc_name(str(comm_only_dir)) == "discord"

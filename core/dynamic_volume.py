@@ -243,20 +243,39 @@ def _list_windows_windowed_process_names() -> list[str]:
     return names
 
 
+def _read_linux_proc_name(pid_dir: str) -> str:
+    """Return process name for a live /proc/<pid> entry, or '' for zombies/exited tasks."""
+    stat_path = os.path.join(pid_dir, "stat")
+    try:
+        with open(stat_path, encoding="utf-8", errors="ignore") as f:
+            stat_line = f.read().strip()
+        lparen = stat_line.find("(")
+        rparen = stat_line.rfind(")")
+        if lparen != -1 and rparen > lparen:
+            state = stat_line[rparen + 1 :].lstrip()[:1]
+            if state in ("Z", "X"):
+                return ""
+            return stat_line[lparen + 1 : rparen].strip()
+    except OSError:
+        pass
+
+    try:
+        with open(os.path.join(pid_dir, "comm"), encoding="utf-8", errors="ignore") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def _list_linux_process_names() -> list[str]:
-    """Return process names on Linux by inspecting /proc/<pid>/comm."""
+    """Return live process names on Linux by inspecting /proc/<pid>/stat (or comm)."""
     names: list[str] = []
     try:
         for entry in os.scandir("/proc"):
             if not entry.name.isdigit() or not entry.is_dir():
                 continue
-            try:
-                with open(os.path.join(entry.path, "comm"), encoding="utf-8", errors="ignore") as f:
-                    comm = f.read().strip()
-                if comm:
-                    names.append(comm)
-            except OSError:
-                continue
+            comm = _read_linux_proc_name(entry.path)
+            if comm:
+                names.append(comm)
     except OSError:
         return []
     return names
@@ -364,9 +383,9 @@ class DynamicVolumeController(QObject):
         self,
         parent: QObject | None = None,
         *,
-        poll_interval_ms: int = 1000,
-        ramp_interval_ms: int = 35,
-        ramp_steps: int = 10,
+        poll_interval_ms: int = 250,
+        ramp_interval_ms: int = 25,
+        ramp_steps: int = 8,
         list_processes_fn: Callable[[], set[str]] | None = None,
         foreground_process_fn: Callable[[], str] | None = None,
     ) -> None:
@@ -397,6 +416,14 @@ class DynamicVolumeController(QObject):
         self._ramp_timer.setInterval(self._ramp_interval_ms)
         self._ramp_timer.timeout.connect(self._on_ramp_tick)
 
+    def _sync_poll_timer(self) -> None:
+        """Keep the shared duck/unduck poll timer running only when active."""
+        if self._enabled and self._apps:
+            if not self._poll_timer.isActive():
+                self._poll_timer.start()
+        elif self._poll_timer.isActive():
+            self._poll_timer.stop()
+
     def configure(
         self,
         enabled: bool,
@@ -415,19 +442,12 @@ class DynamicVolumeController(QObject):
         self._duck_level = max(5, min(90, lvl))
         self._mode = mode if mode in _VALID_MODES else DYNAMIC_MODE_ANY_OPEN
 
-        if self._enabled:
-            if not self._poll_timer.isActive():
-                self._poll_timer.start()
-        else:
-            if self._poll_timer.isActive():
-                self._poll_timer.stop()
-
+        self._sync_poll_timer()
         self.evaluate_now()
 
     def start(self) -> None:
         """Start monitoring if enabled."""
-        if self._enabled and not self._poll_timer.isActive():
-            self._poll_timer.start()
+        self._sync_poll_timer()
         self.evaluate_now()
 
     def stop(self) -> None:
