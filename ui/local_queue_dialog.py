@@ -46,7 +46,7 @@ from core.i18n import I18n, resolve_i18n
 from core.local_metadata import LocalTrackInfo
 from core.local_playlist import LocalPlaylistManager
 from core.now_playing import _format_mmss
-from ui.custom_titlebar import CustomTitleBar
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dialog_animations import CyberMoeDialogAnimationMixin
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 from ui.vector_icons import (
@@ -279,12 +279,9 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.i18n = resolve_i18n(i18n, parent)
 
         self.setObjectName("localQueueDialog")
-        self.setWindowFlags(
-            Qt.WindowType.Dialog
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowSystemMenuHint
-        )
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("QDialog#localQueueDialog { background: transparent; border: none; }")
         self.resize(580, 640)
         self.setMinimumSize(460, 440)
 
@@ -293,13 +290,15 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         self._thumb_cache: dict[tuple[bytes, int], QPixmap] = {}
 
         self._init_ui()
+        install_size_grip(self)
         self._connect_signals()
         self._refresh_queue()
         apply_windows_titlebar_dark_mode(self, True)
 
     def _init_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
 
         self._content_frame = QFrame(self)
         self._content_frame.setObjectName("queueContentFrame")
@@ -307,7 +306,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             f"QFrame#queueContentFrame {{"
             f"  background-color: {PALETTE['bg_surface']};"
             f"  border: 1px solid {PALETTE['border_card']};"
-            "  border-radius: 16px;"
+            "  border-radius: 12px;"
             "}"
         )
         frame_layout = QVBoxLayout(self._content_frame)
@@ -315,8 +314,10 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         frame_layout.setSpacing(0)
 
         # 1. Custom TitleBar
-        self.titlebar = CustomTitleBar(self, i18n=self.i18n)
-        self.titlebar.set_title(self.i18n.t("local_queue_title"))
+        parent_w = self.parentWidget()
+        app_icon = getattr(parent_w, "_icon_app", None) if parent_w is not None else None
+        self.titlebar = CustomTitleBar(self, icon=app_icon, i18n=self.i18n)
+        self.titlebar.set_badge_text(self.i18n.t("local_queue_title").upper())
         self.titlebar._btn_min.setVisible(False)
         self.titlebar._btn_max.setVisible(False)
         frame_layout.addWidget(self.titlebar)
@@ -599,7 +600,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         """Update dialog labels, placeholders, and buttons to the active language."""
         if i18n is not None:
             self.i18n = i18n
-        self.titlebar.set_title(self.i18n.t("local_queue_title"))
+        self.titlebar.set_badge_text(self.i18n.t("local_queue_title").upper())
         self.titlebar.retranslate(self.i18n)
         self.search_box.setPlaceholderText(self.i18n.t("local_search_placeholder"))
         self.btn_add_files.setText(self.i18n.t("local_add_files"))

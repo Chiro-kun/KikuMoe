@@ -41,8 +41,20 @@ class _WinCtrlButton(QPushButton):
         self._hover = False
         self._scale = 1.0
         self._anim_step = 0
+        self.setObjectName("titleBarCtrlBtn")
         self.setFixedSize(_BTN_SIZE)
+        self.setFlat(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(
+            "QPushButton#titleBarCtrlBtn {"
+            " background: transparent;"
+            " border: none;"
+            " border-radius: 0px;"
+            " padding: 0px;"
+            " margin: 0px;"
+            "}"
+        )
 
         self._anim_timer = QTimer(self)
         self._anim_timer.setInterval(16)
@@ -91,8 +103,28 @@ class _WinCtrlButton(QPushButton):
         cy = h / 2.0
 
         if self._hover:
+            rect = QRectF(self.rect())
             if self._kind == "close":
-                painter.fillRect(self.rect(), QColor(232, 17, 35, 220))
+                win = self.window()
+                is_max = bool(win is not None and win.isMaximized())
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(232, 17, 35, 220))
+                if not is_max:
+                    r = min(11.0, rect.width() / 2.0, rect.height() / 2.0)
+                    bg_path = QPainterPath()
+                    bg_path.moveTo(rect.left(), rect.top())
+                    bg_path.lineTo(rect.right() - r, rect.top())
+                    bg_path.arcTo(
+                        QRectF(rect.right() - 2.0 * r, rect.top(), 2.0 * r, 2.0 * r),
+                        90.0,
+                        -90.0,
+                    )
+                    bg_path.lineTo(rect.right(), rect.bottom())
+                    bg_path.lineTo(rect.left(), rect.bottom())
+                    bg_path.closeSubpath()
+                    painter.drawPath(bg_path)
+                else:
+                    painter.fillRect(self.rect(), QColor(232, 17, 35, 220))
             else:
                 painter.fillRect(self.rect(), QColor(255, 255, 255, 22))
 

@@ -755,6 +755,17 @@ def test_local_queue_dialog_shows_thumbnails_and_no_text_overlap(tmp_path: Path,
         assert row1.thumb.has_cover_art() is False
         assert len(dlg._thumb_cache) == 1
         assert row0.thumb.x() >= row0.idx_label.x() + row0.idx_label.width()
+
+        # Issue #81: frameless container fills the dialog with no outer gutter and
+        # the close button hover background follows the rounded top-right corner.
+        assert dlg._content_frame.geometry() == dlg.rect()
+        close_btn = dlg.titlebar._btn_close
+        close_btn._hover = True
+        close_btn.update()
+        _app.processEvents()
+        btn_img = close_btn.grab().toImage()
+        assert btn_img.pixelColor(btn_img.width() - 1, 0).alpha() == 0
+        assert btn_img.pixelColor(btn_img.width() // 2, btn_img.height() // 2).alpha() > 0
     finally:
         dlg.close()
 
