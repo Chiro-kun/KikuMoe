@@ -189,3 +189,153 @@ def test_player_publishes_media_state_and_respects_transport_commands(monkeypatc
     main_window.ListenMoePlayer._on_system_media_command(window, "play")
     main_window.ListenMoePlayer._on_system_media_command(window, "stop")
     assert actions == ["pause_resume", "pause_resume", "stop"]
+
+
+def test_system_media_preserves_local_file_cover_uri_for_mpris_and_smtc(tmp_path, monkeypatch):
+    from core.constants import STATION_LOCAL
+    from ui import main_window
+
+    cover_file = tmp_path / "kikumoe_cover_test.png"
+    cover_file.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    file_uri = cover_file.as_uri()
+
+    sent = []
+    fake_window = SimpleNamespace(
+        system_media=SimpleNamespace(update=sent.append),
+        player=SimpleNamespace(
+            is_playing=lambda: True,
+            is_paused=lambda: False,
+            get_mute=lambda: False,
+            get_time=lambda: 12.0,
+        ),
+        _ui_paused=False,
+        _current_title="Local Track",
+        _current_artist="Local Artist",
+        _current_radio_provider=STATION_LOCAL,
+        _current_start_epoch=100.0,
+        _current_duration_seconds=180,
+        _clock_sync_offset=0,
+        _current_cover_ref=file_uri,
+        _is_local_mode=lambda: True,
+        _normalize_album_cover_url=lambda ref: (
+            main_window.ListenMoePlayer._normalize_album_cover_url(None, ref)
+        ),
+        _media_last_state=MediaState(),
+        i18n=SimpleNamespace(t=lambda key: key),
+        volume_slider=SimpleNamespace(value=lambda: 50),
+        log=logging.getLogger("test.media"),
+    )
+    fake_window._resolve_system_media_cover_url = lambda ref: (
+        main_window.ListenMoePlayer._resolve_system_media_cover_url(fake_window, ref)
+    )
+
+    monkeypatch.setattr(main_window, "_IS_WIN32", False)
+    main_window.ListenMoePlayer._sync_system_media(fake_window)
+    assert sent[-1].cover_url == file_uri
+
+    # Nonexistent file URI or plain HTTP URL must still be rejected.
+    fake_window._current_cover_ref = (tmp_path / "missing.png").as_uri()
+    main_window.ListenMoePlayer._sync_system_media(fake_window)
+    assert sent[-1].cover_url == ""
+
+    fake_window._current_cover_ref = "http://example.com/cover.png"
+    main_window.ListenMoePlayer._sync_system_media(fake_window)
+    assert sent[-1].cover_url == ""
+
+
+def test_windows_media_bridge_reads_local_file_cover_into_stream(qapp, tmp_path):
+    cover_file = tmp_path / "local_cover.png"
+    cover_bytes = b"\x89PNG\r\n\x1a\nlocaldata"
+    cover_file.write_bytes(cover_bytes)
+    file_uri = cover_file.as_uri()
+
+    written = []
+    uri_calls = []
+    stream_calls = []
+
+    class FakeMemStream:
+        def __init__(self):
+            self.seek_pos = None
+
+        def seek(self, pos):
+            self.seek_pos = pos
+
+    class FakeWriter:
+        def __init__(self, mem):
+            self.mem = mem
+            self.detached = False
+
+        def write_bytes(self, data):
+            written.append(bytes(data))
+
+        def store_async(self):
+            return SimpleNamespace(status=1)
+
+        def detach_stream(self):
+            self.detached = True
+
+    class FakeRef:
+        @staticmethod
+        def create_from_stream(mem):
+            stream_calls.append(mem)
+            return ("stream_ref", mem)
+
+        @staticmethod
+        def create_from_uri(uri):
+            uri_calls.append(uri)
+            return ("uri_ref", uri)
+
+    class FakeUpdater:
+        def __init__(self):
+            self.music_properties = SimpleNamespace()
+            self.thumbnail = None
+            self.updated = 0
+
+        def clear_all(self):
+            self.thumbnail = None
+
+        def update(self):
+            self.updated += 1
+
+    updater = FakeUpdater()
+    controls = SimpleNamespace(display_updater=updater, playback_status=None)
+    streams = SimpleNamespace(
+        InMemoryRandomAccessStream=FakeMemStream,
+        DataWriter=FakeWriter,
+        RandomAccessStreamReference=FakeRef,
+    )
+    foundation = SimpleNamespace(Uri=lambda u: f"Uri({u})")
+    media = SimpleNamespace(
+        MediaPlaybackStatus=SimpleNamespace(PLAYING=1, PAUSED=2, STOPPED=3),
+        MediaPlaybackType=SimpleNamespace(MUSIC=1),
+    )
+
+    bridge = WindowsMediaBridge(logging.getLogger("test.smtc.local"))
+    bridge.controls = controls
+    bridge._modules = (foundation, media, SimpleNamespace(), streams)
+
+    bridge.update(
+        MediaState(
+            status="Playing",
+            title="Local Song",
+            artist="Local Artist",
+            station="Local Music",
+            cover_url=file_uri,
+        )
+    )
+    assert written == [cover_bytes]
+    assert len(stream_calls) == 1
+    assert stream_calls[0].seek_pos == 0
+    assert updater.thumbnail[0] == "stream_ref"
+    assert uri_calls == []
+
+    bridge.update(
+        MediaState(
+            status="Playing",
+            title="Remote Song",
+            artist="Remote Artist",
+            station="LISTEN.moe",
+            cover_url="https://cdn.listen.moe/covers/test.png",
+        )
+    )
+    assert updater.thumbnail == ("uri_ref", "Uri(https://cdn.listen.moe/covers/test.png)")

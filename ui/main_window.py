@@ -8,6 +8,7 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 from PyQt6.QtCore import (
@@ -1861,12 +1862,18 @@ class ListenMoePlayer(QWidget):
             ):
                 position = previous.position_us / 1000000
             muted = bool(player and getattr(player, "get_mute", lambda: False)())
+            resolver = getattr(self, "_resolve_system_media_cover_url", None)
+            cover_url = (
+                resolver(self._current_cover_ref)
+                if callable(resolver)
+                else (self._normalize_album_cover_url(self._current_cover_ref) or "")
+            )
             state = MediaState(
                 status=status,
                 title=title,
                 artist=artist,
                 station=station,
-                cover_url=self._normalize_album_cover_url(self._current_cover_ref) or "",
+                cover_url=cover_url,
                 track_id=track_id,
                 duration_us=int(duration * 1000000),
                 position_us=int(position * 1000000),
@@ -2794,6 +2801,20 @@ class ListenMoePlayer(QWidget):
 
         # 2. Update station manager and switch playback if playing
         if hasattr(self, "station_mgr"):
+            prev_station_id = getattr(self.station_mgr, "current_station_id", None)
+            is_empty_local = clean_id == STATION_LOCAL and self.local_playlist.is_empty()
+            will_change = (
+                clean_id != prev_station_id
+                or (clean_id == STATION_LISTENMOE and target_channel != old_channel)
+                or is_empty_local
+            )
+            if will_change:
+                # Clear cover refs before set_station so LocalProvider.start() is not clobbered.
+                self._current_cover_url = None
+                self._current_cover_ref = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+
             changed = self.station_mgr.set_station(clean_id)
             if clean_id == STATION_LISTENMOE:
                 self.station_mgr.set_channel(target_channel)
@@ -2802,16 +2823,11 @@ class ListenMoePlayer(QWidget):
             station_or_chan_changed = changed or (
                 clean_id == STATION_LISTENMOE and target_channel != old_channel
             )
-            is_empty_local = clean_id == STATION_LOCAL and self.local_playlist.is_empty()
             if station_or_chan_changed or is_empty_local:
                 if self.lyrics_button.isChecked():
                     self.lyrics_provider.cancel()
                     self._lyrics_track = None
                     self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
-                self._current_cover_url = None
-                self._current_cover_ref = None
-                self._current_cover_bytes_digest = None
-                self._current_local_cover_sig = None
                 cfg = get_station_config(clean_id)
                 if hasattr(self, "stream_tag_label") and self.stream_tag_label:
                     tag_suffix = "PLAYLIST" if clean_id == STATION_LOCAL else "STREAM"
@@ -3538,6 +3554,19 @@ class ListenMoePlayer(QWidget):
 
     def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
         return normalize_cover_url(cover_ref)
+
+    def _resolve_system_media_cover_url(self, cover_ref: Optional[str]) -> str:
+        """Resolve an MPRIS/SMTC artwork URI, preserving verified local file:// covers."""
+        if isinstance(cover_ref, str):
+            val = cover_ref.strip()
+            if val.lower().startswith("file://"):
+                local_file = urllib.request.url2pathname(urllib.parse.urlsplit(val).path)
+                if local_file and os.path.isfile(local_file):
+                    return Path(local_file).resolve().as_uri()
+                return ""
+            if val and os.path.isfile(val):
+                return Path(val).resolve().as_uri()
+        return self._normalize_album_cover_url(cover_ref) or ""
 
     def _request_album_cover(self, cover_ref: Optional[str]) -> None:
         try:

@@ -2,6 +2,10 @@
 
 import ctypes
 import ctypes.wintypes
+import os
+import time
+import urllib.parse
+import urllib.request
 from typing import Any, Optional, Tuple
 
 from PyQt6.QtCore import QAbstractNativeEventFilter, QObject, pyqtSignal
@@ -54,6 +58,7 @@ class WindowsMediaBridge(QObject):
         self._token: Any = None
         self._last_state: Optional[MediaState] = None
         self._modules: Optional[Tuple[Any, Any, Any, Any]] = None
+        self._thumbnail_stream: Any = None
         self._filter = MediaKeyFilter(self)
         app = QApplication.instance()
         if app is not None:
@@ -145,19 +150,51 @@ class WindowsMediaBridge(QObject):
                 updater.music_properties.album_title = state.station
                 if state.cover_url:
                     try:
-                        updater.thumbnail = streams.RandomAccessStreamReference.create_from_uri(
-                            foundation.Uri(state.cover_url)
-                        )
+                        thumb_ref = self._build_thumbnail_ref(state.cover_url, foundation, streams)
+                        if thumb_ref is not None:
+                            updater.thumbnail = thumb_ref
                     except Exception as exc:
                         self.log.debug("[SMTC] Cover unavailable: %s", exc)
+                else:
+                    self._thumbnail_stream = None
                 updater.update()
             self._last_state = state
         except Exception as exc:
             self.log.debug("[SMTC] Failed to update media controls: %s", exc)
 
+    def _build_thumbnail_ref(self, cover_url: str, foundation: Any, streams: Any) -> Any:
+        """Build an SMTC RandomAccessStreamReference from remote URI or local file."""
+        local_file: Optional[str] = None
+        if cover_url.lower().startswith("file://"):
+            local_file = urllib.request.url2pathname(urllib.parse.urlsplit(cover_url).path)
+        elif os.path.isfile(cover_url):
+            local_file = cover_url
+
+        if local_file and os.path.isfile(local_file):
+            with open(local_file, "rb") as f:
+                raw = f.read((4 * 1024 * 1024) + 1)
+            if not raw or len(raw) > (4 * 1024 * 1024):
+                self._thumbnail_stream = None
+                return None
+            mem = streams.InMemoryRandomAccessStream()
+            writer = streams.DataWriter(mem)
+            writer.write_bytes(raw)
+            op = writer.store_async()
+            deadline = time.monotonic() + 1.0
+            while int(getattr(op, "status", 1)) == 0 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            writer.detach_stream()
+            mem.seek(0)
+            self._thumbnail_stream = mem
+            return streams.RandomAccessStreamReference.create_from_stream(mem)
+
+        self._thumbnail_stream = None
+        return streams.RandomAccessStreamReference.create_from_uri(foundation.Uri(cover_url))
+
     def _release_controls(self):
         controls = self.controls
         self.controls = None
+        self._thumbnail_stream = None
         if controls is not None:
             try:
                 if self._token is not None:
