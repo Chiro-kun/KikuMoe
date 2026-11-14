@@ -567,3 +567,39 @@ def test_tray_manager_activation_clicks(qapp):
     # Middle click
     tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.MiddleClick)
     assert play_cb.call_count == 1
+
+
+def test_tray_header_initial_labels_and_submenu_ownership(qapp, monkeypatch):
+    from core.constants import KEY_STATION, STATION_LOCAL, STATION_TRUCKERSFM
+
+    monkeypatch.setenv("KIKUMOE_TEST_LINUX_TRAY", "1")
+    parent = DummyParent()
+    parent.settings.setValue(KEY_STATION, STATION_LOCAL)
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: {
+        "tray_no_track": "No track playing",
+        "station_local": "Local Music",
+    }.get(key, key)
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # DBusMenu header actions must start non-empty and reflect configured station
+    assert tray_mgr._act_info_now is not None
+    assert tray_mgr._act_info_session is not None
+    assert tray_mgr._act_info_now.text() == "No track playing"
+    assert tray_mgr._act_info_session.text() == "LOCAL MUSIC"
+    assert tray_mgr._card is not None
+    assert tray_mgr._card._badge_station.text() == "LOCAL MUSIC"
+
+    # Placeholder "–" does not replace fallback text on either Linux or card
+    parent._current_title = "–"
+    tray_mgr.update_tooltip("Local Music - Originale\n–\n00:01")
+    assert tray_mgr._act_info_now.text() == "No track playing"
+    assert tray_mgr._card._lbl_title.text() == "KikuMoe"
+
+    # Submenu actions must be owned by their QMenu so clear() doesn't orphan on parent
+    parent.settings.setValue(KEY_STATION, STATION_TRUCKERSFM)
+    tray_mgr.sync_stream_settings(station=STATION_TRUCKERSFM, fmt="MP3 320k")
+    assert all(act.parent() is tray_mgr._sub_format for act in tray_mgr._format_actions.values())
+    assert all(act.parent() is tray_mgr._sub_station for act in tray_mgr._station_actions.values())

@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon,
     QToolButton,
     QVBoxLayout,
+    QWidget,
     QWidgetAction,
 )
 
@@ -583,6 +584,7 @@ class TrayManager(QObject):
 
         # Icone per i controlli
         self._icons: dict = {}
+        self._last_tooltip: str | None = None
 
     def _t(self, key: str, fallback: str) -> str:
         if self._i18n is not None and hasattr(self._i18n, "t"):
@@ -609,13 +611,22 @@ class TrayManager(QObject):
                         else QIcon()
                     )
                     self._tray = QSystemTrayIcon(icon, self._parent)
-                    menu = QMenu()
+                    menu_parent = self._parent if isinstance(self._parent, QWidget) else None
+                    menu = QMenu(menu_parent)
                     try:
                         menu.setSeparatorsCollapsible(False)
                     except Exception:
                         pass
 
                     self._apply_menu_stylesheet(menu)
+
+                    try:
+                        current_station = str(
+                            self._parent.settings.value(KEY_STATION, DEFAULT_STATION)
+                        )
+                    except Exception:
+                        current_station = DEFAULT_STATION
+                    display_station = get_station_display_name(current_station, self._i18n)
 
                     # Font per intestazioni di sezione (maiuscole, bold, letter-spaced)
                     header_font = QFont(menu.font())
@@ -647,19 +658,22 @@ class TrayManager(QObject):
                             else None
                         ),
                     )
+                    self._card.set_track_info(station=display_station)
                     self._card_action = QWidgetAction(menu)
                     self._card_action.setDefaultWidget(self._card)
                     if show_card:
                         menu.addAction(self._card_action)
 
-                    # Now Playing info actions (visible on Linux / DBus where QWidgetAction drops)
-                    self._act_info_now = QAction("", self._parent)
+                    # Now Playing info actions (visible on Linux / DBus where QWidgetAction drops).
+                    # Populate non-empty initial labels before exporting the menu over DBusMenu.
+                    init_now_text = self._t("tray_no_track", "Nessun brano in riproduzione")
+                    self._act_info_now = QAction(init_now_text, menu)
                     self._act_info_now.setVisible(show_native_playback)
                     self._act_info_now.triggered.connect(self._handle_show_window)
                     if show_native_playback:
                         menu.addAction(self._act_info_now)
 
-                    self._act_info_session = QAction("", self._parent)
+                    self._act_info_session = QAction(display_station.upper(), menu)
                     self._act_info_session.setVisible(show_native_playback)
                     self._act_info_session.triggered.connect(self._handle_show_window)
                     if show_native_playback:
@@ -759,19 +773,13 @@ class TrayManager(QObject):
 
                     # Sottomenu Stazione
                     txt_station = self._t("tray_station", "Stazione")
-                    sub_station = QMenu(txt_station, self._parent)
+                    sub_station = QMenu(txt_station, menu)
                     self._sub_station = sub_station
                     self._apply_menu_stylesheet(sub_station, is_submenu=True)
-                    grp_station = QActionGroup(self._parent)
+                    grp_station = QActionGroup(sub_station)
                     grp_station.setExclusive(True)
                     self._grp_station = grp_station
                     self._station_actions.clear()
-                    try:
-                        current_station = str(
-                            self._parent.settings.value(KEY_STATION, DEFAULT_STATION)
-                        )
-                    except Exception:
-                        current_station = DEFAULT_STATION
                     station_items = [
                         ("LISTEN.moe", STATION_LISTENMOE),
                         ("Gensokyo Radio", STATION_GENSOKYO),
@@ -781,7 +789,7 @@ class TrayManager(QObject):
                         (self._t("station_local", "Musica locale"), STATION_LOCAL),
                     ]
                     for name, s_id in station_items:
-                        acts = QAction(name, self._parent)
+                        acts = QAction(name, sub_station)
                         acts.setCheckable(True)
                         acts.setChecked(current_station.lower() == s_id.lower())
                         if self._on_change_station:
@@ -806,10 +814,10 @@ class TrayManager(QObject):
 
                     # Sottomenu Canale
                     txt_channel = self._t("tray_channel", "Canale")
-                    sub_channel = QMenu(txt_channel, self._parent)
+                    sub_channel = QMenu(txt_channel, menu)
                     self._sub_channel = sub_channel
                     self._apply_menu_stylesheet(sub_channel, is_submenu=True)
-                    grp_channel = QActionGroup(self._parent)
+                    grp_channel = QActionGroup(sub_channel)
                     grp_channel.setExclusive(True)
                     self._grp_channel = grp_channel
                     self._channel_actions.clear()
@@ -824,10 +832,10 @@ class TrayManager(QObject):
 
                     # Sottomenu Formato (codec)
                     txt_format = self._t("tray_format", "Formato (codec)")
-                    sub_format = QMenu(txt_format, self._parent)
+                    sub_format = QMenu(txt_format, menu)
                     self._sub_format = sub_format
                     self._apply_menu_stylesheet(sub_format, is_submenu=True)
-                    grp_format = QActionGroup(self._parent)
+                    grp_format = QActionGroup(sub_format)
                     grp_format.setExclusive(True)
                     self._grp_format = grp_format
                     self._format_actions.clear()
@@ -851,7 +859,8 @@ class TrayManager(QObject):
 
                     self._tray.setContextMenu(menu)
                     self._tray.activated.connect(self._on_tray_activated)
-                    menu.aboutToShow.connect(self._nudge_menu_left)
+                    if show_card:
+                        menu.aboutToShow.connect(self._nudge_menu_left)
                     try:
                         menu.aboutToShow.connect(self.sync_stream_settings)
                     except Exception:
@@ -989,7 +998,7 @@ class TrayManager(QObject):
         self._channel_actions.clear()
 
         for ch in channels:
-            act = QAction(ch, self._parent)
+            act = QAction(ch, self._sub_channel)
             act.setCheckable(True)
             act.setChecked(ch.strip().upper() == target_channel)
             if self._on_change_channel:
@@ -1044,7 +1053,7 @@ class TrayManager(QObject):
         self._format_actions.clear()
 
         for f in formats:
-            act = QAction(f, self._parent)
+            act = QAction(f, self._sub_format)
             act.setCheckable(True)
             act.setChecked(f.strip().upper() == target_fmt)
             if self._on_change_format:
@@ -1096,7 +1105,9 @@ class TrayManager(QObject):
             if self._tray is None or text is None:
                 return
 
-            self._tray.setToolTip(text)
+            if text != self._last_tooltip:
+                self._tray.setToolTip(text)
+                self._last_tooltip = text
 
             # Extract header, now playing, and session lines
             lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -1104,8 +1115,12 @@ class TrayManager(QObject):
             info_session = lines[2] if len(lines) > 2 else ""
 
             # Directly extract title and artist if available on parent
-            title = getattr(self._parent, "_current_title", "")
-            artist = getattr(self._parent, "_current_artist", "")
+            title = str(getattr(self._parent, "_current_title", "") or "").strip()
+            artist = str(getattr(self._parent, "_current_artist", "") or "").strip()
+            if title in ("–", "-"):
+                title = ""
+            if info_now in ("–", "-"):
+                info_now = ""
             if not title and info_now:
                 for sep in [" — ", " – ", " - "]:
                     if sep in info_now:
@@ -1136,21 +1151,21 @@ class TrayManager(QObject):
             # Update backward-compatible and Linux DBus actions
             if self._act_info_now is not None:
                 if title and artist:
-                    self._act_info_now.setText(f"{title} — {artist}")
+                    now_text = f"{title} — {artist}"
                 elif title:
-                    self._act_info_now.setText(title)
+                    now_text = title
                 elif info_now:
-                    self._act_info_now.setText(info_now)
+                    now_text = info_now
                 else:
-                    fallback_no_track = self._t("tray_no_track", "Nessun brano in riproduzione")
-                    self._act_info_now.setText(fallback_no_track)
+                    now_text = self._t("tray_no_track", "Nessun brano in riproduzione")
+                if self._act_info_now.text() != now_text:
+                    self._act_info_now.setText(now_text)
 
             if self._act_info_session is not None:
                 st_name = display_station.upper()
-                if info_session:
-                    self._act_info_session.setText(f"{st_name} • {info_session}")
-                else:
-                    self._act_info_session.setText(st_name)
+                sess_text = f"{st_name} • {info_session}" if info_session else st_name
+                if self._act_info_session.text() != sess_text:
+                    self._act_info_session.setText(sess_text)
 
         except Exception:
             pass

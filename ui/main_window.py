@@ -1712,7 +1712,12 @@ class ListenMoePlayer(QWidget):
                 on_quit=self._on_tray_quit,
                 on_about=self.open_about,
             )
-            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon())
+            self.tray_mgr.ensure_tray_enabled(
+                self._tray_enabled,
+                window_icon=self._get_tray_icon(),
+                tooltip=self._get_tray_tooltip(),
+            )
+            self.update_tray_texts()
             self.tray_icon_refresh.connect(self.update_tray_icon)
         except Exception:
             pass
@@ -2854,6 +2859,7 @@ class ListenMoePlayer(QWidget):
                     )
                     self.notify_tray.emit(msg_title, body)
             self.backend_status_refresh.emit()
+            self.update_tray_texts()
         except Exception:
             pass
 
@@ -3121,7 +3127,8 @@ class ListenMoePlayer(QWidget):
         try:
             self._session_seconds += 1
             self._update_session_label()
-            self.update_tray_texts()
+            if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
+                self.tray_mgr.update_tooltip(self._get_tray_tooltip())
         except Exception:
             pass
 
@@ -4991,10 +4998,19 @@ class ListenMoePlayer(QWidget):
         try:
             # Header
             try:
-                header = self.i18n.t("header").format(
-                    channel=self.settings.value(KEY_CHANNEL, "J-POP"),
-                    format=self.settings.value(KEY_FORMAT, "Vorbis"),
+                station_id = str(
+                    getattr(self, "_current_radio_provider", None)
+                    or self.settings.value(KEY_STATION, DEFAULT_STATION)
                 )
+                fmt = self.settings.value(KEY_FORMAT, "Vorbis")
+                if station_id == STATION_LISTENMOE:
+                    header = self.i18n.t("header").format(
+                        channel=self.settings.value(KEY_CHANNEL, "J-POP"),
+                        format=fmt,
+                    )
+                else:
+                    st_disp = get_station_display_name(station_id, self.i18n)
+                    header = f"{st_disp} - {fmt}" if fmt else st_disp
             except Exception:
                 if hasattr(self, "label"):
                     header = self.label.text()
