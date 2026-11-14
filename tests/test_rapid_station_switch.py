@@ -696,3 +696,112 @@ def test_ffmpeg_switch_network_stream_to_local_mp3_omits_http_headers(monkeypatc
         assert str(local_mp3) in local_cmd
     finally:
         player.force_cleanup()
+
+
+def test_ffmpeg_emits_ended_after_cleanup_and_closes_stream_once(monkeypatch, tmp_path):
+    """PlayerFFmpeg cleans up stream/state before emitting 'ended' and never double-closes."""
+    monkeypatch.setattr(PlayerFFmpeg, "_init_audio", lambda self: None)
+    monkeypatch.setattr(PlayerFFmpeg, "_check_ffmpeg", lambda self: True)
+
+    local_mp3 = tmp_path / "repeat_track.mp3"
+    local_mp3.write_bytes(b"\x00" * 1024)
+
+    close_counts: list[int] = []
+    ended_states: list[tuple[bool, Any, Any, int]] = []
+    replayed_ok: list[bool] = []
+    second_started = threading.Event()
+    launch_count = 0
+
+    class TrackingStream:
+        def __init__(self, idx: int):
+            self.idx = idx
+            self.closes = 0
+            close_counts.append(0)
+
+        def is_active(self):
+            return self.closes == 0
+
+        def start_stream(self):
+            pass
+
+        def write(self, _data, exception_on_underflow=False):
+            pass
+
+        def stop_stream(self):
+            pass
+
+        def close(self):
+            self.closes += 1
+            close_counts[self.idx] = self.closes
+
+    streams: list[TrackingStream] = []
+
+    def fake_open(_self, _dev):
+        s = TrackingStream(len(streams))
+        streams.append(s)
+        return s, 48000
+
+    monkeypatch.setattr(PlayerFFmpeg, "_open_pyaudio_stream", fake_open)
+
+    class ShortProc:
+        def __init__(self):
+            nonlocal launch_count
+            launch_count += 1
+            self.num = launch_count
+            if self.num >= 2:
+                second_started.set()
+            self.pid = 6060 + self.num
+            self.killed = threading.Event()
+            self._reads = 0
+            self.stdout = self
+
+        def read(self, n):
+            if self.killed.is_set() or self._reads >= 3:
+                return b""
+            self._reads += 1
+            return b"\x01\x00" * (n // 2)
+
+        def close(self):
+            self.killed.set()
+
+        def poll(self):
+            return 0 if (self.killed.is_set() or self._reads >= 3) else None
+
+        def terminate(self):
+            self.killed.set()
+
+        def kill(self):
+            self.killed.set()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr("audio.player_ffmpeg.subprocess.Popen", lambda *a, **kw: ShortProc())
+
+    def on_event(code: str, _value: int | None) -> None:
+        if code == "ended":
+            ended_states.append(
+                (
+                    player._playing,
+                    player._current_stream,
+                    player._stream_thread,
+                    close_counts[0],
+                )
+            )
+            if launch_count == 1:
+                replayed_ok.append(player.play_url(str(local_mp3)))
+
+    player = PlayerFFmpeg(on_event=on_event)
+    player._ready = True
+    player._pyaudio_instance = object()
+
+    try:
+        assert player.play_url(str(local_mp3)) is True
+        assert second_started.wait(timeout=3.0)
+        assert ended_states[0] == (False, None, None, 1)
+        assert replayed_ok == [True]
+        # Verify explicit duplicate close does not close an already-closed stream
+        player._close_audio_stream(streams[0], clear_attr=False)
+        assert close_counts[0] == 1
+    finally:
+        player.force_cleanup()

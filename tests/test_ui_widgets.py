@@ -1518,3 +1518,85 @@ def test_switch_network_to_local_with_existing_playlist_and_lyrics(qapp, monkeyp
         window._closing = True
         window.station_mgr.stop()
         window.deleteLater()
+
+
+def test_local_music_autoswitch_on_ended_modes(qapp, monkeypatch, tmp_path):
+    """Ended events advance local queue in REPEAT_ALL/REPEAT_ONE and stop once in REPEAT_OFF."""
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSettings
+
+    from core.constants import (
+        KEY_STATION,
+        REPEAT_ALL,
+        REPEAT_OFF,
+        REPEAT_ONE,
+        STATION_LOCAL,
+    )
+    from core.local_metadata import LocalTrackInfo
+    from ui import main_window
+
+    t1 = tmp_path / "one.mp3"
+    t2 = tmp_path / "two.mp3"
+    t1.write_bytes(b"")
+    t2.write_bytes(b"")
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_STATION, STATION_LOCAL)
+
+    cls = main_window.ListenMoePlayer
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+
+    window = cls()
+    played_urls: list[str] = []
+    stop_calls: list[bool] = []
+    window.player = SimpleNamespace(
+        is_ready=lambda: True,
+        is_playing=lambda: True,
+        is_paused=lambda: False,
+        get_mute=lambda: False,
+        set_mute=lambda _m: None,
+        play_url=lambda u: (played_urls.append(u), True)[1],
+        stop=lambda: stop_calls.append(True),
+        get_time=lambda: 0.0,
+        get_version=lambda: "test",
+    )
+    window.local_playlist._tracks = [
+        LocalTrackInfo(file_path=str(t1), title="One", artist="A", duration_seconds=10.0),
+        LocalTrackInfo(file_path=str(t2), title="Two", artist="B", duration_seconds=12.0),
+    ]
+    window.local_playlist.set_repeat_mode(REPEAT_ALL)
+    window.local_playlist.play_index(0)
+    qapp.processEvents()
+
+    try:
+        # REPEAT_ALL: 0 -> 1 -> 0
+        window._on_player_event("ended", None)
+        assert window.local_playlist.current_index == 1
+        assert played_urls[-1] == str(t2)
+
+        window._on_player_event("ended", None)
+        assert window.local_playlist.current_index == 0
+        assert played_urls[-1] == str(t1)
+
+        # REPEAT_ONE: replays track 0
+        window.local_playlist.set_repeat_mode(REPEAT_ONE)
+        window._on_player_event("ended", None)
+        assert window.local_playlist.current_index == 0
+        assert played_urls[-1] == str(t1)
+
+        # REPEAT_OFF on last track: stops cleanly once (no duplicate stop_stream)
+        window.local_playlist.set_repeat_mode(REPEAT_OFF)
+        window.local_playlist.play_index(1)
+        stop_calls.clear()
+        window._on_player_event("ended", None)
+        assert len(stop_calls) == 1
+    finally:
+        window._closing = True
+        window.station_mgr.stop()
+        window.deleteLater()

@@ -1260,21 +1260,26 @@ class ListenMoePlayer(QWidget):
         self.lyrics_provider.search(*key)
 
     def _on_lyrics_result(self, record, status):
-        if not self.lyrics_button.isChecked():
-            return
-        if status == "error":
-            self.lyrics_panel.show_message(self.i18n.t("lyrics_error"))
-        elif not record:
-            self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
-        elif record.get("instrumental"):
-            self.lyrics_panel.show_message(self.i18n.t("lyrics_instrumental"))
-        elif record.get("syncedLyrics") or record.get("plainLyrics"):
-            no_timing = self._current_start_epoch is None or self._current_duration_seconds is None
-            note = self.i18n.t("lyrics_no_timing") if no_timing else ""
-            self.lyrics_panel.show_record(record, self.i18n.t("lyrics_plain"), note)
-            self._update_lyrics_position()
-        else:
-            self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+        try:
+            if not self.lyrics_button.isChecked():
+                return
+            if status == "error":
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_error"))
+            elif not record:
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+            elif record.get("instrumental"):
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_instrumental"))
+            elif record.get("syncedLyrics") or record.get("plainLyrics"):
+                no_timing = (
+                    self._current_start_epoch is None or self._current_duration_seconds is None
+                )
+                note = self.i18n.t("lyrics_no_timing") if no_timing else ""
+                self.lyrics_panel.show_record(record, self.i18n.t("lyrics_plain"), note)
+                self._update_lyrics_position()
+            else:
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+        except Exception as e:
+            self.log.debug(f"[UI] _on_lyrics_result failed: {e}")
 
     def _update_lyrics_position(self):
         if not self.lyrics_button.isChecked() or self._ui_paused:
@@ -1738,46 +1743,51 @@ class ListenMoePlayer(QWidget):
             self._set_window_on_top(enabled)
 
     def _sync_mini_hud(self) -> None:
-        if not self._mini_mode:
-            return
-        self.mini_hud.title.set_text(self._current_title or "–")
-        self.mini_hud.artist.set_text(self._current_artist or "")
-        duration = self._current_duration_seconds
-        if self._is_local_mode():
-            elapsed = self._get_local_playback_seconds()
-            self.mini_hud.track_progress.set_seekable(True)
-        else:
-            self.mini_hud.track_progress.set_seekable(False)
-            epoch = self._current_start_epoch
-            elapsed = None
-            if epoch is not None and duration is not None:
-                now_synced = time.time() + self._clock_sync_offset
-                elapsed = (
-                    (duration - (epoch - now_synced)) if duration > 0 else (now_synced - epoch)
-                )
-        title = (self._current_title or "").strip()
-        live = (duration is None or duration <= 0) and title not in (
-            "",
-            "–",
-            "-",
-            self.i18n.t("unknown"),
-        )
-        self.mini_hud.set_track_progress(elapsed, duration, live=live)
         try:
-            playing = bool(self.player and self.player.is_playing() and not self._ui_paused)
-        except Exception:
-            playing = False
-        self.mini_hud.play_button.kind = "pause" if playing else "play"
-        self.mini_hud.play_button.setToolTip(self.t("tt_pause") if playing else self.t("tt_play"))
-        self.mini_hud.play_button.update()
-        cover = getattr(self.ambient_cover, "_cover_pixmap", None)
-        key = cover.cacheKey() if cover is not None and not cover.isNull() else None
-        if key != self._mini_cover_key:
-            self._mini_cover_key = key
-            if cover is not None and not cover.isNull():
-                self.mini_hud.set_cover(cover)
+            if not self._mini_mode:
+                return
+            self.mini_hud.title.set_text(self._current_title or "–")
+            self.mini_hud.artist.set_text(self._current_artist or "")
+            duration = self._current_duration_seconds
+            if self._is_local_mode():
+                elapsed = self._get_local_playback_seconds()
+                self.mini_hud.track_progress.set_seekable(True)
             else:
-                self.mini_hud.set_cover(self._icon_app.pixmap(MINI_COVER_SIZE, MINI_COVER_SIZE))
+                self.mini_hud.track_progress.set_seekable(False)
+                epoch = self._current_start_epoch
+                elapsed = None
+                if epoch is not None and duration is not None:
+                    now_synced = time.time() + self._clock_sync_offset
+                    elapsed = (
+                        (duration - (epoch - now_synced)) if duration > 0 else (now_synced - epoch)
+                    )
+            title = (self._current_title or "").strip()
+            live = (duration is None or duration <= 0) and title not in (
+                "",
+                "–",
+                "-",
+                self.i18n.t("unknown"),
+            )
+            self.mini_hud.set_track_progress(elapsed, duration, live=live)
+            try:
+                playing = bool(self.player and self.player.is_playing() and not self._ui_paused)
+            except Exception:
+                playing = False
+            self.mini_hud.play_button.kind = "pause" if playing else "play"
+            self.mini_hud.play_button.setToolTip(
+                self.t("tt_pause") if playing else self.t("tt_play")
+            )
+            self.mini_hud.play_button.update()
+            cover = getattr(self.ambient_cover, "_cover_pixmap", None)
+            key = cover.cacheKey() if cover is not None and not cover.isNull() else None
+            if key != self._mini_cover_key:
+                self._mini_cover_key = key
+                if cover is not None and not cover.isNull():
+                    self.mini_hud.set_cover(cover)
+                else:
+                    self.mini_hud.set_cover(self._icon_app.pixmap(MINI_COVER_SIZE, MINI_COVER_SIZE))
+        except Exception as e:
+            self.log.debug(f"[UI] _sync_mini_hud failed: {e}")
 
     def toggle_mini_hud(self) -> None:
         if self._lyrics_transition.state() == QVariantAnimation.State.Running:
@@ -3065,14 +3075,17 @@ class ListenMoePlayer(QWidget):
             pass
 
     def _on_now_playing_text_changed(self, text: str) -> None:
-        if hasattr(self, "now_playing_label"):
-            self.now_playing_label.setText(text)
-        title = self._current_title or self.t("unknown")
-        artist = self._current_artist or ""
-        if hasattr(self, "now_playing_title"):
-            self.now_playing_title.setText(title)
-        if hasattr(self, "now_playing_artist"):
-            self.now_playing_artist.setText(artist)
+        try:
+            if hasattr(self, "now_playing_label"):
+                self.now_playing_label.setText(text)
+            title = self._current_title or self.t("unknown")
+            artist = self._current_artist or ""
+            if hasattr(self, "now_playing_title"):
+                self.now_playing_title.setText(title)
+            if hasattr(self, "now_playing_artist"):
+                self.now_playing_artist.setText(artist)
+        except Exception as e:
+            self.log.debug(f"[UI] _on_now_playing_text_changed failed: {e}")
 
     # 4. Timer & Tray Action Events
     def _on_session_tick(self) -> None:
@@ -5753,13 +5766,15 @@ class ListenMoePlayer(QWidget):
         """Advances to the next track in the local queue and starts playback."""
         if not self._is_local_mode():
             return
+        self._playback_ended_stopped = False
         next_track = self.local_playlist.next_track()
         if next_track:
             self.log.info(f"[UI] Next local track: {next_track.title} by {next_track.artist}")
             self.play_stream(is_retry=False)
         else:
             self.log.info("[UI] Next track reached end of playlist.")
-            self.stop_stream()
+            if not getattr(self, "_playback_ended_stopped", False):
+                self.stop_stream()
 
     def play_previous_track(self) -> None:
         """Returns to previous track (or restarts current track if >3s in)."""
@@ -5860,86 +5875,94 @@ class ListenMoePlayer(QWidget):
 
     def _on_local_track_changed(self, track: Optional[LocalTrackInfo]) -> None:
         """Updates UI display, cover art, and lyrics cascade when local track changes."""
-        if not self._is_local_mode():
-            return
-        if not track:
-            self._current_title = self.i18n.t("station_local")
-            self._current_artist = self.i18n.t("queue_empty_hint")
-            self._current_duration_seconds = None
-            self._current_start_epoch = None
-            self._current_cover_ref = None
-            self._current_cover_url = None
-            self._current_cover_bytes_digest = None
-            self._current_local_cover_sig = None
-            self.song_progress.setValue(0)
-            self.song_progress.set_seekable(False)
-            self.playback_controls.set_nav_enabled(False, False)
-            self._set_album_cover_pixmap(None)
+        try:
+            if not self._is_local_mode():
+                return
+            if not track:
+                self._current_title = self.i18n.t("station_local")
+                self._current_artist = self.i18n.t("queue_empty_hint")
+                self._current_duration_seconds = None
+                self._current_start_epoch = None
+                self._current_cover_ref = None
+                self._current_cover_url = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+                self.song_progress.setValue(0)
+                self.song_progress.set_seekable(False)
+                self.playback_controls.set_nav_enabled(False, False)
+                self._set_album_cover_pixmap(None)
+                if hasattr(self, "now_playing_title"):
+                    self.now_playing_title.setText(self._current_title)
+                    self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+                if hasattr(self, "now_playing_artist"):
+                    self.now_playing_artist.setText(self._current_artist)
+                    self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                self.label_refresh.emit()
+                return
+
+            self._current_title = track.display_title()
+            self._current_artist = track.display_artist()
             if hasattr(self, "now_playing_title"):
                 self.now_playing_title.setText(self._current_title)
-                self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+                self.now_playing_title.setToolTip(self.i18n.t("search_menu_tooltip"))
             if hasattr(self, "now_playing_artist"):
                 self.now_playing_artist.setText(self._current_artist)
-                self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                self.now_playing_artist.setToolTip(self.i18n.t("search_menu_tooltip"))
+            self._current_duration_seconds = (
+                int(track.duration_seconds) if track.duration_seconds > 0 else None
+            )
+            self._current_start_epoch = time.time()
+            self.song_progress.set_seekable(True)
+            self.song_progress.set_live_mode(False)
+            if self._current_duration_seconds and self._current_duration_seconds > 0:
+                self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
+            self.song_progress.setValue(0)
+
+            # Update deck navigation buttons
+            has_prev = self.local_playlist.current_index > 0 or self.local_playlist.repeat_mode == 1
+            has_next = (
+                self.local_playlist.current_index < len(self.local_playlist.tracks) - 1
+                or self.local_playlist.repeat_mode == 1
+            )
+            self.playback_controls.set_nav_enabled(has_prev, has_next)
+
+            # Update album art (deduplicate identical embedded/sidecar bytes across tracks)
+            if track.cover_bytes:
+                digest = hashlib.blake2b(track.cover_bytes, digest_size=16).digest()
+                if digest != getattr(self, "_current_cover_bytes_digest", None):
+                    pix = QPixmap()
+                    if pix.loadFromData(track.cover_bytes) and not pix.isNull():
+                        self._current_cover_bytes_digest = digest
+                        self._current_local_cover_sig = None
+                        self._set_album_cover_pixmap(pix)
+                    else:
+                        self._current_cover_ref = None
+                        self._current_cover_url = None
+                        self._current_cover_bytes_digest = None
+                        self._current_local_cover_sig = None
+                        self._set_album_cover_pixmap(None)
+            else:
+                self._current_cover_ref = None
+                self._current_cover_url = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+                self._set_album_cover_pixmap(None)
+
+            # 3-level lyrics cascade
+            if self.lyrics_button.isChecked():
+                if not self._show_local_track_lyrics(track):
+                    self._refresh_lyrics()
+
             self.label_refresh.emit()
-            return
-
-        self._current_title = track.display_title()
-        self._current_artist = track.display_artist()
-        if hasattr(self, "now_playing_title"):
-            self.now_playing_title.setText(self._current_title)
-            self.now_playing_title.setToolTip(self.i18n.t("search_menu_tooltip"))
-        if hasattr(self, "now_playing_artist"):
-            self.now_playing_artist.setText(self._current_artist)
-            self.now_playing_artist.setToolTip(self.i18n.t("search_menu_tooltip"))
-        self._current_duration_seconds = (
-            int(track.duration_seconds) if track.duration_seconds > 0 else None
-        )
-        self._current_start_epoch = time.time()
-        self.song_progress.set_seekable(True)
-        self.song_progress.set_live_mode(False)
-        if self._current_duration_seconds and self._current_duration_seconds > 0:
-            self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
-        self.song_progress.setValue(0)
-
-        # Update deck navigation buttons
-        has_prev = self.local_playlist.current_index > 0 or self.local_playlist.repeat_mode == 1
-        has_next = (
-            self.local_playlist.current_index < len(self.local_playlist.tracks) - 1
-            or self.local_playlist.repeat_mode == 1
-        )
-        self.playback_controls.set_nav_enabled(has_prev, has_next)
-
-        # Update album art (deduplicate identical embedded/sidecar bytes across tracks)
-        if track.cover_bytes:
-            digest = hashlib.blake2b(track.cover_bytes, digest_size=16).digest()
-            if digest != getattr(self, "_current_cover_bytes_digest", None):
-                pix = QPixmap()
-                if pix.loadFromData(track.cover_bytes) and not pix.isNull():
-                    self._current_cover_bytes_digest = digest
-                    self._current_local_cover_sig = None
-                    self._set_album_cover_pixmap(pix)
-                else:
-                    self._current_cover_ref = None
-                    self._current_cover_url = None
-                    self._set_album_cover_pixmap(None)
-        else:
-            self._current_cover_ref = None
-            self._current_cover_url = None
-            self._set_album_cover_pixmap(None)
-
-        # 3-level lyrics cascade
-        if self.lyrics_button.isChecked():
-            if not self._show_local_track_lyrics(track):
-                self._refresh_lyrics()
-
-        self.label_refresh.emit()
-        self._sync_mini_hud()
-        self.update_tray_texts()
+            self._sync_mini_hud()
+            self.update_tray_texts()
+        except Exception as e:
+            self.log.debug(f"[UI] _on_local_track_changed failed: {e}")
 
     def _on_local_playback_ended(self) -> None:
         """Invoked when local playlist finishes all tracks without repeat."""
         self.log.info("[UI] Local playlist ended.")
+        self._playback_ended_stopped = True
         self.stop_stream()
 
     def dragEnterEvent(self, event) -> None:

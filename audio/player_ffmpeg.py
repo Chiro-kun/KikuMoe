@@ -152,52 +152,56 @@ class PlayerFFmpeg:
         if pyaudio is None or self._pyaudio_instance is None:
             return None
         pa = self._pyaudio_instance
-        for api_type in (self._PA_PULSE_AUDIO, self._PA_ALSA):
-            try:
-                api_info = pa.get_host_api_info_by_type(api_type)
-            except Exception:
-                continue
-            device_count = api_info.get("deviceCount", 0) if isinstance(api_info, dict) else 0
-            if not device_count:
-                continue
-            # Use the default output device reported by this host API
-            default_out = (
-                api_info.get("defaultOutputDevice", -1) if isinstance(api_info, dict) else -1
-            )
-            if default_out is not None and default_out >= 0:
+        with PORTAUDIO_LOCK:
+            for api_type in (self._PA_PULSE_AUDIO, self._PA_ALSA):
                 try:
-                    dev_info = pa.get_device_info_by_index(default_out)
-                    if isinstance(dev_info, dict) and int(dev_info.get("maxOutputChannels", 0)) > 0:
-                        label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
-                        self.log.debug(
-                            "[FFmpeg] Linux audio: using %s device index=%d (%s)",
-                            label,
-                            default_out,
-                            dev_info.get("name", ""),
-                        )
-                        return default_out
+                    api_info = pa.get_host_api_info_by_type(api_type)
                 except Exception:
-                    pass
-            # No explicit default; take the first output-capable device on this API
-            api_idx = api_info.get("index", -1) if isinstance(api_info, dict) else -1
-            for i in range(pa.get_device_count()):
-                try:
-                    d = pa.get_device_info_by_index(i)
-                    if (
-                        isinstance(d, dict)
-                        and d.get("hostApi") == api_idx
-                        and int(d.get("maxOutputChannels", 0)) > 0
-                    ):
-                        label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
-                        self.log.debug(
-                            "[FFmpeg] Linux audio: using first %s device index=%d (%s)",
-                            label,
-                            i,
-                            d.get("name", ""),
-                        )
-                        return i
-                except Exception:
-                    pass
+                    continue
+                device_count = api_info.get("deviceCount", 0) if isinstance(api_info, dict) else 0
+                if not device_count:
+                    continue
+                # Use the default output device reported by this host API
+                default_out = (
+                    api_info.get("defaultOutputDevice", -1) if isinstance(api_info, dict) else -1
+                )
+                if default_out is not None and default_out >= 0:
+                    try:
+                        dev_info = pa.get_device_info_by_index(default_out)
+                        if (
+                            isinstance(dev_info, dict)
+                            and int(dev_info.get("maxOutputChannels", 0)) > 0
+                        ):
+                            label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
+                            self.log.debug(
+                                "[FFmpeg] Linux audio: using %s device index=%d (%s)",
+                                label,
+                                default_out,
+                                dev_info.get("name", ""),
+                            )
+                            return default_out
+                    except Exception:
+                        pass
+                # No explicit default; take the first output-capable device on this API
+                api_idx = api_info.get("index", -1) if isinstance(api_info, dict) else -1
+                for i in range(pa.get_device_count()):
+                    try:
+                        d = pa.get_device_info_by_index(i)
+                        if (
+                            isinstance(d, dict)
+                            and d.get("hostApi") == api_idx
+                            and int(d.get("maxOutputChannels", 0)) > 0
+                        ):
+                            label = "PipeWire/Pulse" if api_type == self._PA_PULSE_AUDIO else "ALSA"
+                            self.log.debug(
+                                "[FFmpeg] Linux audio: using first %s device index=%d (%s)",
+                                label,
+                                i,
+                                d.get("name", ""),
+                            )
+                            return i
+                    except Exception:
+                        pass
         self.log.debug("[FFmpeg] Linux audio: no preferred host API found, using PortAudio default")
         return None
 
@@ -234,8 +238,13 @@ class PlayerFFmpeg:
             stream = target_stream if target_stream is not None else self._audio_stream
             if clear_attr and (target_stream is None or self._audio_stream is stream):
                 self._audio_stream = None
-            if stream is None:
+            if stream is None or getattr(stream, "_kikumoe_closed", False):
                 return
+            # Guard against calling Pa_CloseStream twice on the same C PaStream* pointer.
+            try:
+                setattr(stream, "_kikumoe_closed", True)
+            except Exception:
+                pass
             try:
                 if getattr(stream, "is_active", lambda: False)():
                     try:
@@ -877,6 +886,7 @@ class PlayerFFmpeg:
             )
 
         self.log.debug("[DEBUG] _stream_worker: started for url: %s (session=%s)", url, session_id)
+        terminal_event: str | None = None
         try:
             if _session_aborted():
                 return
@@ -902,16 +912,20 @@ class PlayerFFmpeg:
                         self._close_audio_stream(local_stream, clear_attr=False)
                         local_stream = None
                         return
-                    with self._stream_lock:
-                        self._audio_stream = local_stream
-                        self._stream_sample_rate = stream_rate
                     try:
-                        if local_stream is not None and hasattr(local_stream, "start_stream"):
-                            local_stream.start_stream()
-                            self.log.debug(
-                                "[DEBUG] _stream_worker: PyAudio stream started at rate=%d",
-                                stream_rate,
-                            )
+                        with PORTAUDIO_LOCK, self._stream_lock:
+                            if _session_aborted():
+                                self._close_audio_stream(local_stream, clear_attr=False)
+                                local_stream = None
+                                return
+                            self._audio_stream = local_stream
+                            self._stream_sample_rate = stream_rate
+                            if local_stream is not None and hasattr(local_stream, "start_stream"):
+                                local_stream.start_stream()
+                                self.log.debug(
+                                    "[DEBUG] _stream_worker: PyAudio stream started at rate=%d",
+                                    stream_rate,
+                                )
                     except Exception as se:
                         self.log.debug(
                             "[DEBUG] _stream_worker: could not start PyAudio stream: %s", se
@@ -1383,26 +1397,26 @@ class PlayerFFmpeg:
                         self.log.error(
                             "[BACKEND] PlayerFFmpeg: stream failed or stalled; emitting error"
                         )
-                        self._emit_if_session(session_id, "error", None)
+                        terminal_event = "error"
                     elif not started_streaming:
                         self.log.error(
                             "[BACKEND] PlayerFFmpeg: connection failed before receiving audio data"
                             " (all attempts); emitting error"
                         )
-                        self._emit_if_session(session_id, "error", None)
+                        terminal_event = "error"
                     else:
                         self.log.debug("[DEBUG] _stream_worker: stream ended naturally")
-                        self._emit_if_session(session_id, "ended", None)
+                        terminal_event = "ended"
                 else:
                     self.log.debug("[DEBUG] _stream_worker: stream stopped by request")
-                    self._emit_if_session(session_id, "stopped", None)
+                    terminal_event = "stopped"
 
         except Exception as e:
             self.log.error(
                 "[BACKEND] PlayerFFmpeg: unhandled exception in stream worker thread: %s", e
             )
             if not (local_stop.is_set() or self._stop_requested):
-                self._emit_if_session(session_id, "error", None)
+                terminal_event = "error"
         finally:
             self.log.debug("[DEBUG] _stream_worker: final cleanup (session=%s)", session_id)
             if local_proc is not None and local_proc.poll() is None:
@@ -1421,4 +1435,9 @@ class PlayerFFmpeg:
                         self._stream_thread = None
                 except Exception:
                     pass
+            # Emit terminal state only after process, PortAudio stream, and flags
+            # are completely cleaned up so handlers (e.g. local autoswitch / repeat-one)
+            # can safely call play_url() without racing the exiting worker.
+            if terminal_event is not None:
+                self._emit_if_session(session_id, terminal_event, None)
             self.log.debug("[DEBUG] _stream_worker: exited")
