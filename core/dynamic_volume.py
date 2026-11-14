@@ -386,6 +386,7 @@ class DynamicVolumeController(QObject):
         poll_interval_ms: int = 250,
         ramp_interval_ms: int = 25,
         ramp_steps: int = 8,
+        unduck_ramp_steps: int = 40,
         list_processes_fn: Callable[[], set[str]] | None = None,
         foreground_process_fn: Callable[[], str] | None = None,
     ) -> None:
@@ -403,7 +404,11 @@ class DynamicVolumeController(QObject):
         self._poll_interval_ms = max(100, int(poll_interval_ms))
         self._ramp_interval_ms = max(10, int(ramp_interval_ms))
         self._ramp_steps = max(1, int(ramp_steps))
-        self._step_delta: float = 0.08
+        self._unduck_ramp_steps = max(1, int(unduck_ramp_steps))
+        self._ramp_start_factor: float = 1.0
+        self._ramp_step_index: int = 0
+        self._ramp_total_steps: int = self._ramp_steps
+        self._ramp_is_unduck: bool = False
 
         self._list_processes = list_processes_fn or list_running_process_names
         self._foreground_process = foreground_process_fn or get_foreground_process_name
@@ -492,8 +497,12 @@ class DynamicVolumeController(QObject):
         self._active_app = new_app
 
         if target_changed:
-            dist = abs(self._target_factor - self._current_factor)
-            self._step_delta = max(0.01, dist / float(self._ramp_steps))
+            self._ramp_start_factor = self._current_factor
+            self._ramp_step_index = 0
+            self._ramp_is_unduck = self._target_factor > self._current_factor
+            self._ramp_total_steps = (
+                self._unduck_ramp_steps if self._ramp_is_unduck else self._ramp_steps
+            )
             if not self._ramp_timer.isActive():
                 self._ramp_timer.start()
             # Perform first step right away so fast callers/tests feel responsive.
@@ -502,14 +511,24 @@ class DynamicVolumeController(QObject):
             self.factor_changed.emit(self._current_factor, self._active_app)
 
     def _on_ramp_tick(self) -> None:
-        diff = self._target_factor - self._current_factor
-        if abs(diff) <= self._step_delta + 1e-4:
+        self._ramp_step_index += 1
+        total = max(1, self._ramp_total_steps)
+        if (
+            self._ramp_step_index >= total
+            or abs(self._target_factor - self._current_factor) <= 1e-4
+        ):
             self._current_factor = self._target_factor
             if self._ramp_timer.isActive():
                 self._ramp_timer.stop()
-        elif diff > 0:
-            self._current_factor = min(self._target_factor, self._current_factor + self._step_delta)
         else:
-            self._current_factor = max(self._target_factor, self._current_factor - self._step_delta)
+            t = self._ramp_step_index / float(total)
+            # Smoothstep ease when restoring volume so unducking swells gently without blasting.
+            eased = t * t * (3.0 - 2.0 * t) if self._ramp_is_unduck else t
+            span = self._target_factor - self._ramp_start_factor
+            next_factor = self._ramp_start_factor + span * eased
+            if self._ramp_is_unduck:
+                self._current_factor = min(self._target_factor, next_factor)
+            else:
+                self._current_factor = max(self._target_factor, next_factor)
 
         self.factor_changed.emit(self._current_factor, self._active_app)

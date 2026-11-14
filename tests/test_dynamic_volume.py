@@ -457,7 +457,7 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
         player.deleteLater()
 
 
-def test_controller_unducks_promptly_with_default_poll_timer_and_skips_empty_apps(qapp):
+def test_controller_unducks_promptly_and_gradually_on_process_exit(qapp):
     state = {"running": set(), "fg": ""}
     ctrl = DynamicVolumeController(
         list_processes_fn=lambda: set(state["running"]),
@@ -466,6 +466,7 @@ def test_controller_unducks_promptly_with_default_poll_timer_and_skips_empty_app
     try:
         assert ctrl._poll_timer.interval() <= 250
         assert ctrl._ramp_timer.interval() * ctrl._ramp_steps <= 250
+        assert ctrl._ramp_timer.interval() * ctrl._unduck_ramp_steps >= 800
 
         # Empty app list -> poll timer stays idle even when enabled
         ctrl.configure(True, "", 25, DYNAMIC_MODE_ANY_OPEN)
@@ -476,16 +477,66 @@ def test_controller_unducks_promptly_with_default_poll_timer_and_skips_empty_app
         assert ctrl._poll_timer.isActive() is True
 
         state["running"] = {"game"}
-        QTest.qWait(650)
+        QTest.qWait(550)
         assert ctrl.is_ducked() is True
         assert abs(ctrl.current_factor() - 0.25) < 1e-6
 
-        # Selected process exits -> unducking completes via the same poll timer within <= 650ms
+        # Selected process exits -> exit is detected promptly, and volume swells gradually (not blasted to 1.0)
         state["running"] = set()
-        QTest.qWait(650)
+        QTest.qWait(400)
         assert ctrl.is_ducked() is False
         assert ctrl.active_app() == ""
+        assert ctrl.target_factor() == 1.0
+        assert 0.25 < ctrl.current_factor() < 0.90
+
+        # Remainder of the gradual fade completes smoothly to 1.0
+        QTest.qWait(1050)
         assert abs(ctrl.current_factor() - 1.0) < 1e-6
+    finally:
+        ctrl.stop()
+
+
+def test_controller_gradual_unduck_easing_and_reduck_mid_fade(qapp):
+    state = {"running": {"game"}, "fg": ""}
+    events: list[tuple[float, str]] = []
+    ctrl = DynamicVolumeController(
+        ramp_steps=4,
+        unduck_ramp_steps=20,
+        list_processes_fn=lambda: set(state["running"]),
+        foreground_process_fn=lambda: state["fg"],
+    )
+    try:
+        ctrl.factor_changed.connect(lambda f, app: events.append((f, app)))
+        ctrl.configure(True, "game.exe", 20, DYNAMIC_MODE_ANY_OPEN)
+        while ctrl._ramp_timer.isActive():
+            ctrl._on_ramp_tick()
+        assert abs(ctrl.current_factor() - 0.20) < 1e-6
+
+        events.clear()
+        state["running"] = set()
+        ctrl.evaluate_now()
+        # First tick rises very gently (smoothstep start), never snapping
+        assert events[0][0] < 0.22
+        assert ctrl._ramp_step_index == 1
+
+        # Advance 5 ticks (quarter of unduck fade) -> stays below linear midpoint (still gentle)
+        for _ in range(4):
+            ctrl._on_ramp_tick()
+        assert 0.20 < events[-1][0] < 0.40
+
+        # Monotonically non-decreasing upward ticks until mid-fade
+        up_factors = [f for f, _ in events]
+        assert up_factors == sorted(up_factors)
+
+        # If target app re-opens mid-unduck, controller ducks smoothly from current factor
+        mid_factor = ctrl.current_factor()
+        state["running"] = {"game"}
+        ctrl.evaluate_now()
+        assert ctrl.is_ducked() is True
+        assert ctrl.current_factor() < mid_factor
+        while ctrl._ramp_timer.isActive():
+            ctrl._on_ramp_tick()
+        assert abs(ctrl.current_factor() - 0.20) < 1e-6
     finally:
         ctrl.stop()
 
