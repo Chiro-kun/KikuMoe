@@ -12,7 +12,7 @@ import random
 from pathlib import Path
 from typing import Sequence
 
-from PyQt6.QtCore import QObject, QSettings, pyqtSignal
+from PyQt6.QtCore import QObject, QSettings, QStandardPaths, pyqtSignal
 
 from core.constants import (
     APP_SETTINGS,
@@ -29,6 +29,15 @@ from core.constants import (
 from core.local_metadata import LocalTrackInfo, extract_track_metadata
 
 logger = logging.getLogger("kikumoe.local_playlist")
+
+
+def get_default_music_dir() -> str:
+    """Return the user's Music folder on first run, falling back safely if missing."""
+    music_std = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MusicLocation)
+    for candidate in (music_std, str(Path.home() / "Music"), str(Path.home())):
+        if candidate and Path(candidate).is_dir():
+            return candidate
+    return music_std or str(Path.home())
 
 
 class LocalPlaylistManager(QObject):
@@ -84,9 +93,18 @@ class LocalPlaylistManager(QObject):
     def total_duration_seconds(self) -> float:
         return sum(t.duration_seconds for t in self._tracks)
 
+    def get_initial_picker_dir(self) -> str:
+        """Return the last used existing local directory, or the OS Music folder on first run."""
+        raw_last = self._settings.value(KEY_LOCAL_LAST_DIR, "")
+        last_dir = str(raw_last).strip() if raw_last else ""
+        if last_dir and Path(last_dir).is_dir():
+            return last_dir
+        return get_default_music_dir()
+
     def add_files(self, paths: Sequence[str]) -> int:
         """Extract metadata and append supported audio files to the queue."""
         added = 0
+        last_parent: Path | None = None
         for p in paths:
             path_obj = Path(p)
             if not path_obj.is_file():
@@ -94,13 +112,17 @@ class LocalPlaylistManager(QObject):
             if path_obj.suffix.lower() not in SUPPORTED_AUDIO_EXTENSIONS:
                 continue
             try:
-                info = extract_track_metadata(str(path_obj.resolve()))
+                resolved = path_obj.resolve()
+                info = extract_track_metadata(str(resolved))
                 self._tracks.append(info)
+                last_parent = resolved.parent
                 added += 1
             except Exception as e:
                 logger.warning("Could not extract metadata for '%s': %s", p, e)
 
         if added > 0:
+            if last_parent is not None and last_parent.is_dir():
+                self._settings.setValue(KEY_LOCAL_LAST_DIR, str(last_parent))
             self._rebuild_shuffle_order()
             self.save_queue()
             self.queue_updated.emit()

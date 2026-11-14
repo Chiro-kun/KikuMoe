@@ -469,7 +469,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         files, _ = QFileDialog.getOpenFileNames(
             self,
             self.i18n.t("local_add_files"),
-            "",
+            self.playlist_mgr.get_initial_picker_dir(),
             filters,
         )
         if files:
@@ -479,6 +479,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
         folder = QFileDialog.getExistingDirectory(
             self,
             self.i18n.t("local_add_folder"),
+            self.playlist_mgr.get_initial_picker_dir(),
         )
         if folder:
             self.playlist_mgr.add_folder(folder)

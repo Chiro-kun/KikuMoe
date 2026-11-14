@@ -626,3 +626,64 @@ def test_seek_bar_click_emits_once_and_updates_immediately():
     assert ListenMoePlayer._get_local_playback_seconds(fake) == 72.0
     pos["t"] = 72.5
     assert ListenMoePlayer._get_local_playback_seconds(fake) == 72.5
+
+
+def test_picker_defaults_to_music_folder_on_first_run(tmp_path: Path, monkeypatch):
+    from PyQt6.QtCore import QSettings, QStandardPaths
+    from PyQt6.QtWidgets import QApplication, QFileDialog
+
+    import core.local_playlist as lp_mod
+    from ui.local_queue_dialog import LocalQueueDialog
+    from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+    _app = QApplication.instance() or QApplication([])
+
+    music_dir = tmp_path / "Music"
+    music_dir.mkdir()
+    albums_dir = tmp_path / "Albums"
+    albums_dir.mkdir()
+    song = albums_dir / "track.mp3"
+    song.write_bytes(b"\x00" * 64)
+
+    settings = QSettings(str(tmp_path / "local.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(lp_mod, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(
+        lp_mod.QStandardPaths,
+        "writableLocation",
+        lambda loc: str(music_dir) if loc == QStandardPaths.StandardLocation.MusicLocation else "",
+    )
+
+    mgr = LocalPlaylistManager()
+    assert mgr.get_initial_picker_dir() == str(music_dir)
+
+    opened_dirs: list[str] = []
+
+    def fake_open_files(parent, caption="", directory="", filter="", *args, **kwargs):
+        opened_dirs.append(directory)
+        return [], ""
+
+    def fake_existing_dir(parent, caption="", directory="", *args, **kwargs):
+        opened_dirs.append(directory)
+        return ""
+
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", fake_open_files)
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", fake_existing_dir)
+
+    queue_dlg = LocalQueueDialog(mgr)
+    prompt_dlg = LocalMusicPromptDialog(mgr)
+    try:
+        queue_dlg._on_add_files_clicked()
+        queue_dlg._on_add_folder_clicked()
+        prompt_dlg._on_select_files()
+        prompt_dlg._on_select_folder()
+        assert opened_dirs == [str(music_dir)] * 4
+
+        # Adding files remembers that directory; missing dirs fall back cleanly to Music
+        mgr.add_files([str(song)])
+        assert mgr.get_initial_picker_dir() == str(albums_dir.resolve())
+
+        settings.setValue("local_last_dir", str(tmp_path / "deleted_folder"))
+        assert mgr.get_initial_picker_dir() == str(music_dir)
+    finally:
+        queue_dlg.close()
+        prompt_dlg.close()

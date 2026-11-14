@@ -247,7 +247,7 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
         folder = QFileDialog.getExistingDirectory(
             self,
             self.i18n.t("local_add_folder"),
-            "",
+            self.playlist_mgr.get_initial_picker_dir(),
         )
         if folder:
             self._self_loading = True
@@ -263,7 +263,7 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
         files, _ = QFileDialog.getOpenFileNames(
             self,
             self.i18n.t("local_add_files"),
-            "",
+            self.playlist_mgr.get_initial_picker_dir(),
             filters,
         )
         if files:
