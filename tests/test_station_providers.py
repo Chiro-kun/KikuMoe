@@ -421,6 +421,54 @@ def test_station_pill_button_state():
     pill.deleteLater()
 
 
+def test_station_pill_never_truncates_or_stalls_on_font_change(monkeypatch):
+    from PyQt6.QtGui import QFont, QPainter
+    from PyQt6.QtWidgets import QApplication
+
+    from core.config import STATIONS
+    from core.i18n import I18n
+    from ui.widgets.station_pill import StationPillButton
+
+    app = QApplication.instance() or QApplication(["pytest"])
+    drawn_texts: list[str] = []
+    orig_draw_text = QPainter.drawText
+
+    def spy_draw_text(self, *args, **kwargs):
+        if len(args) >= 2 and isinstance(args[1], str):
+            drawn_texts.append(args[1])
+        return orig_draw_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(QPainter, "drawText", spy_draw_text)
+
+    for lang in ("en", "it"):
+        pill = StationPillButton(
+            initial_station="listenmoe", initial_channel="J-POP", i18n=I18n(lang)
+        )
+        try:
+            for st_id in STATIONS:
+                drawn_texts.clear()
+                pill.update_state(st_id, "J-POP")
+                pill.grab()
+                app.processEvents()
+                expected = pill.get_display_title()
+                assert pill.width() == pill.sizeHint().width()
+                assert pill.maximumWidth() == pill.sizeHint().width()
+                assert drawn_texts == [expected], f"Elided {expected!r} -> {drawn_texts!r}"
+
+            # Simulating Linux post-init font-family change must resize pill and update maxWidth
+            pill.update_state("local")
+            mono_font = QFont(pill.font())
+            mono_font.setFamily("Courier New")
+            pill.setFont(mono_font)
+            pill.grab()
+            app.processEvents()
+            assert pill.maximumWidth() == pill.sizeHint().width()
+            assert pill.width() == pill.sizeHint().width()
+            assert drawn_texts[-1] == pill.get_display_title()
+        finally:
+            pill.deleteLater()
+
+
 def test_station_popover_animations():
     """Verify StationGlassPopover and StationPillButton animations (drop-in, fade, chevron)."""
     from PyQt6.QtTest import QTest

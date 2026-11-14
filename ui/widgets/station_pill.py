@@ -8,6 +8,7 @@ without repeating station entries or truncating text.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -15,6 +16,7 @@ from typing import Callable
 
 from PyQt6.QtCore import (  # type: ignore[attr-defined]
     QEasingCurve,
+    QEvent,
     QParallelAnimationGroup,
     QPoint,
     QPointF,
@@ -29,8 +31,9 @@ from PyQt6.QtCore import (  # type: ignore[attr-defined]
 from PyQt6.QtGui import (
     QColor,
     QFont,
-    QFontMetrics,
+    QFontMetricsF,
     QGuiApplication,
+    QPaintDevice,
     QPainter,
     QPainterPath,
     QPaintEvent,
@@ -649,8 +652,39 @@ class StationPillButton(QWidget):
         self.setMouseTracking(True)
         self.setToolTip(self._i18n.t("station_switch_tooltip"))
         self._pixmap_cache: dict[str, QPixmap] = {}
-        self.setMaximumWidth(self.sizeHint().width())
-        self.resize(self.sizeHint())
+        self._sync_size_constraints()
+
+    def _pill_font(self) -> QFont:
+        font = QFont(self.font())
+        font.setPointSize(9)
+        font.setBold(True)
+        return font
+
+    def _measure_text_width(
+        self, title: str, font: QFont | None = None, device: QPaintDevice | None = None
+    ) -> int:
+        """Measure *title* width with device-matched fractional font metrics plus safety buffer."""
+        resolved_font = font if font is not None else self._pill_font()
+        fm_f = QFontMetricsF(resolved_font, device if device is not None else self)
+        raw_w = max(fm_f.horizontalAdvance(title), fm_f.boundingRect(title).width())
+        return math.ceil(raw_w) + 2
+
+    def _sync_size_constraints(self) -> None:
+        hint = self.sizeHint()
+        self.setMaximumWidth(hint.width())
+        self.resize(hint)
+        self.updateGeometry()
+        self.update()
+
+    def changeEvent(self, a0: QEvent | None) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() in (
+            QEvent.Type.FontChange,
+            QEvent.Type.StyleChange,
+            QEvent.Type.ApplicationFontChange,
+            QEvent.Type.Polish,
+        ):
+            self._sync_size_constraints()
 
     def get_chevron_angle(self) -> float:
         return self._chevron_angle
@@ -677,10 +711,7 @@ class StationPillButton(QWidget):
         self._current_station = (station_id or DEFAULT_STATION).lower().strip()
         if channel:
             self._current_channel = channel.strip()
-        self.setMaximumWidth(self.sizeHint().width())
-        self.resize(self.sizeHint())
-        self.updateGeometry()
-        self.update()
+        self._sync_size_constraints()
 
     def get_current_station(self) -> str:
         return self._current_station
@@ -698,18 +729,11 @@ class StationPillButton(QWidget):
         if i18n is not None:
             self._i18n = i18n
         self.setToolTip(self._i18n.t("station_switch_tooltip"))
-        self.setMaximumWidth(self.sizeHint().width())
-        self.resize(self.sizeHint())
-        self.updateGeometry()
-        self.update()
+        self._sync_size_constraints()
 
     def sizeHint(self) -> QSize:
-        font = QFont(self.font())
-        font.setPointSize(9)
-        font.setBold(True)
-        fm = QFontMetrics(font)
         title = self.get_display_title()
-        text_w = fm.horizontalAdvance(title)
+        text_w = self._measure_text_width(title)
         # Symmetrical pill: 11 (left) + 16 (icon) + 7 (gap)
         # + text_w + 8 (gap) + 7 (chevron) + 11 (right)
         total_w = 11 + 16 + 7 + text_w + 8 + 7 + 11
@@ -763,7 +787,7 @@ class StationPillButton(QWidget):
 
     def refresh_theme(self) -> None:
         self._accent = QColor(PALETTE.get("accent", "#EC186C"))
-        self.update()
+        self._sync_size_constraints()
 
     def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
@@ -814,18 +838,21 @@ class StationPillButton(QWidget):
             painter.drawPixmap(int(icon_x), int(icon_y), pix)
 
         # 3. Title Text
-        font = QFont(self.font())
-        font.setPointSize(9)
-        font.setBold(True)
+        font = self._pill_font()
         painter.setFont(font)
         painter.setPen(fg)
 
         title = self.get_display_title()
         fm = painter.fontMetrics()
+        fm_f = QFontMetricsF(font, painter.device() or self)
         text_x = icon_x + 16.0 + gap_icon_text
-        available_text_width = max(0, int(w - text_x - gap_text_chev - 7.0 - pad))
-        title = fm.elidedText(title, Qt.TextElideMode.ElideRight, available_text_width)
-        text_w = fm.horizontalAdvance(title)
+        available_text_width = max(0, int(math.floor(w - text_x - gap_text_chev - 7.0 - pad)))
+        needed_text_width = math.ceil(
+            max(fm_f.horizontalAdvance(title), fm_f.boundingRect(title).width())
+        )
+        if available_text_width < needed_text_width:
+            title = fm.elidedText(title, Qt.TextElideMode.ElideRight, available_text_width)
+        text_w = min(float(available_text_width), float(fm_f.horizontalAdvance(title)))
         text_y = (h + fm.ascent() - fm.descent()) / 2.0
         painter.drawText(QPointF(text_x, text_y), title)
 
