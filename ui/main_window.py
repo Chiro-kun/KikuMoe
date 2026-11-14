@@ -135,7 +135,7 @@ from core.i18n import I18n, install_qt_translator
 from core.local_metadata import LocalTrackInfo
 from core.local_playlist import LocalPlaylistManager
 from core.logger import get_logger
-from core.lyrics import LyricsProvider
+from core.lyrics import LyricsProvider, parse_lrc
 from core.media_state import MediaState
 from core.quick_search import (
     copy_to_clipboard,
@@ -1211,9 +1211,43 @@ class ListenMoePlayer(QWidget):
             self.lyrics_panel._schedule_recenter()
         self._update_responsive_stage()
 
+    def _show_local_track_lyrics(self, track: Optional[LocalTrackInfo]) -> bool:
+        """Render embedded or sidecar local track lyrics; return False if none exist."""
+        if not track or not track.lyrics:
+            return False
+        self.lyrics_provider.cancel()
+        parsed = parse_lrc(track.lyrics)
+        badge = "LOCAL LRC" if parsed else self.i18n.t("lyrics_plain")
+        rec = {
+            "trackName": track.title,
+            "artistName": track.artist,
+            "albumName": track.album,
+            "duration": track.duration_seconds,
+            "instrumental": False,
+            "plainLyrics": track.lyrics,
+            "syncedLyrics": track.lyrics if parsed else "",
+        }
+        self._lyrics_track = (
+            track.title,
+            track.artist,
+            self._current_duration_seconds or 0,
+        )
+        self.lyrics_panel.show_record(rec, badge, "")
+        pos = (
+            self._get_local_playback_seconds()
+            if hasattr(self, "player") and self.player and self.player.is_playing()
+            else 0.0
+        )
+        self.lyrics_panel.set_position(pos)
+        return True
+
     def _refresh_lyrics(self, force=False):
         if not self.lyrics_button.isChecked():
             return
+        if self._is_local_mode() and hasattr(self, "local_playlist"):
+            curr = self.local_playlist.get_current_track()
+            if self._show_local_track_lyrics(curr):
+                return
         title = self._current_title or ""
         artist = self._current_artist or ""
         if title == self.i18n.t("unknown"):
@@ -5219,14 +5253,21 @@ class ListenMoePlayer(QWidget):
                         self.player.is_ready(),
                         getattr(self.player, "get_init_error", lambda: None)(),
                     )
-                    # Sanitizza URL prima di log e play
+                    # Sanitizza URL prima di log e play (preserva i percorsi file locali)
                     try:
-                        m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or "")
-                        safe_url = (m.group(0) if m else (url or "").strip()).rstrip(
-                            ".,;!?)]}'\" \t\r\n"
-                        )
-                        if safe_url.lower().endswith("/mp3.") or safe_url.lower().endswith(".mp3."):
-                            safe_url = safe_url[:-1]
+                        if self._is_local_mode() or os.path.isfile(url):
+                            safe_url = url
+                        else:
+                            m = re.search(
+                                r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or ""
+                            )
+                            safe_url = (m.group(0) if m else (url or "").strip()).rstrip(
+                                ".,;!?)]}'\" \t\r\n"
+                            )
+                            if safe_url.lower().endswith("/mp3.") or safe_url.lower().endswith(
+                                ".mp3."
+                            ):
+                                safe_url = safe_url[:-1]
                     except Exception:
                         safe_url = url
                     self.log.info(f"[UI] play_stream url={safe_url}")
@@ -5889,22 +5930,7 @@ class ListenMoePlayer(QWidget):
 
         # 3-level lyrics cascade
         if self.lyrics_button.isChecked():
-            if track.lyrics:
-                parsed = self.lyrics_provider.parse_lrc(track.lyrics)
-                badge = "LOCAL LRC" if parsed else self.i18n.t("lyrics_plain")
-                rec = {
-                    "trackName": track.title,
-                    "artistName": track.artist,
-                    "albumName": track.album,
-                    "duration": track.duration_seconds,
-                    "instrumental": False,
-                    "plainLyrics": track.lyrics,
-                    "syncedLyrics": track.lyrics if parsed else "",
-                }
-                self._lyrics_track = (track.title, track.artist)
-                self.lyrics_panel.show_record(rec, badge, "")
-                self.lyrics_panel.set_position(0.0)
-            else:
+            if not self._show_local_track_lyrics(track):
                 self._refresh_lyrics()
 
         self.label_refresh.emit()

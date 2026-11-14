@@ -229,8 +229,8 @@ class PlayerFFmpeg:
     def _close_audio_stream(
         self, target_stream: Any | None = None, clear_attr: bool = True
     ) -> None:
-        """Stop and close a PyAudio stream cleanly under _stream_lock."""
-        with self._stream_lock:
+        """Stop and close a PyAudio stream cleanly under PORTAUDIO_LOCK and _stream_lock."""
+        with PORTAUDIO_LOCK, self._stream_lock:
             stream = target_stream if target_stream is not None else self._audio_stream
             if clear_attr and (target_stream is None or self._audio_stream is stream):
                 self._audio_stream = None
@@ -665,24 +665,25 @@ class PlayerFFmpeg:
 
         def _get_candidate_rates(dev_index: int | None) -> list[int]:
             rates: list[int] = []
-            if dev_index is not None:
-                try:
-                    info = pa.get_device_info_by_index(dev_index)
-                    if isinstance(info, dict):
-                        def_rate = int(round(float(info.get("defaultSampleRate", 0))))
-                        if def_rate > 0:
-                            rates.append(def_rate)
-                except Exception:
-                    pass
-            else:
-                try:
-                    info = pa.get_default_output_device_info()
-                    if isinstance(info, dict):
-                        def_rate = int(round(float(info.get("defaultSampleRate", 0))))
-                        if def_rate > 0:
-                            rates.append(def_rate)
-                except Exception:
-                    pass
+            with PORTAUDIO_LOCK:
+                if dev_index is not None:
+                    try:
+                        info = pa.get_device_info_by_index(dev_index)
+                        if isinstance(info, dict):
+                            def_rate = int(round(float(info.get("defaultSampleRate", 0))))
+                            if def_rate > 0:
+                                rates.append(def_rate)
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        info = pa.get_default_output_device_info()
+                        if isinstance(info, dict):
+                            def_rate = int(round(float(info.get("defaultSampleRate", 0))))
+                            if def_rate > 0:
+                                rates.append(def_rate)
+                    except Exception:
+                        pass
             for r in (48000, 44100):
                 if r not in rates:
                     rates.append(r)
@@ -700,14 +701,15 @@ class PlayerFFmpeg:
             )
             for rate in candidate_rates:
                 try:
-                    stream = pa.open(
-                        format=pa_format,
-                        channels=2,
-                        rate=rate,
-                        output=True,
-                        output_device_index=device_idx,
-                        frames_per_buffer=frames_per_buffer,
-                    )
+                    with PORTAUDIO_LOCK:
+                        stream = pa.open(
+                            format=pa_format,
+                            channels=2,
+                            rate=rate,
+                            output=True,
+                            output_device_index=device_idx,
+                            frames_per_buffer=frames_per_buffer,
+                        )
                     self.log.debug(
                         "[DEBUG] _open_pyaudio_stream: opened device_idx=%s with rate=%d",
                         device_idx,
@@ -736,13 +738,14 @@ class PlayerFFmpeg:
         )
         for rate in candidate_rates:
             try:
-                stream = pa.open(
-                    format=pa_format,
-                    channels=2,
-                    rate=rate,
-                    output=True,
-                    frames_per_buffer=frames_per_buffer,
-                )
+                with PORTAUDIO_LOCK:
+                    stream = pa.open(
+                        format=pa_format,
+                        channels=2,
+                        rate=rate,
+                        output=True,
+                        frames_per_buffer=frames_per_buffer,
+                    )
                 self.log.debug(
                     "[DEBUG] _open_pyaudio_stream: opened system default device with rate=%d", rate
                 )
@@ -1017,8 +1020,8 @@ class PlayerFFmpeg:
                     elif seek_offset > 0:
                         ffmpeg_cmd.extend(["-ss", f"{seek_offset:.3f}"])
 
-                    # Apply MP3-specific headers (some servers expect audio/mpeg Accept)
-                    if is_mp3:
+                    # Apply MP3-specific HTTP headers for network streams only
+                    if is_mp3 and not is_local:
                         try:
                             ffmpeg_cmd.extend(
                                 [

@@ -1400,3 +1400,121 @@ def test_apply_settings_preserves_station_including_local_and_avoids_duplicate_r
         assert len(station_switches) == 2
     finally:
         window.deleteLater()
+
+
+def test_switch_network_to_local_with_existing_playlist_and_lyrics(qapp, monkeypatch, tmp_path):
+    """Switching from a network station to Local Music renders local LRC lyrics without crashing."""
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QBuffer, QIODevice, QSettings
+    from PyQt6.QtGui import QImage
+
+    from core.constants import KEY_STATION, STATION_LISTENMOE, STATION_LOCAL, STATION_TRUCKERSFM
+    from core.local_metadata import LocalTrackInfo
+    from network.providers.listenmoe_provider import ListenMoeProvider
+    from network.providers.truckersfm_provider import TruckersFMProvider
+    from ui import main_window, settings_dialog
+
+    track_path = tmp_path / "song (1)!.mp3"
+    track_path.write_bytes(b"")
+
+    img = QImage(16, 16, QImage.Format.Format_RGBA8888)
+    img.fill(0xFF00AAFF)
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    png_bytes = bytes(buf.data())
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_STATION, STATION_LISTENMOE)
+
+    cls = main_window.ListenMoePlayer
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(settings_dialog, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(
+        settings_dialog.SettingsDialog, "_ensure_devices_populated", lambda self: None
+    )
+    monkeypatch.setattr(ListenMoeProvider, "start", lambda self: setattr(self, "_is_running", True))
+    monkeypatch.setattr(ListenMoeProvider, "stop", lambda self: setattr(self, "_is_running", False))
+    monkeypatch.setattr(
+        TruckersFMProvider, "start", lambda self: setattr(self, "_is_running", True)
+    )
+    monkeypatch.setattr(
+        TruckersFMProvider, "stop", lambda self: setattr(self, "_is_running", False)
+    )
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+
+    window = cls()
+    played_urls: list[str] = []
+    window.player = SimpleNamespace(
+        is_ready=lambda: True,
+        is_playing=lambda: True,
+        is_paused=lambda: False,
+        get_mute=lambda: False,
+        set_mute=lambda _m: None,
+        play_url=lambda u: (played_urls.append(u), True)[1],
+        stop=lambda: None,
+        get_time=lambda: 0.0,
+        get_version=lambda: "test",
+    )
+    window.local_playlist._tracks = [
+        LocalTrackInfo(
+            file_path=str(track_path),
+            title="Test Local Song",
+            artist="Test Artist",
+            duration_seconds=120.0,
+            cover_bytes=png_bytes,
+            cover_mime="image/png",
+            lyrics="[00:01.00]Line One\n[00:03.50]Line Two",
+        )
+    ]
+    window.local_playlist._current_index = 0
+
+    lrclib_calls: list[tuple] = []
+    monkeypatch.setattr(
+        window.lyrics_provider,
+        "search",
+        lambda *args: lrclib_calls.append(args),
+    )
+
+    try:
+        window.lyrics_button.setChecked(True)
+        qapp.processEvents()
+        lrclib_calls.clear()
+
+        # Switch via StationGlassPopover from active network station -> local
+        window.station_pill._show_station_menu()
+        qapp.processEvents()
+        pop = window.station_pill._popover
+        assert pop is not None
+        pop._on_select(STATION_LOCAL, "")
+        qapp.processEvents()
+
+        assert window.station_mgr.current_station_id == STATION_LOCAL
+        assert window.lyrics_panel.lines == [(1.0, "Line One"), (3.5, "Line Two")]
+        assert played_urls[-1] == str(track_path)
+        assert lrclib_calls == []
+
+        # Switch to a network station, then switch back to local via Settings Apply (#87 + #88)
+        window.set_radio_provider(STATION_TRUCKERSFM)
+        qapp.processEvents()
+        lrclib_calls.clear()
+        window.open_settings()
+        dlg = window._settings_dlg
+        assert dlg is not None
+        dlg.cmb_station.setCurrentIndex(dlg.cmb_station.findData(STATION_LOCAL))
+        dlg.btn_apply.click()
+        qapp.processEvents()
+
+        assert window.station_mgr.current_station_id == STATION_LOCAL
+        assert window.lyrics_panel.lines == [(1.0, "Line One"), (3.5, "Line Two")]
+        assert played_urls[-1] == str(track_path)
+        assert lrclib_calls == []
+    finally:
+        window._closing = True
+        window.station_mgr.stop()
+        window.deleteLater()

@@ -607,3 +607,92 @@ def test_player_vlc_suppresses_stale_events_and_detaches_on_cleanup(monkeypatch)
 
     p.force_cleanup()
     assert len(detached) == 7
+
+
+def test_ffmpeg_switch_network_stream_to_local_mp3_omits_http_headers(monkeypatch, tmp_path):
+    """Switching PlayerFFmpeg from an HTTP MP3 stream to a local .mp3 must omit HTTP -headers."""
+    monkeypatch.setattr(PlayerFFmpeg, "_init_audio", lambda self: None)
+    monkeypatch.setattr(PlayerFFmpeg, "_check_ffmpeg", lambda self: True)
+
+    player = PlayerFFmpeg()
+    player._ready = True
+    player._pyaudio_instance = object()
+
+    local_mp3 = tmp_path / "track (1)!.mp3"
+    local_mp3.write_bytes(b"\x00" * 1024)
+
+    class FakeStream:
+        def is_active(self):
+            return True
+
+        def start_stream(self):
+            pass
+
+        def write(self, _data, exception_on_underflow=False):
+            pass
+
+        def stop_stream(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        PlayerFFmpeg, "_open_pyaudio_stream", lambda self, _d: (FakeStream(), 48000)
+    )
+
+    launched_cmds: list[list[str]] = []
+    cmd_launched = threading.Event()
+
+    class FakeProc:
+        def __init__(self, cmd):
+            launched_cmds.append(list(cmd))
+            cmd_launched.set()
+            self.pid = 5050
+            self.killed = threading.Event()
+            self._reads = 0
+            self.stdout = self
+
+        def read(self, n):
+            if self.killed.is_set() or self._reads >= 4:
+                return b""
+            self._reads += 1
+            return b"\x00\x00" * (n // 2)
+
+        def close(self):
+            self.killed.set()
+
+        def poll(self):
+            return 0 if (self.killed.is_set() or self._reads >= 4) else None
+
+        def terminate(self):
+            self.killed.set()
+
+        def kill(self):
+            self.killed.set()
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(
+        "audio.player_ffmpeg.subprocess.Popen",
+        lambda cmd, *a, **kw: FakeProc(cmd),
+    )
+
+    try:
+        assert player.play_url("https://radio.twinskaraoke.com/listen/neuro_21/radio.mp3") is True
+        assert cmd_launched.wait(timeout=2.0)
+        cmd_launched.clear()
+
+        assert player.play_url(str(local_mp3)) is True
+        assert cmd_launched.wait(timeout=2.0)
+        time.sleep(0.05)
+
+        assert len(launched_cmds) >= 2
+        net_cmd = launched_cmds[0]
+        local_cmd = launched_cmds[-1]
+        assert "-headers" in net_cmd
+        assert "-headers" not in local_cmd
+        assert str(local_mp3) in local_cmd
+    finally:
+        player.force_cleanup()
