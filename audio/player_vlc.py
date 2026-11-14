@@ -647,6 +647,16 @@ class PlayerVLC:
         except Exception:
             return False
 
+    def is_paused(self) -> bool:
+        if not self.is_ready():
+            return False
+        try:
+            if vlc is None or self.player is None:
+                return False
+            return bool(self.player.get_state() == vlc.State.Paused)
+        except Exception:
+            return False
+
     def seek(self, seconds: float) -> bool:
         """Seek to target seconds in current track."""
         if not self.is_ready() or self.player is None:

@@ -541,7 +541,12 @@ class PlayerFFmpeg:
         return bool(self._playing and not self._stop_requested)
 
     def is_paused(self) -> bool:
-        return bool(self._paused)
+        return bool(
+            self._paused
+            and self._playing
+            and not self._stop_requested
+            and not self._stop_event.is_set()
+        )
 
     def seek(self, seconds: float) -> bool:
         """Seek to target timestamp in seconds for local audio playback."""
@@ -770,6 +775,23 @@ class PlayerFFmpeg:
         if last_exc:
             raise last_exc
         raise RuntimeError("Failed to open PyAudio stream with any candidate sample rate")
+
+    def _write_pause_silence(self, target_stream: Any | None, chunk_size: int) -> None:
+        """Keep the PortAudio output active with silence while paused on a local file."""
+        t0 = time.monotonic()
+        wrote = False
+        if target_stream is not None:
+            with self._stream_lock:
+                stream = self._audio_stream
+                if stream is target_stream:
+                    try:
+                        if getattr(stream, "is_active", lambda: False)():
+                            stream.write(b"\x00" * chunk_size, exception_on_underflow=False)
+                            wrote = True
+                    except Exception:
+                        pass
+        if not wrote or (time.monotonic() - t0) < 0.01:
+            time.sleep(0.04)
 
     def _write_audio_chunk(self, data: bytes, target_stream: Any | None = None) -> None:
         """Applica il controllo dinamico del volume e scrive il chunk PCM
@@ -1131,6 +1153,7 @@ class PlayerFFmpeg:
                         _forced_error_ref=forced_error_ref,
                         _watched_proc=local_proc,
                     ):
+                        nonlocal last_data_ts
                         _last_wd_log = [0]
                         while not _watchdog_stop.is_set():
                             if _session_aborted():
@@ -1148,6 +1171,11 @@ class PlayerFFmpeg:
                             if ended:
                                 break
                             try:
+                                if is_local and self._paused:
+                                    last_data_ts = time.time()
+                                    if _watchdog_stop.wait(0.5):
+                                        break
+                                    continue
                                 delta = time.time() - last_data_ts
                             except Exception:
                                 delta = stall_timeout + 1
@@ -1192,6 +1220,21 @@ class PlayerFFmpeg:
                             seek_restarted = True
                             prebuffer.clear()
                             break
+                        if is_local and started_streaming and self._paused:
+                            while (
+                                self._paused
+                                and not _session_aborted()
+                                and not self._is_seek_interrupted(seek_seq_at_start)
+                            ):
+                                last_data_ts = time.time()
+                                self._write_pause_silence(local_stream, chunk_size)
+                            last_data_ts = time.time()
+                            if self._is_seek_interrupted(seek_seq_at_start):
+                                seek_restarted = True
+                                prebuffer.clear()
+                                break
+                            if _session_aborted():
+                                break
                         with self._state_lock:
                             if _session_aborted():
                                 self.log.debug(
@@ -1427,6 +1470,7 @@ class PlayerFFmpeg:
                 is_current_session = session_id is None or session_id == self._session_seq
                 if is_current_session:
                     self._playing = False
+                    self._paused = False
                     self._current_stream = None
                     if self._ffmpeg_process is local_proc:
                         self._ffmpeg_process = None

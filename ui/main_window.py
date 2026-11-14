@@ -5369,8 +5369,22 @@ class ListenMoePlayer(QWidget):
                     self.log.info("[UI] pause_resume clicked")
                 except Exception:
                     pass
+                is_playing = False
+                is_paused_backend = False
+                try:
+                    is_playing = bool(getattr(self.player, "is_playing", lambda: False)())
+                    is_paused_backend = bool(getattr(self.player, "is_paused", lambda: False)())
+                except Exception:
+                    pass
+
+                if not is_playing and not is_paused_backend:
+                    needs_play = True
+                    new_paused = False
+                else:
+                    effective_paused = bool(getattr(self, "_ui_paused", False) or is_paused_backend)
+                    new_paused = not effective_paused
+
                 # Aggiorna subito lo stato UI di pausa e la tray (pre-toggle)
-                new_paused = not bool(getattr(self, "_ui_paused", False))
                 self._ui_paused = new_paused
                 try:
                     is_muted = bool(getattr(self.player, "get_mute", lambda: False)())
@@ -5384,25 +5398,15 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
 
-                if not new_paused:
-                    try:
-                        is_playing = getattr(self.player, "is_playing", lambda: False)()
-                        is_paused_backend = getattr(self.player, "is_paused", lambda: False)()
-                        if not is_playing and not is_paused_backend:
-                            needs_play = True
-                    except Exception:
-                        pass
-
                 if not needs_play:
                     # Esegui il toggle del backend
                     self.player.pause_toggle()
-
-                # Gestisci il session timer e aggiorna solo il tooltip
-                try:
-                    self._apply_session_timer_running_state(not new_paused)
-                except Exception:
-                    pass
-                self._refresh_play_button_text(not new_paused)
+                    # Gestisci il session timer e aggiorna stato pulsante
+                    try:
+                        self._apply_session_timer_running_state(not new_paused)
+                    except Exception:
+                        pass
+                    self._refresh_play_button_text(not new_paused)
 
             if needs_play:
                 try:
@@ -5426,6 +5430,7 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             with self._playback_lock:
+                self._ui_paused = False
                 # Stop backend playback
                 try:
                     self.player.stop()

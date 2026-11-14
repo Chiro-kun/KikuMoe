@@ -339,3 +339,135 @@ def test_windows_media_bridge_reads_local_file_cover_into_stream(qapp, tmp_path)
         )
     )
     assert updater.thumbnail == ("uri_ref", "Uri(https://cdn.listen.moe/covers/test.png)")
+
+
+def test_pause_resume_starts_playback_when_backend_stopped_even_if_ui_paused():
+    import threading
+    from types import SimpleNamespace
+
+    from ui import main_window
+
+    calls: list[str] = []
+    timer_states: list[bool] = []
+    button_states: list[bool] = []
+
+    window = SimpleNamespace(
+        _playback_lock=threading.RLock(),
+        _ui_paused=True,
+        player=SimpleNamespace(
+            is_playing=lambda: False,
+            is_paused=lambda: False,
+            pause_toggle=lambda: calls.append("pause_toggle"),
+        ),
+        play_stream=lambda: calls.append("play_stream"),
+        _apply_session_timer_running_state=lambda running: timer_states.append(bool(running)),
+        _refresh_play_button_text=lambda active: button_states.append(bool(active)),
+        _sync_system_media=lambda: calls.append("sync"),
+        log=SimpleNamespace(debug=lambda *_a, **_kw: None, info=lambda *_a, **_kw: None),
+    )
+
+    main_window.ListenMoePlayer.pause_resume(window)
+
+    assert window._ui_paused is False
+    assert "play_stream" in calls
+    assert "pause_toggle" not in calls
+    assert timer_states == []
+    assert button_states == []
+
+
+def test_mpris_pause_and_resume_keeps_state_synced_and_recovers_after_end():
+    import threading
+    from types import SimpleNamespace
+
+    from core.constants import STATION_LOCAL
+    from ui import main_window
+
+    state = {"playing": True, "paused": False, "play_stream_calls": 0, "pause_toggle_calls": 0}
+    timer_states: list[bool] = []
+    button_states: list[bool] = []
+
+    def toggle_backend():
+        state["pause_toggle_calls"] += 1
+        if state["playing"]:
+            state["paused"] = not state["paused"]
+
+    def start_backend():
+        state["play_stream_calls"] += 1
+        state["playing"] = True
+        state["paused"] = False
+
+    fake_service = SimpleNamespace(updates=[], update=lambda s: fake_service.updates.append(s))
+
+    window = SimpleNamespace(
+        _playback_lock=threading.RLock(),
+        _ui_paused=False,
+        current_station=STATION_LOCAL,
+        _current_title="Local Song",
+        _current_artist="Local Artist",
+        _current_album="Local Album",
+        _current_cover_ref=None,
+        _current_duration_seconds=120.0,
+        _current_start_epoch=None,
+        _media_last_state=SimpleNamespace(status="Stopped", position_us=0),
+        _user_intent_playing=True,
+        i18n=SimpleNamespace(t=lambda k, **kw: k),
+        volume_slider=SimpleNamespace(value=lambda: 80),
+        player=SimpleNamespace(
+            is_playing=lambda: state["playing"],
+            is_paused=lambda: state["paused"],
+            pause_toggle=toggle_backend,
+            get_time=lambda: 12.5 if state["playing"] else 0.0,
+            get_duration=lambda: 120.0,
+            get_mute=lambda: False,
+        ),
+        system_media=fake_service,
+        _resolve_system_media_cover_url=lambda _ref: None,
+        _apply_session_timer_running_state=lambda running: timer_states.append(bool(running)),
+        _refresh_play_button_text=lambda active: button_states.append(bool(active)),
+        log=SimpleNamespace(
+            debug=lambda *_a, **_kw: None,
+            info=lambda *_a, **_kw: None,
+            warning=lambda *_a, **_kw: None,
+        ),
+    )
+    window.play_stream = lambda: start_backend()
+    window._sync_system_media = lambda: main_window.ListenMoePlayer._sync_system_media(window)
+    window.pause_resume = lambda: main_window.ListenMoePlayer.pause_resume(window)
+    window._tray_toggle_play_pause = lambda: main_window.ListenMoePlayer._tray_toggle_play_pause(
+        window
+    )
+
+    # Pause from MPRIS
+    main_window.ListenMoePlayer._on_system_media_command(window, "pause")
+    window._sync_system_media()
+    assert state["paused"] is True
+    assert window._ui_paused is True
+    assert timer_states[-1] is False
+    assert button_states[-1] is False
+    assert fake_service.updates[-1].status == "Paused"
+
+    # Resume from MPRIS
+    main_window.ListenMoePlayer._on_system_media_command(window, "play")
+    window._sync_system_media()
+    assert state["paused"] is False
+    assert window._ui_paused is False
+    assert timer_states[-1] is True
+    assert button_states[-1] is True
+    assert fake_service.updates[-1].status == "Playing"
+
+    # Simulate backend stopped/ended cleanly; pressing play/toggle restarts instead of no-op
+    state["playing"] = False
+    state["paused"] = False
+    window._ui_paused = False
+    window._sync_system_media()
+    assert fake_service.updates[-1].status == "Stopped"
+
+    # Even if a stale _ui_paused=True lingered while backend is stopped, toggle recovers
+    window._ui_paused = True
+    main_window.ListenMoePlayer._on_system_media_command(window, "toggle")
+    window._sync_system_media()
+    assert state["play_stream_calls"] == 1
+    assert state["playing"] is True
+    assert state["paused"] is False
+    assert window._ui_paused is False
+    assert fake_service.updates[-1].status == "Playing"
