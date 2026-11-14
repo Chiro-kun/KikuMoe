@@ -79,6 +79,7 @@ from core.constants import (
     DEFAULT_DYNAMIC_VOLUME_ENABLED,
     DEFAULT_DYNAMIC_VOLUME_LEVEL,
     DEFAULT_DYNAMIC_VOLUME_MODE,
+    DEFAULT_LYRICS_PROVIDER,
     DEFAULT_STATION,
     DEFAULT_THEME,
     DEFAULT_VISUALIZER_ENABLED,
@@ -86,6 +87,7 @@ from core.constants import (
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
+    KEY_BETTERLYRICS_API_KEY,
     KEY_CHANNEL,
     KEY_CLOSE_TO_TRAY,
     KEY_CUSTOM_ACCENT,
@@ -102,6 +104,7 @@ from core.constants import (
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
+    KEY_LYRICS_PROVIDER,
     KEY_MINI_ALWAYS_ON_TOP,
     KEY_MINI_GEOMETRY,
     KEY_MUTE,
@@ -958,6 +961,7 @@ class ListenMoePlayer(QWidget):
         self.lyrics_provider = LyricsProvider(self)
         self.lyrics_provider.finished.connect(self._on_lyrics_result)
         self._lyrics_track = None
+        self._sync_lyrics_settings()
         self._lyrics_original_width = None
         self._lyrics_effect = QGraphicsOpacityEffect(self.lyrics_panel)
         self.lyrics_panel.setGraphicsEffect(self._lyrics_effect)
@@ -1241,23 +1245,48 @@ class ListenMoePlayer(QWidget):
         self.lyrics_panel.set_position(pos)
         return True
 
+    def _sync_lyrics_settings(self) -> None:
+        provider = getattr(self, "lyrics_provider", None)
+        if provider is None or not hasattr(self, "settings") or self.settings is None:
+            return
+        mode = str(
+            self.settings.value(KEY_LYRICS_PROVIDER, DEFAULT_LYRICS_PROVIDER)
+            or DEFAULT_LYRICS_PROVIDER
+        )
+        api_key = str(self.settings.value(KEY_BETTERLYRICS_API_KEY, "") or "").strip()
+        changed = provider.configure(mode, api_key)
+        if (
+            changed
+            and hasattr(self, "lyrics_button")
+            and self.lyrics_button is not None
+            and self.lyrics_button.isChecked()
+        ):
+            self._lyrics_track = None
+            self._refresh_lyrics(force=True)
+
     def _refresh_lyrics(self, force=False):
         if not self.lyrics_button.isChecked():
             return
+        album = ""
         if self._is_local_mode() and hasattr(self, "local_playlist"):
             curr = self.local_playlist.get_current_track()
             if self._show_local_track_lyrics(curr):
                 return
+            if curr is not None:
+                album = str(getattr(curr, "album", "") or "").strip()
         title = self._current_title or ""
         artist = self._current_artist or ""
         if title == self.i18n.t("unknown"):
             title = ""
-        key = (title, artist, self._current_duration_seconds or 0)
+        key = (title, artist, self._current_duration_seconds or 0, album)
         if not force and key == self._lyrics_track:
             return
         self._lyrics_track = key
         self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
-        self.lyrics_provider.search(*key)
+        if album:
+            self.lyrics_provider.search(title, artist, self._current_duration_seconds or 0, album)
+        else:
+            self.lyrics_provider.search(title, artist, self._current_duration_seconds or 0)
 
     def _on_lyrics_result(self, record, status):
         try:
@@ -4511,6 +4540,7 @@ class ListenMoePlayer(QWidget):
                 self._sync_sleep_timer_visibility()
                 self._sync_ambient_mode()
                 self._sync_dynamic_volume_settings()
+                self._sync_lyrics_settings()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev["tray_enabled"]:

@@ -77,6 +77,7 @@ from core.constants import (
     DEFAULT_DYNAMIC_VOLUME_ENABLED,
     DEFAULT_DYNAMIC_VOLUME_LEVEL,
     DEFAULT_DYNAMIC_VOLUME_MODE,
+    DEFAULT_LYRICS_PROVIDER,
     DEFAULT_STATION,
     DEFAULT_THEME,
     DEFAULT_VISUALIZER_ENABLED,
@@ -84,6 +85,7 @@ from core.constants import (
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
+    KEY_BETTERLYRICS_API_KEY,
     KEY_CHANNEL,
     KEY_CUSTOM_ACCENT,
     KEY_CUSTOM_ACCENT_ENABLED,
@@ -98,6 +100,7 @@ from core.constants import (
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
+    KEY_LYRICS_PROVIDER,
     KEY_NETWORK_CACHING,
     KEY_SESSION_TIMER_ENABLED,
     KEY_SHOW_SLEEP_TIMER,
@@ -110,6 +113,10 @@ from core.constants import (
     KEY_UPDATE_CHANNEL,
     KEY_UPDATE_CHECK_ON_STARTUP,
     KEY_VISUALIZER_ENABLED,
+    LYRICS_PROVIDER_AUTO,
+    LYRICS_PROVIDER_BETTERLYRICS,
+    LYRICS_PROVIDER_BETTERLYRICS_FIRST,
+    LYRICS_PROVIDER_LRCLIB,
     ORG_NAME,
     UPDATE_CHANNEL_BETA,
     UPDATE_CHANNEL_STABLE,
@@ -1354,6 +1361,62 @@ class SettingsDialog(QDialog):
         play_lay.addWidget(self.chk_session_timer)
 
         gen_layout.addWidget(card_play)
+
+        card_lyrics, lyrics_lay = self._make_card(self.i18n.t("settings_lyrics_section"))
+        self._card_lyrics_hdr = self._layout_first_widget(lyrics_lay)
+
+        self._lyrics_provider_items = (
+            (LYRICS_PROVIDER_AUTO, "settings_lyrics_provider_auto"),
+            (LYRICS_PROVIDER_BETTERLYRICS_FIRST, "settings_lyrics_provider_bl_first"),
+            (LYRICS_PROVIDER_LRCLIB, "settings_lyrics_provider_lrclib"),
+            (LYRICS_PROVIDER_BETTERLYRICS, "settings_lyrics_provider_betterlyrics"),
+        )
+        self.cmb_lyrics_provider = GlassComboBox()
+        for pid, p_key in self._lyrics_provider_items:
+            self.cmb_lyrics_provider.addItem(self.i18n.t(p_key), userData=pid)
+        saved_lyrics_provider = str(
+            self.settings.value(KEY_LYRICS_PROVIDER, DEFAULT_LYRICS_PROVIDER)
+            or DEFAULT_LYRICS_PROVIDER
+        )
+        for i in range(self.cmb_lyrics_provider.count()):
+            if self.cmb_lyrics_provider.itemData(i) == saved_lyrics_provider:
+                self.cmb_lyrics_provider.setCurrentIndex(i)
+                break
+        self.cmb_lyrics_provider.setFixedWidth(combo_w)
+        lyrics_prov_row = self._make_field_row(
+            self.i18n.t("settings_lyrics_provider"), self.cmb_lyrics_provider
+        )
+        self._lbl_lyrics_provider = self._layout_first_widget(lyrics_prov_row)
+        lyrics_lay.addLayout(lyrics_prov_row)
+
+        self.txt_betterlyrics_api_key = QLineEdit(
+            str(self.settings.value(KEY_BETTERLYRICS_API_KEY, "") or "").strip()
+        )
+        self.txt_betterlyrics_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_betterlyrics_api_key.setPlaceholderText(
+            self.i18n.t("settings_betterlyrics_api_key_placeholder")
+        )
+        self.txt_betterlyrics_api_key.setToolTip(self.i18n.t("settings_betterlyrics_api_key_tip"))
+        self.txt_betterlyrics_api_key.setFixedWidth(combo_w)
+        self.txt_betterlyrics_api_key.setFixedHeight(30)
+        self.betterlyrics_key_row = QWidget()
+        self.betterlyrics_key_row.setFixedHeight(36)
+        bl_key_layout = self._make_field_row(
+            self.i18n.t("settings_betterlyrics_api_key"), self.txt_betterlyrics_api_key
+        )
+        self._lbl_betterlyrics_api_key = self._layout_first_widget(bl_key_layout)
+        self.betterlyrics_key_row.setLayout(bl_key_layout)
+        self.betterlyrics_key_row.setVisible(
+            self.cmb_lyrics_provider.currentData() != LYRICS_PROVIDER_LRCLIB
+        )
+        self.cmb_lyrics_provider.currentIndexChanged.connect(
+            lambda _idx: self.betterlyrics_key_row.setVisible(
+                self.cmb_lyrics_provider.currentData() != LYRICS_PROVIDER_LRCLIB
+            )
+        )
+        lyrics_lay.addWidget(self.betterlyrics_key_row)
+
+        gen_layout.addWidget(card_lyrics)
         gen_layout.addStretch(1)
         self._add_settings_page(page_gen)
 
@@ -2089,6 +2152,7 @@ class SettingsDialog(QDialog):
                     ("_card_tray_hdr", "settings_tray_section"),
                     ("_card_dev_hdr", "settings_dev_console_section"),
                     ("_card_updates_hdr", "updates_section"),
+                    ("_card_lyrics_hdr", "settings_lyrics_section"),
                 ):
                     hdr_w = getattr(self, hdr_attr, None)
                     if isinstance(hdr_w, QLabel):
@@ -2110,6 +2174,8 @@ class SettingsDialog(QDialog):
                     ("_lbl_network_caching", "settings_network_caching"),
                     ("_lbl_vlc_path", "settings_vlc_path"),
                     ("_lbl_update_channel", "updates_channel_label"),
+                    ("_lbl_lyrics_provider", "settings_lyrics_provider"),
+                    ("_lbl_betterlyrics_api_key", "settings_betterlyrics_api_key"),
                 ):
                     lbl_w = getattr(self, lbl_attr, None)
                     if isinstance(lbl_w, QLabel):
@@ -2145,6 +2211,15 @@ class SettingsDialog(QDialog):
                 self.chk_sleep_stop.setText(self.i18n.t("settings_sleep_stop_on_end"))
                 self.chk_session_timer.setText(self.i18n.t("settings_session_timer_enable"))
                 self.chk_session_timer.setToolTip(self.i18n.t("settings_session_timer_tip"))
+                for i, (_pid, p_key) in enumerate(self._lyrics_provider_items):
+                    if i < self.cmb_lyrics_provider.count():
+                        self.cmb_lyrics_provider.setItemText(i, self.i18n.t(p_key))
+                self.txt_betterlyrics_api_key.setPlaceholderText(
+                    self.i18n.t("settings_betterlyrics_api_key_placeholder")
+                )
+                self.txt_betterlyrics_api_key.setToolTip(
+                    self.i18n.t("settings_betterlyrics_api_key_tip")
+                )
 
                 for i, backend_key in enumerate(
                     (
@@ -2317,6 +2392,22 @@ class SettingsDialog(QDialog):
             self.chk_session_timer.setChecked(
                 self.settings.value(KEY_SESSION_TIMER_ENABLED, "true") == "true"
             )
+            if hasattr(self, "cmb_lyrics_provider"):
+                saved_lp = str(
+                    self.settings.value(KEY_LYRICS_PROVIDER, DEFAULT_LYRICS_PROVIDER)
+                    or DEFAULT_LYRICS_PROVIDER
+                )
+                for i in range(self.cmb_lyrics_provider.count()):
+                    if self.cmb_lyrics_provider.itemData(i) == saved_lp:
+                        if self.cmb_lyrics_provider.currentIndex() != i:
+                            self.cmb_lyrics_provider.setCurrentIndex(i)
+                        break
+                self.txt_betterlyrics_api_key.setText(
+                    str(self.settings.value(KEY_BETTERLYRICS_API_KEY, "") or "").strip()
+                )
+                self.betterlyrics_key_row.setVisible(
+                    self.cmb_lyrics_provider.currentData() != LYRICS_PROVIDER_LRCLIB
+                )
             self.chk_tray_enabled.setChecked(
                 self.settings.value(KEY_TRAY_ENABLED, "true") == "true"
             )
@@ -2967,6 +3058,15 @@ class SettingsDialog(QDialog):
         self.settings.setValue(
             KEY_SESSION_TIMER_ENABLED, "true" if self.chk_session_timer.isChecked() else "false"
         )
+        if hasattr(self, "cmb_lyrics_provider"):
+            self.settings.setValue(
+                KEY_LYRICS_PROVIDER,
+                self.cmb_lyrics_provider.currentData() or DEFAULT_LYRICS_PROVIDER,
+            )
+            self.settings.setValue(
+                KEY_BETTERLYRICS_API_KEY,
+                self.txt_betterlyrics_api_key.text().strip(),
+            )
         self.settings.setValue(
             KEY_DEV_CONSOLE_ENABLED, "true" if self.chk_dev_console.isChecked() else "false"
         )

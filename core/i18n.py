@@ -14,6 +14,18 @@ I18N: dict[str, dict[str, str]] = {
         "lyrics_instrumental": "Brano strumentale",
         "lyrics_plain": "Testo non sincronizzato",
         "lyrics_no_timing": "Sincronizzazione non disponibile",
+        "settings_lyrics_section": "Testi",
+        "settings_lyrics_provider": "Provider testi:",
+        "settings_lyrics_provider_auto": "Auto (LRCLIB → Better Lyrics)",
+        "settings_lyrics_provider_bl_first": "Better Lyrics → LRCLIB",
+        "settings_lyrics_provider_lrclib": "Solo LRCLIB",
+        "settings_lyrics_provider_betterlyrics": "Solo Better Lyrics",
+        "settings_betterlyrics_api_key": "API Key Better Lyrics:",
+        "settings_betterlyrics_api_key_placeholder": "Opzionale (serve per brani non in cache)",
+        "settings_betterlyrics_api_key_tip": (
+            "Senza chiave Better Lyrics restituisce solo i brani già in cache; "
+            "per ricerche non in cache serve X-API-Key."
+        ),
         "app_title": "KikuMoe",
         "header": "LISTEN.moe - {channel} - {format}",
         "channel_label": "Canale:",
@@ -395,6 +407,18 @@ I18N: dict[str, dict[str, str]] = {
         "lyrics_instrumental": "Instrumental track",
         "lyrics_plain": "Unsynchronized lyrics",
         "lyrics_no_timing": "Synchronization unavailable",
+        "settings_lyrics_section": "Lyrics",
+        "settings_lyrics_provider": "Lyrics provider:",
+        "settings_lyrics_provider_auto": "Auto (LRCLIB → Better Lyrics)",
+        "settings_lyrics_provider_bl_first": "Better Lyrics → LRCLIB",
+        "settings_lyrics_provider_lrclib": "LRCLIB only",
+        "settings_lyrics_provider_betterlyrics": "Better Lyrics only",
+        "settings_betterlyrics_api_key": "Better Lyrics API Key:",
+        "settings_betterlyrics_api_key_placeholder": "Optional (needed for uncached tracks)",
+        "settings_betterlyrics_api_key_tip": (
+            "Without a key, Better Lyrics only serves already-cached tracks; "
+            "uncached lookups require an X-API-Key."
+        ),
         "app_title": "KikuMoe",
         "header": "LISTEN.moe - {channel} - {format}",
         "channel_label": "Channel:",

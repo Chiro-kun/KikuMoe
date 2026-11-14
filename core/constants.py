@@ -206,3 +206,12 @@ UPDATE_CHANNEL_STABLE = "stable"
 UPDATE_CHANNEL_BETA = "beta"
 DEFAULT_UPDATE_CHECK_ON_STARTUP = True
 URL_GITHUB_API_RELEASES = "https://api.github.com/repos/Chiro-kun/KikuMoe/releases"
+
+# Lyrics providers (LRCLIB + Better Lyrics)
+KEY_LYRICS_PROVIDER = "lyrics_provider"
+KEY_BETTERLYRICS_API_KEY = "betterlyrics_api_key"
+LYRICS_PROVIDER_AUTO = "auto"
+LYRICS_PROVIDER_BETTERLYRICS_FIRST = "betterlyrics_first"
+LYRICS_PROVIDER_LRCLIB = "lrclib"
+LYRICS_PROVIDER_BETTERLYRICS = "betterlyrics"
+DEFAULT_LYRICS_PROVIDER = LYRICS_PROVIDER_AUTO
