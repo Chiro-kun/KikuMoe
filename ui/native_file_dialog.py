@@ -217,7 +217,7 @@ async def _query_portal_file_chooser_version(bus: Any) -> int:
         ),
         timeout=3.0,
     )
-    if reply.message_type == MessageType.ERROR or not reply.body:
+    if reply is None or reply.message_type == MessageType.ERROR or not reply.body:
         return 0
     val = reply.body[0]
     raw = getattr(val, "value", val)
@@ -297,7 +297,7 @@ async def _call_portal_file_chooser(
             ),
             timeout=3.0,
         )
-        if add_match_reply.message_type == MessageType.ERROR:
+        if add_match_reply is None or add_match_reply.message_type == MessageType.ERROR:
             return _DialogResult(handled=False)
 
         options: dict[str, Variant] = {
@@ -338,8 +338,12 @@ async def _call_portal_file_chooser(
             ),
             timeout=5.0,
         )
-        if reply.message_type == MessageType.ERROR:
-            _log.debug("Portal %s returned error: %s", member, reply.body)
+        if reply is None or reply.message_type == MessageType.ERROR:
+            _log.debug(
+                "Portal %s returned error: %s",
+                member,
+                reply.body if reply is not None else None,
+            )
             return _DialogResult(handled=False)
 
         if reply.body and isinstance(reply.body[0], str):
