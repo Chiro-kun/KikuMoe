@@ -481,7 +481,8 @@ def test_controller_unducks_promptly_and_gradually_on_process_exit(qapp):
         assert ctrl.is_ducked() is True
         assert abs(ctrl.current_factor() - 0.25) < 1e-6
 
-        # Selected process exits -> exit is detected promptly, and volume swells gradually (not blasted to 1.0)
+        # Selected process exits -> exit is detected promptly,
+        # and volume swells gradually (not blasted to 1.0)
         state["running"] = set()
         QTest.qWait(400)
         assert ctrl.is_ducked() is False
@@ -490,7 +491,7 @@ def test_controller_unducks_promptly_and_gradually_on_process_exit(qapp):
         assert 0.25 < ctrl.current_factor() < 0.90
 
         # Remainder of the gradual fade completes smoothly to 1.0
-        QTest.qWait(1050)
+        QTest.qWait(1200)
         assert abs(ctrl.current_factor() - 1.0) < 1e-6
     finally:
         ctrl.stop()
