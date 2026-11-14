@@ -88,6 +88,32 @@ def get_log_file_path() -> str:
     return os.path.join(get_log_dir(), "kikumoe.log")
 
 
+def log_to_file_only(level: int, logger_name: str, message: str) -> None:
+    """Write a log record directly to kikumoe.log and the in-memory ring buffer.
+
+    Unlike ``get_logger(...).log(...)``, this bypasses UI/DevConsole logger
+    hooks and Qt signals, making it safe to invoke from Qt message handlers
+    and crash hooks.
+    """
+    try:
+        record = logging.LogRecord(
+            name=logger_name,
+            level=level,
+            pathname=__file__,
+            lineno=0,
+            msg=message,
+            args=(),
+            exc_info=None,
+        )
+        fh = _get_shared_file_handler()
+        if fh is not None and level >= fh.level:
+            fh.handle(record)
+        if level >= _ring_handler.level:
+            _ring_handler.handle(record)
+    except Exception:
+        pass
+
+
 _file_handler: RotatingFileHandler | None = None
 
 
