@@ -23,7 +23,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -35,6 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
+from ui.native_file_dialog import get_save_file_name
 from ui.settings_dialog import GlassComboBox
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, get_cyber_moe_stylesheet
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
@@ -986,7 +986,7 @@ class DevConsole(QObject):
 
             ts = time.strftime("%Y%m%d-%H%M%S")
             suggested = f"console-{ts}.log"
-            filename, _selected_filter = QFileDialog.getSaveFileName(
+            filename, _selected_filter = get_save_file_name(
                 self._console_dialog,
                 self._t("dev_console_save", "Save..."),
                 suggested,

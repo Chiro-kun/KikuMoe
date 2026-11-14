@@ -24,7 +24,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -48,6 +47,7 @@ from core.local_playlist import LocalPlaylistManager
 from core.now_playing import _format_mmss
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dialog_animations import CyberMoeDialogAnimationMixin
+from ui.native_file_dialog import get_existing_directory, get_open_file_names
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
 from ui.vector_icons import (
     get_folder_icon,
@@ -616,7 +616,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
 
     def _on_add_files_clicked(self) -> None:
         filters = self.i18n.t("local_audio_files_filter")
-        files, _ = QFileDialog.getOpenFileNames(
+        files, _ = get_open_file_names(
             self,
             self.i18n.t("local_add_files"),
             self.playlist_mgr.get_initial_picker_dir(),
@@ -626,7 +626,7 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             self.playlist_mgr.add_files(files)
 
     def _on_add_folder_clicked(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
+        folder = get_existing_directory(
             self,
             self.i18n.t("local_add_folder"),
             self.playlist_mgr.get_initial_picker_dir(),

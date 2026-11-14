@@ -47,7 +47,6 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
     QHBoxLayout,
@@ -132,6 +131,7 @@ from core.updater import UpdateCheckWorker
 from ui.about_dialog import AboutWidget
 from ui.color_picker_dialog import AccentColorPickerDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
+from ui.native_file_dialog import get_existing_directory
 from ui.themes.cyber_moe import (
     PALETTE,
     THEME_ORDER,
@@ -2531,9 +2531,7 @@ class SettingsDialog(QDialog):
         start_dir = self.txt_vlc_path.text().strip() or self.settings.value(KEY_LIBVLC_PATH, None)
         if not start_dir:
             start_dir = "C:/" if _IS_WIN32 else os.path.expanduser("~")
-        chosen = QFileDialog.getExistingDirectory(
-            self, self.i18n.t("libvlc_choose_title"), start_dir
-        )
+        chosen = get_existing_directory(self, self.i18n.t("libvlc_choose_title"), start_dir)
         if chosen:
             self.txt_vlc_path.setText(chosen)
 

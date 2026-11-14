@@ -16,7 +16,6 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QDialog,
-    QFileDialog,
     QFrame,
     QLabel,
     QPushButton,
@@ -31,6 +30,7 @@ from core.local_playlist import (
 )
 from ui.custom_titlebar import CustomTitleBar
 from ui.dialog_animations import CyberMoeDialogAnimationMixin
+from ui.native_file_dialog import get_existing_directory, get_open_file_names
 from ui.themes.cyber_moe import PALETTE
 from ui.vector_icons import get_folder_icon, get_music_note_icon, get_queue_icon
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
@@ -244,7 +244,7 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
         QTimer.singleShot(0, self._finish_with_tracks)
 
     def _on_select_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(
+        folder = get_existing_directory(
             self,
             self.i18n.t("local_add_folder"),
             self.playlist_mgr.get_initial_picker_dir(),
@@ -260,7 +260,7 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
 
     def _on_select_files(self) -> None:
         filters = self.i18n.t("local_audio_files_filter")
-        files, _ = QFileDialog.getOpenFileNames(
+        files, _ = get_open_file_names(
             self,
             self.i18n.t("local_add_files"),
             self.playlist_mgr.get_initial_picker_dir(),
