@@ -67,7 +67,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.config import get_station_config
+from core.config import STATIONS, get_station_config, get_station_display_name
 from core.constants import (
     APP_SETTINGS,
     APP_VERSION,
@@ -111,11 +111,6 @@ from core.constants import (
     KEY_UPDATE_CHECK_ON_STARTUP,
     KEY_VISUALIZER_ENABLED,
     ORG_NAME,
-    STATION_ANISON,
-    STATION_GENSOKYO,
-    STATION_LISTENMOE,
-    STATION_NEURO21,
-    STATION_TRUCKERSFM,
     UPDATE_CHANNEL_BETA,
     UPDATE_CHANNEL_STABLE,
 )
@@ -1198,11 +1193,8 @@ class SettingsDialog(QDialog):
         prefs_lay.addLayout(lang_row)
 
         self.cmb_station = GlassComboBox()
-        self.cmb_station.addItem("LISTEN.moe", userData=STATION_LISTENMOE)
-        self.cmb_station.addItem("Gensokyo Radio", userData=STATION_GENSOKYO)
-        self.cmb_station.addItem("ANISON.FM", userData=STATION_ANISON)
-        self.cmb_station.addItem("Neuro 21", userData=STATION_NEURO21)
-        self.cmb_station.addItem("TruckersFM", userData=STATION_TRUCKERSFM)
+        for sid in STATIONS:
+            self.cmb_station.addItem(get_station_display_name(sid, self.i18n), userData=sid)
         saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
         for i in range(self.cmb_station.count()):
             if self.cmb_station.itemData(i) == saved_station:
@@ -2126,6 +2118,10 @@ class SettingsDialog(QDialog):
                 for i, tid in enumerate(THEME_ORDER):
                     if i < self.cmb_theme.count():
                         self.cmb_theme.setItemText(i, self.i18n.t(THEME_PRESETS[tid]["i18n_key"]))
+                for i in range(self.cmb_station.count()):
+                    sid = str(self.cmb_station.itemData(i) or "")
+                    if sid:
+                        self.cmb_station.setItemText(i, get_station_display_name(sid, self.i18n))
                 self.chk_custom_accent.setText(self.i18n.t("settings_custom_accent_enable"))
                 self.btn_accent_swatch.setToolTip(self.i18n.t("settings_custom_accent_pick"))
                 self.btn_accent_swatch.set_dialog_title(

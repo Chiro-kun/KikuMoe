@@ -4310,21 +4310,23 @@ class ListenMoePlayer(QWidget):
             if not self.isVisible():
                 self.showNormal()
 
-            # Salva stato precedente
-            was_playing = bool(self.player and self.player.is_playing())
-            prev_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
-            prev_channel = self.settings.value(KEY_CHANNEL, "J-POP")
-            prev_format = self.settings.value(KEY_FORMAT, "Vorbis")
-            prev_path = self.settings.value(KEY_LIBVLC_PATH, "") or None
-            prev_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
-            prev_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+            # Salva stato precedente (mutabile così Apply ripetuti + OK restano idempotenti)
             try:
-                prev_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+                init_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
             except Exception:
-                prev_nc = 1000
-            prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
-            prev_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-            prev_lang = self.settings.value(KEY_LANG, "it")
+                init_nc = 1000
+            prev = {
+                "station": str(self.settings.value(KEY_STATION, DEFAULT_STATION)),
+                "channel": str(self.settings.value(KEY_CHANNEL, "J-POP")),
+                "format": str(self.settings.value(KEY_FORMAT, "Vorbis")),
+                "path": self.settings.value(KEY_LIBVLC_PATH, "") or None,
+                "backend": self.settings.value(KEY_AUDIO_BACKEND, "auto"),
+                "tray_enabled": self._get_bool(KEY_TRAY_ENABLED, True),
+                "nc": init_nc,
+                "dev_console": self._get_bool(KEY_DEV_CONSOLE_ENABLED, False),
+                "audio_idx": self.settings.value(KEY_AUDIO_DEVICE_INDEX, ""),
+                "lang": self.settings.value(KEY_LANG, "it"),
+            }
 
             # Reuse persistent embedded panel so opening is instantaneous & 60 FPS
             if not hasattr(self, "_settings_dlg") or self._settings_dlg is None:
@@ -4340,47 +4342,6 @@ class ListenMoePlayer(QWidget):
                     dlg.settings_changed.disconnect()
                 except Exception:
                     pass
-            try:
-                self._apply_prev_audio_idx = prev_audio_idx
-
-                def _on_apply_from_dialog():
-                    try:
-                        new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-                        if new_audio_idx != getattr(self, "_apply_prev_audio_idx", ""):
-                            if was_playing:
-                                self._restart_playback_with_session_persistence(
-                                    notification_body=self.t("tray_audio_restarted")
-                                )
-                            self._apply_prev_audio_idx = new_audio_idx
-                        self._sync_sleep_timer_visibility()
-                        self._sync_ambient_mode()
-                        self._sync_dynamic_volume_settings()
-                        self.update_header_label()
-                        self.update_tray_texts()
-                    except Exception:
-                        pass
-
-                try:
-                    dlg.settings_changed.connect(_on_apply_from_dialog)
-                    # Also update DevConsole [DEV] filter live on settings_changed
-                    try:
-
-                        def _on_settings_changed_apply_filter():
-                            try:
-                                if hasattr(self, "dev_console") and self.dev_console:
-                                    self.dev_console.set_show_dev(
-                                        self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False)
-                                    )
-                            except Exception:
-                                pass
-
-                        dlg.settings_changed.connect(_on_settings_changed_apply_filter)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            except Exception:
-                pass
 
             def _on_dialog_accepted():
                 self.apply_theme()
@@ -4388,58 +4349,70 @@ class ListenMoePlayer(QWidget):
                     self.playback_controls.set_autoplay(self._get_bool(KEY_AUTOPLAY, False))
                 # Lingua: applica solo se effettivamente modificata
                 lang = self.settings.value(KEY_LANG, "it")
-                if lang != prev_lang:
+                if lang != prev["lang"]:
                     self.i18n.set_lang("it" if lang not in ("it", "en") else lang)
                     self.apply_translations()
+                prev["lang"] = lang
                 # Aggiorna header e valori visivi canale/formato da QSettings
                 self.update_header_label()
                 if hasattr(self, "channel_value"):
                     self.channel_value.setText(self.settings.value(KEY_CHANNEL, "J-POP"))
                 if hasattr(self, "format_value"):
                     self.format_value.setText(self.settings.value(KEY_FORMAT, "Vorbis"))
-                # Se canale o formato sono cambiati, riavvia WS/stream
-                # ma mantieni il Now Playing finché non arriva un nuovo evento
+                # Gestione cambio stazione / canale / formato senza riavvii errati
+                restarted_stream = False
                 try:
                     new_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
-                    if new_station != prev_station:
-                        self.set_radio_provider(new_station)
-                    new_channel = self.settings.value(KEY_CHANNEL, "J-POP")
-                    new_format = self.settings.value(KEY_FORMAT, "Vorbis")
-                    if new_channel != prev_channel or new_format != prev_format:
-                        # Mantieni il Now Playing corrente; il WS invierà il nuovo titolo a breve
-                        # Riavvia WS se è cambiato il canale
-                        if new_channel != prev_channel:
+                    new_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+                    new_format = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+                    station_changed = new_station != prev["station"]
+                    channel_changed = new_channel != prev["channel"]
+                    format_changed = new_format != prev["format"]
+
+                    if station_changed:
+                        was_playing_before = bool(self.player and self.player.is_playing())
+                        self.set_radio_provider(
+                            new_station,
+                            new_channel if new_station == STATION_LISTENMOE else None,
+                        )
+                        restarted_stream = was_playing_before
+                    elif channel_changed or format_changed:
+                        is_listenmoe = new_station == STATION_LISTENMOE
+                        if channel_changed and is_listenmoe:
                             try:
-                                self._restart_ws_for_channel(new_channel)
+                                if hasattr(self, "station_mgr") and self.station_mgr:
+                                    self.station_mgr.set_channel(new_channel)
+                                    self.ws = getattr(self.station_mgr, "_active_provider", None)
+                                else:
+                                    self._restart_ws_for_channel(new_channel)
                             except Exception:
                                 pass
-                        self._restart_stream_after_channel_format_change()
-                        # Aggiorna tooltip/menu della tray
+                        should_restart_stream = (channel_changed and is_listenmoe) or (
+                            format_changed and new_station != STATION_LOCAL
+                        )
+                        if should_restart_stream:
+                            restarted_stream = bool(self.player and self.player.is_playing())
+                            self._restart_stream_after_channel_format_change()
                         try:
                             self.update_tray_texts()
                             self.tray_icon_refresh.emit()
                         except Exception:
                             pass
+
+                    prev["station"] = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+                    prev["channel"] = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+                    prev["format"] = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+                    if hasattr(self, "format_value"):
+                        self.format_value.setText(prev["format"])
                 except Exception:
                     pass
-                # Se il dispositivo audio è cambiato, riavvia il playback per applicarlo
-                try:
-                    new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-                    if new_audio_idx != prev_audio_idx:
-                        if was_playing:
-                            self._restart_playback_with_session_persistence(
-                                notification_body=self.t("tray_audio_restarted")
-                            )
-                except Exception:
-                    pass
-                # Percorso VLC / backend
+
+                # Percorso VLC / backend / caching
                 new_path = self.settings.value(KEY_LIBVLC_PATH, "") or None
                 new_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
-                path_changed = prev_path != new_path
-                backend_changed = prev_backend != new_backend
-                # Ricalibra network caching status
+                path_changed = prev["path"] != new_path
+                backend_changed = prev["backend"] != new_backend
                 self.update_vlc_status_label()
-                # Se backend/path è cambiato o network-caching è variato sensibile, riavvia
                 try:
                     new_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
                 except Exception:
@@ -4447,10 +4420,19 @@ class ListenMoePlayer(QWidget):
                 needs_restart = (
                     backend_changed
                     or (new_backend == "vlc" and path_changed)
-                    or (prev_backend == "auto" and path_changed)
-                    or (new_nc != prev_nc)
+                    or (prev["backend"] == "auto" and path_changed)
+                    or (new_nc != prev["nc"])
                 )
+                prev["path"] = new_path
+                prev["backend"] = new_backend
+                prev["nc"] = new_nc
+
+                new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+                audio_changed = new_audio_idx != prev["audio_idx"]
+                prev["audio_idx"] = new_audio_idx
+
                 if needs_restart:
+                    resume_after_recreate = bool(self.player and self.player.is_playing())
                     self.status_changed.emit(self.t("status_restarting"))
                     # Recreate player with new settings
                     try:
@@ -4468,13 +4450,25 @@ class ListenMoePlayer(QWidget):
                     self._apply_effective_volume(self.volume_slider.value())
                     self.player.set_mute(self.mute_button.isChecked())
                     self.update_vlc_status_label()
+                    if resume_after_recreate:
+                        QTimer.singleShot(200, self.play_stream)
+                elif audio_changed and not restarted_stream:
+                    try:
+                        if self.player and self.player.is_playing():
+                            self._restart_playback_with_session_persistence(
+                                notification_body=self.t("tray_audio_restarted")
+                            )
+                    except Exception:
+                        pass
+
                 self._sync_sleep_timer_visibility()
                 self._sync_ambient_mode()
                 self._sync_dynamic_volume_settings()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
-                if new_tray_enabled != prev_tray_enabled:
+                if new_tray_enabled != prev["tray_enabled"]:
                     self._ensure_tray(new_tray_enabled)
+                prev["tray_enabled"] = new_tray_enabled
                 # Session timer enable/disable may have changed
                 try:
                     new_session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
@@ -4498,9 +4492,16 @@ class ListenMoePlayer(QWidget):
                     self.update_tray_texts()
                 except Exception:
                     pass
-                # Dev console enable/disable may have changed
+                # Dev console enable/disable and [DEV] filter may have changed
+                if hasattr(self, "dev_console") and self.dev_console:
+                    try:
+                        self.dev_console.set_show_dev(
+                            self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False)
+                        )
+                    except Exception:
+                        pass
                 new_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
-                if new_dev_console != prev_dev_console:
+                if new_dev_console != prev["dev_console"]:
                     try:
                         if not new_dev_console:
                             if hasattr(self, "dev_console") and self.dev_console:
@@ -4508,23 +4509,15 @@ class ListenMoePlayer(QWidget):
                                     self.dev_console.deactivate_logging()
                                 except Exception:
                                     pass
-                                # Non chiudere la UI della console: consenti all'utente
-                                # di aprirla/vederla anche se il logging di background è disattivato
-                                # (prima: self.dev_console.close())
                         else:
                             if hasattr(self, "dev_console") and self.dev_console:
-                                try:
-                                    self.dev_console.set_show_dev(
-                                        self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False)
-                                    )
-                                except Exception:
-                                    pass
                                 try:
                                     self.dev_console.activate_logging()
                                 except Exception:
                                     pass
                     except Exception:
                         pass
+                prev["dev_console"] = new_dev_console
 
             # Collega e mostra nel pannello integrato della home
             def _on_ok_embedded():

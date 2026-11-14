@@ -1292,3 +1292,111 @@ def test_mini_hud_cover_is_rounded_and_clears(qapp):
     hud.set_cover(None)
     assert hud.cover.pixmap() is None or hud.cover.pixmap().isNull()
     hud.close()
+
+
+def test_apply_settings_preserves_station_including_local_and_avoids_duplicate_restarts(
+    qapp, monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSettings
+
+    from core.constants import KEY_FORMAT, KEY_STATION, STATION_LOCAL, STATION_TRUCKERSFM
+    from ui import main_window, settings_dialog
+
+    cls = main_window.ListenMoePlayer
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_STATION, STATION_LOCAL)
+    settings.setValue(KEY_FORMAT, "Originale")
+
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(settings_dialog, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(
+        settings_dialog.SettingsDialog, "_ensure_devices_populated", lambda self: None
+    )
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+
+    window = cls()
+    window.player = SimpleNamespace(
+        is_ready=lambda: True,
+        is_playing=lambda: True,
+        is_paused=lambda: False,
+        get_mute=lambda: False,
+        set_mute=lambda _m: None,
+        stop=lambda: None,
+        get_version=lambda: "test",
+    )
+
+    station_switches = []
+    stream_restarts = []
+    ws_restarts = []
+    monkeypatch.setattr(
+        window,
+        "set_radio_provider",
+        lambda st, ch=None: (
+            station_switches.append((st, ch)),
+            settings.setValue(KEY_STATION, st),
+        ),
+    )
+    monkeypatch.setattr(
+        window,
+        "_restart_stream_after_channel_format_change",
+        lambda: stream_restarts.append(settings.value(KEY_STATION)),
+    )
+    monkeypatch.setattr(
+        window,
+        "_restart_ws_for_channel",
+        lambda ch: ws_restarts.append(ch),
+    )
+
+    try:
+        window.open_settings()
+        dlg = window._settings_dlg
+        assert dlg is not None
+        assert dlg.cmb_station.currentData() == STATION_LOCAL
+
+        # Change an unrelated toggle and click Apply then OK: station must remain Local Music
+        dlg.chk_autoplay.setChecked(True)
+        dlg.btn_apply.click()
+        qapp.processEvents()
+        assert settings.value(KEY_STATION) == STATION_LOCAL
+        assert station_switches == []
+        assert stream_restarts == []
+        assert ws_restarts == []
+
+        dlg.btn_ok.click()
+        qapp.processEvents()
+        assert settings.value(KEY_STATION) == STATION_LOCAL
+        assert station_switches == []
+
+        # Re-open settings, switch station via Apply, then click OK: switch must happen once
+        window.open_settings()
+        qapp.processEvents()
+        idx_truckers = dlg.cmb_station.findData(STATION_TRUCKERSFM)
+        assert idx_truckers >= 0
+        dlg.cmb_station.setCurrentIndex(idx_truckers)
+        dlg.btn_apply.click()
+        qapp.processEvents()
+        assert station_switches == [(STATION_TRUCKERSFM, None)]
+        assert stream_restarts == []
+
+        dlg.btn_ok.click()
+        qapp.processEvents()
+        assert station_switches == [(STATION_TRUCKERSFM, None)]
+
+        # Switch back on Apply then switch again before OK: mutable baseline tracks both transitions
+        window.open_settings()
+        qapp.processEvents()
+        idx_local = dlg.cmb_station.findData(STATION_LOCAL)
+        dlg.cmb_station.setCurrentIndex(idx_local)
+        dlg.btn_apply.click()
+        qapp.processEvents()
+        assert station_switches[-1] == (STATION_LOCAL, None)
+        assert len(station_switches) == 2
+    finally:
+        window.deleteLater()
