@@ -7,6 +7,7 @@ and stream URL resolution across LISTEN.moe, Gensokyo Radio, and ANISON.FM.
 from __future__ import annotations
 
 import logging
+import threading
 
 from core.config import get_station_config, get_station_stream_url
 from core.constants import (
@@ -56,6 +57,8 @@ class StationManager:
         self._current_station_id: str = (initial_station or DEFAULT_STATION).lower().strip()
         self._current_channel: str = (initial_channel or "J-POP").strip()
         self._active_provider: BaseMetadataProvider | None = None
+        self._lock = threading.RLock()
+        self._switch_seq: int = 0
 
     @property
     def current_station_id(self) -> str:
@@ -85,16 +88,20 @@ class StationManager:
 
     def start(self) -> None:
         """Starts the metadata provider for the active station."""
-        self._activate_provider()
+        with self._lock:
+            self._switch_seq += 1
+            self._activate_provider()
 
     def stop(self) -> None:
         """Stops and cleans up the active metadata provider."""
-        if self._active_provider:
-            try:
-                self._active_provider.stop()
-            except Exception as e:
-                logger.debug("Error stopping active provider: %s", e)
-            self._active_provider = None
+        with self._lock:
+            self._switch_seq += 1
+            if self._active_provider:
+                try:
+                    self._active_provider.stop()
+                except Exception as e:
+                    logger.debug("Error stopping active provider: %s", e)
+                self._active_provider = None
 
     def set_station(self, station_id: str) -> bool:
         """Switches to a different radio station.
@@ -102,65 +109,85 @@ class StationManager:
         Returns True if the station changed, False if already active.
         """
         clean_id = (station_id or DEFAULT_STATION).lower().strip()
-        if (
-            clean_id == self._current_station_id
-            and self._active_provider
-            and self._active_provider.is_running
-        ):
-            return False
+        with self._lock:
+            if (
+                clean_id == self._current_station_id
+                and self._active_provider
+                and self._active_provider.is_running
+            ):
+                return False
 
-        logger.info("Switching station from '%s' to '%s'", self._current_station_id, clean_id)
-        self.stop()
-        self._current_station_id = clean_id
-        self._activate_provider()
-        return True
+            logger.info("Switching station from '%s' to '%s'", self._current_station_id, clean_id)
+            self.stop()
+            self._current_station_id = clean_id
+            self._activate_provider()
+            return True
 
     def set_channel(self, channel: str) -> None:
         """Updates the active sub-channel (e.g. J-POP / K-POP for LISTEN.moe)."""
-        self._current_channel = (channel or "J-POP").strip()
-        if self._active_provider and hasattr(self._active_provider, "set_channel"):
-            self._active_provider.set_channel(self._current_channel)
+        with self._lock:
+            self._current_channel = (channel or "J-POP").strip()
+            if self._active_provider and hasattr(self._active_provider, "set_channel"):
+                self._active_provider.set_channel(self._current_channel)
 
     def _activate_provider(self) -> None:
         station_id = self._current_station_id
+        seq = self._switch_seq
+
+        def _guarded_now_playing(title, artist, duration, start_ts, art_url) -> None:
+            if seq != self._switch_seq:
+                return
+            self.on_now_playing(title, artist, duration, start_ts, art_url)
+
+        def _guarded_error(text: str) -> None:
+            if seq != self._switch_seq:
+                return
+            self.on_error_text(text)
+
+        def _guarded_status(text: str) -> None:
+            if seq != self._switch_seq or self.on_status_text is None:
+                return
+            self.on_status_text(text)
+
+        guarded_status = _guarded_status if self.on_status_text is not None else None
 
         if station_id == STATION_GENSOKYO:
             self._active_provider = GensokyoProvider(
-                on_now_playing=self.on_now_playing,
-                on_error_text=self.on_error_text,
-                on_status_text=self.on_status_text,
+                on_now_playing=_guarded_now_playing,
+                on_error_text=_guarded_error,
+                on_status_text=guarded_status,
             )
         elif station_id == STATION_ANISON:
             self._active_provider = AnisonProvider(
-                on_now_playing=self.on_now_playing,
-                on_error_text=self.on_error_text,
-                on_status_text=self.on_status_text,
+                on_now_playing=_guarded_now_playing,
+                on_error_text=_guarded_error,
+                on_status_text=guarded_status,
             )
         elif station_id == STATION_NEURO21:
             self._active_provider = Neuro21Provider(
-                on_now_playing=self.on_now_playing,
-                on_error_text=self.on_error_text,
-                on_status_text=self.on_status_text,
+                on_now_playing=_guarded_now_playing,
+                on_error_text=_guarded_error,
+                on_status_text=guarded_status,
             )
         elif station_id == STATION_TRUCKERSFM:
             self._active_provider = TruckersFMProvider(
-                on_now_playing=self.on_now_playing,
-                on_error_text=self.on_error_text,
-                on_status_text=self.on_status_text,
+                on_now_playing=_guarded_now_playing,
+                on_error_text=_guarded_error,
+                on_status_text=guarded_status,
             )
         elif station_id == STATION_LOCAL:
             self._active_provider = LocalProvider(
-                on_now_playing=self.on_now_playing,
-                on_error_text=self.on_error_text,
-                on_status_text=self.on_status_text,
+                on_now_playing=_guarded_now_playing,
+                on_error_text=_guarded_error,
+                on_status_text=guarded_status,
                 playlist_manager=self.playlist_manager,
             )
         else:
             # Default: LISTEN.moe
             self._active_provider = ListenMoeProvider(
-                on_now_playing=self.on_now_playing,
-                on_error_text=self.on_error_text,
-                on_status_text=self.on_status_text,
+                on_now_playing=_guarded_now_playing,
+                on_error_text=_guarded_error,
+                on_status_text=guarded_status,
                 channel=self._current_channel,
             )
 
@@ -168,4 +195,5 @@ class StationManager:
             self._active_provider.start()
         except Exception as e:
             logger.error("Failed to start provider for '%s': %s", station_id, e)
-            self.on_error_text(f"Station {station_id} error: {e}")
+            if seq == self._switch_seq:
+                self.on_error_text(f"Station {station_id} error: {e}")

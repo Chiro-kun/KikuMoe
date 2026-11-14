@@ -62,7 +62,7 @@ class TruckersFMProvider(BaseMetadataProvider):
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             try:
-                self._thread.join(timeout=1.5)
+                self._thread.join(timeout=0.05)
             except Exception:
                 pass
         self._thread = None
@@ -88,12 +88,14 @@ class TruckersFMProvider(BaseMetadataProvider):
             req = urllib.request.Request(TRUCKERSFM_API_URL, headers=headers)
             with urllib.request.urlopen(req, timeout=6.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+            if self._stop_event.is_set() or not self._is_running:
+                return
             if self._parse_and_emit_radiocloud(data):
                 return
         except Exception as e:
             logger.debug("TruckersFM primary API failed, falling back to Icecast: %s", e)
 
-        if self._stop_event.is_set():
+        if self._stop_event.is_set() or not self._is_running:
             return
 
         # 2. Fallback: Native Icecast JSON status endpoint
@@ -101,8 +103,12 @@ class TruckersFMProvider(BaseMetadataProvider):
             req_ice = urllib.request.Request(TRUCKERSFM_ICECAST_URL, headers=headers)
             with urllib.request.urlopen(req_ice, timeout=6.0) as resp:
                 ice_data = json.loads(resp.read().decode("utf-8"))
+            if self._stop_event.is_set() or not self._is_running:
+                return
             self._parse_and_emit_icecast(ice_data)
         except Exception as e:
+            if self._stop_event.is_set() or not self._is_running:
+                return
             logger.debug("TruckersFM Icecast fallback failed: %s", e)
             if self.on_status_text:
                 self.on_status_text(f"TruckersFM API sync: {e}")

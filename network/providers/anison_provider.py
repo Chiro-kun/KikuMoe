@@ -63,7 +63,7 @@ class AnisonProvider(BaseMetadataProvider):
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             try:
-                self._thread.join(timeout=1.5)
+                self._thread.join(timeout=0.05)
             except Exception:
                 pass
         self._thread = None
@@ -89,8 +89,12 @@ class AnisonProvider(BaseMetadataProvider):
             with urllib.request.urlopen(req, timeout=8.0) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
 
+            if self._stop_event.is_set() or not self._is_running:
+                return
             self._parse_and_emit(data)
         except Exception as e:
+            if self._stop_event.is_set() or not self._is_running:
+                return
             logger.debug("ANISON.FM metadata fetch error: %s", e)
             if self.on_status_text:
                 self.on_status_text(f"ANISON.FM API sync: {e}")

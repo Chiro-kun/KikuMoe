@@ -4,6 +4,7 @@ import locale
 import math
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -242,6 +243,7 @@ _MPV_END_ERROR = 4
 class PlayerMPV:
     def __init__(self, on_event: Callable[[str, int | None], None] | None = None) -> None:
         self._on_event = on_event
+        self._lock = threading.RLock()
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
@@ -250,6 +252,12 @@ class PlayerMPV:
         # Set when stop()/force_cleanup() is called so the end-file callback
         # doesn't mis-classify the resulting event as a natural 'ended'.
         self._stopping: bool = False
+        # Set when play_url() replaces an active stream without calling stop()
+        # so the replaced stream's end-file event is absorbed until start-file.
+        self._switching: bool = False
+        self._cached_device_val: str = ""
+        self._cached_device_name: str | None = None
+        self._applied_audio_device: str | None = None
         self.log = get_logger("PlayerMPV")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -265,17 +273,25 @@ class PlayerMPV:
 
             settings = QSettings(ORG_NAME, APP_SETTINGS)
             val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-            if val in (None, ""):
+            val_str = "" if val is None else str(val).strip()
+            if not val_str:
+                self._cached_device_val = ""
+                self._cached_device_name = None
                 return None
+            if val_str == self._cached_device_val and self._cached_device_name is not None:
+                return self._cached_device_name
             import pyaudio
 
             with PORTAUDIO_LOCK, silence_stderr():
                 pa = pyaudio.PyAudio()
                 try:
-                    info = pa.get_device_info_by_index(int(val))
-                    return str(info.get("name", "")) if isinstance(info, dict) else None
+                    info = pa.get_device_info_by_index(int(val_str))
+                    name = str(info.get("name", "")) if isinstance(info, dict) else None
                 finally:
                     pa.terminate()
+            self._cached_device_val = val_str
+            self._cached_device_name = name
+            return name
         except Exception:
             return None
 
@@ -286,6 +302,13 @@ class PlayerMPV:
             return
         device_name = self._get_stored_device_name()
         if not device_name:
+            if self._applied_audio_device is not None:
+                try:
+                    assert self._player is not None
+                    self._player.audio_device = "auto"
+                except Exception:
+                    pass
+                self._applied_audio_device = None
             return
         try:
             assert self._player is not None
@@ -297,15 +320,20 @@ class PlayerMPV:
                 try:
                     desc = str(dev.get("description", "")).lower()
                     name = str(dev.get("name", "")).lower()
+                    raw_name = dev.get("name")
                 except Exception:
                     try:
                         desc = str(getattr(dev, "description", "")).lower()
                         name = str(getattr(dev, "name", "")).lower()
+                        raw_name = getattr(dev, "name", None)
                     except Exception:
                         continue
                 if needle in desc or needle in name or desc in needle:
+                    if raw_name == self._applied_audio_device:
+                        return
                     try:
-                        self._player.audio_device = dev.get("name") or getattr(dev, "name", None)
+                        self._player.audio_device = raw_name
+                        self._applied_audio_device = raw_name
                         self.log.debug("[MPV] audio_device set to: %s", self._player.audio_device)
                     except Exception as e:
                         self.log.debug("[MPV] Could not set audio_device: %s", e)
@@ -362,6 +390,7 @@ class PlayerMPV:
             kwargs = dict(
                 vid="no",
                 terminal=False,
+                ytdl=False,
                 log_handler=_mpv_log_handler,
                 loglevel="warn",
                 user_agent=self._user_agent,
@@ -372,56 +401,7 @@ class PlayerMPV:
             self._player = player
             player.volume = self._to_backend_volume(self._volume)
             player.mute = self._muted
-
-            @player.event_callback("start-file")
-            def _on_start(event):
-                self._stopping = False
-                self._emit("opening", None)
-
-            @player.event_callback("file-loaded")
-            def _on_loaded(event):
-                self._emit("playing", None)
-
-            @player.event_callback("end-file")
-            def _on_end(event):
-                # If stop()/force_cleanup() set the flag, absorb this event —
-                # 'stopped' was already emitted by the calling method.
-                if self._stopping:
-                    self._stopping = False
-                    return
-
-                # Determine reason: event.reason is an int in libmpv
-                # (MPV_END_FILE_REASON_STOP=2, QUIT=3, ERROR=4, EOF=0/1).
-                # Guard against string/enum forms in future python-mpv versions.
-                reason = getattr(event, "reason", None)
-                try:
-                    reason_int = int(reason) if reason is not None else -1
-                except Exception:
-                    reason_int = -1
-                reason_str = str(reason).lower()
-
-                if (
-                    reason_int in (_MPV_END_STOP, _MPV_END_QUIT)
-                    or "stop" in reason_str
-                    or "quit" in reason_str
-                ):
-                    self._emit("stopped", None)
-                elif reason_int == _MPV_END_ERROR or "error" in reason_str:
-                    self.log.error(
-                        "[BACKEND] PlayerMPV: playback ended with error (reason=%s)", reason
-                    )
-                    self._emit("error", None)
-                else:
-                    self._emit("ended", None)
-
-            @player.property_observer("cache-buffering-state")
-            def _on_cache(name, value):
-                if value is not None:
-                    try:
-                        self._emit("buffering", int(value))
-                    except Exception:
-                        pass
-
+            self._attach_mpv_callbacks(player)
             self._ready = True
             try:
                 self.log.info(
@@ -441,6 +421,7 @@ class PlayerMPV:
                     self._player = player
                     player.volume = self._to_backend_volume(self._volume)
                     player.mute = self._muted
+                    self._attach_mpv_callbacks(player)
                     self._ready = True
                 except Exception as e2:
                     self._init_error = str(e2)
@@ -452,6 +433,72 @@ class PlayerMPV:
             else:
                 self._player = None
                 self._ready = False
+
+    def _attach_mpv_callbacks(self, player: Any) -> None:
+        """Attach event and property callbacks to an MPV instance."""
+
+        @player.event_callback("start-file")
+        def _on_start(event: Any) -> None:
+            with self._lock:
+                self._stopping = False
+                self._switching = False
+            self._emit("opening", None)
+
+        @player.event_callback("file-loaded")
+        def _on_loaded(event: Any) -> None:
+            self._emit("playing", None)
+
+        @player.event_callback("end-file")
+        def _on_end(event: Any) -> None:
+            ev_data = getattr(event, "data", None)
+            reason = getattr(ev_data, "reason", None)
+            if reason is None:
+                reason = getattr(event, "reason", None)
+            if reason is None and hasattr(event, "as_dict"):
+                try:
+                    reason = event.as_dict().get("reason")
+                except Exception:
+                    reason = None
+            try:
+                reason_int = int(reason) if isinstance(reason, (int, float)) else -1
+            except Exception:
+                reason_int = -1
+            if isinstance(reason, (bytes, bytearray)):
+                reason_str = reason.decode("utf-8", errors="ignore").lower()
+            else:
+                reason_str = str(reason).lower() if reason is not None else ""
+
+            with self._lock:
+                # If stop()/force_cleanup() set the flag, absorb this event —
+                # 'stopped' was already emitted by the calling method.
+                if self._stopping:
+                    self._stopping = False
+                    return
+                # If play_url() is replacing an active stream, absorb teardown
+                # events from the replaced stream before start-file fires.
+                if self._switching:
+                    self._switching = False
+                    return
+
+            if (
+                reason_int in (_MPV_END_STOP, _MPV_END_QUIT)
+                or "stop" in reason_str
+                or "quit" in reason_str
+            ):
+                self._emit("stopped", None)
+            elif reason_int == _MPV_END_ERROR or "error" in reason_str:
+                self.log.error("[BACKEND] PlayerMPV: playback ended with error (reason=%s)", reason)
+                self._emit("error", None)
+            else:
+                self._emit("ended", None)
+
+        @player.property_observer("cache-buffering-state")
+        def _on_cache(name: Any, value: Any) -> None:
+            if value is not None:
+                try:
+                    self._emit("buffering", int(value))
+                except Exception:
+                    pass
 
     def is_ready(self) -> bool:
         return bool(self._ready and self._player is not None)
@@ -472,37 +519,49 @@ class PlayerMPV:
                 pass
 
     def play_url(self, url: str) -> bool:
-        if not self.is_ready():
+        with self._lock:
+            if not self.is_ready():
+                emit_err = True
+            else:
+                emit_err = False
+                try:
+                    assert self._player is not None
+                    try:
+                        was_active = not bool(getattr(self._player, "idle_active", True))
+                    except Exception:
+                        was_active = False
+                    self._stopping = False
+                    self._switching = was_active
+                    self._apply_linux_audio_device()
+                    self._player.pause = False
+                    self._player.play(url)
+                    return True
+                except Exception as e:
+                    self._switching = False
+                    self.log.error("[BACKEND] PlayerMPV: play_url failed: %s", e)
+                    emit_err = True
+        if emit_err:
             self._emit("error", None)
-            return False
-        try:
-            assert self._player is not None
-            self._stopping = False
-            self._apply_linux_audio_device()
-            self._player.pause = False
-            self._player.play(url)
-            return True
-        except Exception as e:
-            self.log.error("[BACKEND] PlayerMPV: play_url failed: %s", e)
-            self._emit("error", None)
-            return False
+        return False
 
     def stop(self) -> None:
-        if not self.is_ready():
-            return
-        assert self._player is not None
-        # Only set the flag when there's actually something playing/paused;
-        # if MPV is already idle no end-file event will fire and the flag
-        # would linger, suppressing the next natural 'ended'.
-        try:
-            idle = bool(getattr(self._player, "idle_active", True))
-            self._stopping = not idle
-        except Exception:
-            self._stopping = False
-        try:
-            self._player.stop()
-        except Exception:
-            self._stopping = False
+        with self._lock:
+            if not self.is_ready():
+                return
+            assert self._player is not None
+            # Only set the flag when there's actually something playing/paused;
+            # if MPV is already idle no end-file event will fire and the flag
+            # would linger, suppressing the next natural 'ended'.
+            self._switching = False
+            try:
+                idle = bool(getattr(self._player, "idle_active", True))
+                self._stopping = not idle
+            except Exception:
+                self._stopping = False
+            try:
+                self._player.stop()
+            except Exception:
+                self._stopping = False
         self._emit("stopped", None)
 
     def pause_toggle(self) -> None:
@@ -631,15 +690,17 @@ class PlayerMPV:
         return None
 
     def force_cleanup(self) -> None:
-        if not self.is_ready():
-            return
-        assert self._player is not None
-        try:
-            idle = bool(getattr(self._player, "idle_active", True))
-            self._stopping = not idle
-        except Exception:
-            self._stopping = False
-        try:
-            self._player.stop()
-        except Exception:
-            self._stopping = False
+        with self._lock:
+            if not self.is_ready():
+                return
+            assert self._player is not None
+            self._switching = False
+            try:
+                idle = bool(getattr(self._player, "idle_active", True))
+                self._stopping = not idle
+            except Exception:
+                self._stopping = False
+            try:
+                self._player.stop()
+            except Exception:
+                self._stopping = False

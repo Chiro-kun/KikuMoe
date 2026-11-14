@@ -44,12 +44,13 @@ class LocalProvider(BaseMetadataProvider):
         self.playlist_manager = playlist_manager
         self._cover_cache_file: Path | None = None
         self._cover_digest: bytes | None = None
-
-        if self.playlist_manager is not None:
-            self.playlist_manager.track_changed.connect(self._on_track_changed)
+        self._signal_connected: bool = False
 
     def start(self) -> None:
         self._is_running = True
+        if self.playlist_manager is not None and not self._signal_connected:
+            self.playlist_manager.track_changed.connect(self._on_track_changed)
+            self._signal_connected = True
         if self.on_status_text:
             self.on_status_text("Locale")
         if self.playlist_manager is not None:
@@ -59,6 +60,12 @@ class LocalProvider(BaseMetadataProvider):
 
     def stop(self) -> None:
         self._is_running = False
+        if self.playlist_manager is not None and self._signal_connected:
+            try:
+                self.playlist_manager.track_changed.disconnect(self._on_track_changed)
+            except (TypeError, RuntimeError):
+                pass
+            self._signal_connected = False
 
     def _on_track_changed(self, track: LocalTrackInfo | None) -> None:
         if not self._is_running or track is None:

@@ -537,6 +537,8 @@ class ListenMoePlayer(QWidget):
     cover_data_ready = pyqtSignal(str, bytes)
     # Marshal websocket metadata updates to the UI thread
     now_playing_event = pyqtSignal(str, str, object, object, object)
+    # Marshal audio backend player events to the UI thread
+    player_event = pyqtSignal(str, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -567,6 +569,14 @@ class ListenMoePlayer(QWidget):
         self._retry_count = 0
         self._max_retries = 10
         self._retry_pending = False
+        self._closing: bool = False
+        self._station_switch_seq: int = 0
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._on_retry_timer)
+        self._local_prompt_timer = QTimer(self)
+        self._local_prompt_timer.setSingleShot(True)
+        self._local_prompt_timer.timeout.connect(self._prompt_local_music_if_needed)
         self._settings_dlg: Optional[SettingsDialog] = None
         self._about_dialog: Optional[AboutDialog] = None
         self.history_mgr = SongHistoryManager(max_entries=100, parent=self)
@@ -1512,6 +1522,7 @@ class ListenMoePlayer(QWidget):
         try:
             self.schedule_play.connect(self._schedule_play_stream)
             self.notify_tray.connect(self._notify_tray)
+            self.player_event.connect(self._on_player_event)
         except Exception:
             pass
 
@@ -2185,7 +2196,12 @@ class ListenMoePlayer(QWidget):
 
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""
+        self._closing = True
         try:
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.stop()
+            if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
+                self._local_prompt_timer.stop()
             if hasattr(self, "lyrics_provider"):
                 self.lyrics_provider.cancel()
             if self._media_timer is not None:
@@ -2495,7 +2511,15 @@ class ListenMoePlayer(QWidget):
 
     # 2. Player Backend & Audio Events
     def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
-        """Gestisce gli eventi del backend (FFmpeg/VLC) aggiornando lo stato UI."""
+        """Gestisce gli eventi del backend (FFmpeg/VLC/MPV) aggiornando lo stato UI."""
+        if getattr(self, "_closing", False):
+            return
+        try:
+            if QThread.currentThread() != self.thread():
+                self.player_event.emit("" if code is None else str(code), value)
+                return
+        except Exception:
+            pass
         try:
             c = str(code).lower() if code is not None else ""
             if c == "opening":
@@ -2615,10 +2639,26 @@ class ListenMoePlayer(QWidget):
 
     def _schedule_play_stream(self, delay_ms: int) -> None:
         """Slot per avviare lo stream dopo un delay (thread-safe UI call)."""
+        if getattr(self, "_closing", False):
+            return
         try:
-            QTimer.singleShot(int(delay_ms), lambda: self.play_stream(is_retry=True))
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.start(max(0, int(delay_ms)))
+            else:
+                QTimer.singleShot(max(0, int(delay_ms)), self._on_retry_timer)
         except Exception:
-            self.play_stream(is_retry=True)
+            self._on_retry_timer()
+
+    def _on_retry_timer(self) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self.play_stream(is_retry=True)
+
+    def _prompt_local_music_if_needed(self) -> None:
+        if getattr(self, "_closing", False):
+            return
+        if self._is_local_mode() and self.local_playlist.is_empty():
+            self.prompt_select_local_music()
 
     # 3. WebSocket & Metadata Events
     def _on_now_playing(
@@ -2759,6 +2799,16 @@ class ListenMoePlayer(QWidget):
 
     def set_radio_provider(self, provider: str, channel: Optional[str] = None) -> None:
         """Switch active radio station and optional channel."""
+        if getattr(self, "_closing", False):
+            return
+        self._station_switch_seq += 1
+        self._retry_pending = False
+        self._retry_count = 0
+        if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+            self._retry_timer.stop()
+        if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
+            self._local_prompt_timer.stop()
+
         clean_id = (provider or "").strip().lower()
         if clean_id not in STATIONS:
             clean_id = DEFAULT_STATION
@@ -2872,7 +2922,13 @@ class ListenMoePlayer(QWidget):
                             self.time_label.setText("00:00 / 00:00")
                         self.status_changed.emit(self.i18n.t("station_local"))
                         # Prompt the user to select local music!
-                        QTimer.singleShot(100, self.prompt_select_local_music)
+                        if (
+                            hasattr(self, "_local_prompt_timer")
+                            and self._local_prompt_timer is not None
+                        ):
+                            self._local_prompt_timer.start(100)
+                        else:
+                            QTimer.singleShot(100, self._prompt_local_music_if_needed)
                 else:
                     if self.player and self.player.is_playing():
                         self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
@@ -5112,8 +5168,12 @@ class ListenMoePlayer(QWidget):
 
     # ------------------- Player controls -------------------
     def play_stream(self, is_retry: bool = False, *args) -> None:
+        if getattr(self, "_closing", False):
+            return
         try:
             self._retry_pending = False
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.stop()
             if is_retry and getattr(self, "_retry_count", 0) > self._max_retries:
                 return
             if not is_retry:
@@ -5130,7 +5190,13 @@ class ListenMoePlayer(QWidget):
                         self.player.stop()
                     self._refresh_play_button_text(False)
                     self.status_changed.emit(self.i18n.t("queue_empty_hint"))
-                    QTimer.singleShot(100, self.prompt_select_local_music)
+                    if (
+                        hasattr(self, "_local_prompt_timer")
+                        and self._local_prompt_timer is not None
+                    ):
+                        self._local_prompt_timer.start(100)
+                    else:
+                        QTimer.singleShot(100, self._prompt_local_music_if_needed)
                     return
                 if not hasattr(self, "player") or self.player is None or not url:
                     try:
@@ -5301,6 +5367,11 @@ class ListenMoePlayer(QWidget):
     def stop_stream(self, reset_session: bool = True) -> None:
         try:
             self._retry_count = 0
+            self._retry_pending = False
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.stop()
+            if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
+                self._local_prompt_timer.stop()
             try:
                 self.log.info("[UI] stop_stream clicked")
             except Exception:
