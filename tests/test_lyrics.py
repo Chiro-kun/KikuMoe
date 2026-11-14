@@ -139,3 +139,50 @@ def test_lookup_falls_back_after_404_and_honors_retry_after(qapp, monkeypatch):
     record, status, retry = provider._lookup({}, ("Song", "Artist", 200), provider.generation)
     assert record is None and status == "error"
     assert retry >= time.monotonic() + 29
+
+
+def test_lyrics_panel_responsive_scaling_and_recenter(qapp):
+    panel = LyricsPanel()
+    panel.resize(480, LyricsPanel.BASE_HEIGHT)
+    panel.show()
+    panel.show_record(
+        {"syncedLyrics": "\n".join(f"[00:{n:02}.00]Lyric line {n}" for n in range(1, 10))},
+        "Plain",
+    )
+    panel.set_position(5)
+    QTest.qWait(400)
+
+    assert panel._font_px == LyricsPanel.BASE_FONT_PX
+    assert panel.height() == LyricsPanel.BASE_HEIGHT
+    assert f"font-size: {LyricsPanel.BASE_FONT_PX}px" in panel.labels[0].styleSheet()
+
+    # Scale up to hero / fullscreen proportion
+    panel.set_responsive_scale(1.0)
+    QTest.qWait(420)
+    assert panel._font_px == LyricsPanel.HERO_FONT_PX
+    assert panel.height() == LyricsPanel.HERO_HEIGHT
+    assert panel.content_layout.spacing() == 13
+    assert all(
+        f"font-size: {LyricsPanel.HERO_FONT_PX}px" in lbl.styleSheet() for lbl in panel.labels
+    )
+    active_lbl = panel.labels[panel.active]
+    assert (
+        abs(
+            active_lbl.mapTo(panel.scroll.viewport(), active_lbl.rect().center()).y()
+            - panel.scroll.viewport().height() // 2
+        )
+        < 5
+    )
+
+    # New track loaded while scaled must inherit hero font size
+    panel.show_record({"plainLyrics": "New track words"}, "Plain")
+    assert all(
+        f"font-size: {LyricsPanel.HERO_FONT_PX}px" in lbl.styleSheet() for lbl in panel.labels
+    )
+
+    # Scale back to compact
+    panel.set_responsive_scale(0.0)
+    assert panel._font_px == LyricsPanel.BASE_FONT_PX
+    assert panel.height() == LyricsPanel.BASE_HEIGHT
+    assert panel.content_layout.spacing() == 9
+    panel.close()

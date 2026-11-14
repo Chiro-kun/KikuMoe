@@ -2468,6 +2468,8 @@ class ListenMoePlayer(QWidget):
             artist_lbl = getattr(self, "now_playing_artist", None)
             if artist_lbl is not None and hasattr(artist_lbl, "set_font_size"):
                 artist_lbl.set_font_size(round(13 + 2 * t))
+            if lyrics_panel is not None and hasattr(lyrics_panel, "set_responsive_scale"):
+                lyrics_panel.set_responsive_scale(t)
 
             is_hero_stage = (
                 self.isFullScreen()

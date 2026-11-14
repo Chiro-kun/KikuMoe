@@ -19,11 +19,12 @@ from ui.themes.cyber_moe import PALETTE
 class LyricLine(QLabel):
     """A line that fades smoothly between its inactive and active colors."""
 
-    def __init__(self, text, parent=None):
+    def __init__(self, text, parent=None, font_px: int = 15):
         super().__init__(text, parent)
         self.setWordWrap(True)
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._font_px = max(12, int(font_px))
         self._color = QColor(255, 255, 255, 165)
         self._animation = QVariantAnimation(self)
         self._animation.setDuration(400)
@@ -35,8 +36,17 @@ class LyricLine(QLabel):
         self._color = QColor(color)
         self.setStyleSheet(
             f"color: rgba({self._color.red()}, {self._color.green()}, "
-            f"{self._color.blue()}, {self._color.alpha()}); font-size: 14px; font-weight: 700;"
+            f"{self._color.blue()}, {self._color.alpha()}); "
+            f"font-size: {self._font_px}px; font-weight: 700;"
         )
+
+    def set_font_size(self, font_px: int) -> None:
+        size = max(12, int(font_px))
+        if self._font_px == size:
+            return
+        self._font_px = size
+        self._set_color(self._color)
+        self.updateGeometry()
 
     def set_active(self, active, accent, animate=True):
         target = QColor(accent) if active else QColor(255, 255, 255, 165)
@@ -55,9 +65,16 @@ class LyricsSkeleton(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._phase = 0.0
+        self._scale = 0.0
         self.timer = QTimer(self)
         self.timer.setInterval(32)
         self.timer.timeout.connect(self._tick)
+
+    def set_scale(self, scale: float) -> None:
+        clamped = max(0.0, min(1.0, float(scale)))
+        if self._scale != clamped:
+            self._scale = clamped
+            self.update()
 
     def _tick(self):
         self._phase = (self._phase + 0.025) % 1.0
@@ -77,9 +94,17 @@ class LyricsSkeleton(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         width = float(self.width())
         center_y = float(self.height()) / 2
+        bar_h = 10.0 + 3.0 * self._scale
+        step = 27.0 + 9.0 * self._scale
+        top_offset = 2.0 * step + bar_h * 0.5
         for index, fraction in enumerate((0.55, 0.76, 0.63, 0.82, 0.48)):
             line_width = max(10.0, width * fraction)
-            rect = QRectF((width - line_width) / 2, center_y - 61 + index * 27, line_width, 10)
+            rect = QRectF(
+                (width - line_width) / 2,
+                center_y - top_offset + index * step,
+                line_width,
+                bar_h,
+            )
             gradient = QLinearGradient(rect.left(), 0, rect.right(), 0)
             base = QColor(PALETTE["lyrics_skeleton_base"])
             shine = QColor(PALETTE["lyrics_skeleton_shine"])
@@ -97,13 +122,19 @@ class LyricsSkeleton(QWidget):
 
 class LyricsPanel(QWidget):
     scroll: QScrollArea  # type: ignore[assignment]
+    BASE_HEIGHT = 222
+    HERO_HEIGHT = 342
+    BASE_FONT_PX = 15
+    HERO_FONT_PX = 21
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("lyricsPanel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(190)
-        self.setFixedHeight(222)
+        self.setFixedHeight(self.BASE_HEIGHT)
+        self._font_px: int = self.BASE_FONT_PX
+        self._scale: float = 0.0
         self.lines: list = []
         self.labels: list = []
         self.active = -1
@@ -149,6 +180,39 @@ class LyricsPanel(QWidget):
     def refresh_theme(self):
         self.set_accent(PALETTE["accent"])
 
+    def set_font_size(self, font_px: int) -> None:
+        """Update lyric line font size across existing and future lines."""
+        size = max(12, int(font_px))
+        if self._font_px == size:
+            return
+        self._font_px = size
+        for label in self.labels:
+            label.set_font_size(size)
+        if self.lines:
+            self._update_padding()
+            self._schedule_recenter()
+
+    def set_responsive_scale(self, scale: float) -> None:
+        """Scale lyrics typography, spacing, and panel height smoothly (0.0 compact .. 1.0 hero)."""
+        t = max(0.0, min(1.0, float(scale)))
+        self._scale = t
+        target_height = round(self.BASE_HEIGHT + (self.HERO_HEIGHT - self.BASE_HEIGHT) * t)
+        target_font = round(self.BASE_FONT_PX + (self.HERO_FONT_PX - self.BASE_FONT_PX) * t)
+        target_spacing = round(9 + 4 * t)
+
+        height_changed = self.height() != target_height or self.maximumHeight() != target_height
+        if height_changed:
+            self.setFixedHeight(target_height)
+        if self.content_layout.spacing() != target_spacing:
+            self.content_layout.setSpacing(target_spacing)
+        self.skeleton.set_scale(t)
+
+        font_changed = self._font_px != target_font
+        self.set_font_size(target_font)
+        if height_changed and not font_changed and self.lines:
+            self._update_padding()
+            self._schedule_recenter()
+
     def _clear(self):
         self.animation.stop()
         self._recenter_timer.stop()
@@ -161,7 +225,7 @@ class LyricsPanel(QWidget):
                     w.deleteLater()
 
     def _add_line(self, text):
-        label = LyricLine(text)
+        label = LyricLine(text, font_px=self._font_px)
         self.content_layout.addWidget(label)
         self.labels.append(label)
 
