@@ -2841,7 +2841,7 @@ class ListenMoePlayer(QWidget):
 
                 # Record into session song history
                 if self._current_cover_ref and QThread.currentThread() == self.thread():
-                    self._ensure_local_cover_cached(self._current_cover_ref)
+                    ListenMoePlayer._ensure_local_cover_cached(self, self._current_cover_ref)
                 current_st = getattr(self, "_current_radio_provider", "listenmoe")
                 st_name = get_station_display_name(current_st, self.i18n)
                 self.history_mgr.add_entry(
@@ -3747,10 +3747,10 @@ class ListenMoePlayer(QWidget):
         cached = get_cached_pixmap(cover_ref)
         if cached is not None and not cached.isNull():
             return cached
-        local_file = self._resolve_local_cover_file(cover_ref)
+        local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
         if not local_file:
             return None
-        raw_bytes = self._read_local_cover_bytes(local_file)
+        raw_bytes = ListenMoePlayer._read_local_cover_bytes(local_file)
         if not raw_bytes:
             return None
         digest = hashlib.blake2b(raw_bytes, digest_size=16).digest()
@@ -3767,7 +3767,7 @@ class ListenMoePlayer(QWidget):
 
     def _request_album_cover(self, cover_ref: Optional[str]) -> None:
         try:
-            local_file = self._resolve_local_cover_file(cover_ref)
+            local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
             if local_file and cover_ref:
                 try:
                     st = os.stat(local_file)
@@ -3783,20 +3783,28 @@ class ListenMoePlayer(QWidget):
                 if local_sig is not None and local_sig == getattr(
                     self, "_current_local_cover_sig", None
                 ):
-                    self._ensure_local_cover_cached(cover_ref)
+                    ListenMoePlayer._ensure_local_cover_cached(self, cover_ref)
                     return
 
-                raw_bytes = self._read_local_cover_bytes(local_file)
+                raw_bytes = ListenMoePlayer._read_local_cover_bytes(local_file)
                 if raw_bytes:
                     digest = hashlib.blake2b(raw_bytes, digest_size=16).digest()
                     if digest == getattr(self, "_current_cover_bytes_digest", None):
                         self._current_cover_url = cover_ref
                         self._current_local_cover_sig = local_sig
-                        cur_pix = getattr(self, "_current_cover_pixmap", None)
-                        if isinstance(cur_pix, QPixmap) and not cur_pix.isNull():
-                            store_cached_pixmap(cover_ref, cur_pix)
-                            self._refresh_history_popover_if_visible()
-                            return
+                        if get_cached_pixmap(cover_ref) is None:
+                            cur_pix = getattr(self, "_current_cover_pixmap", None)
+                            if isinstance(cur_pix, QPixmap) and not cur_pix.isNull():
+                                store_cached_pixmap(cover_ref, cur_pix)
+                            else:
+                                fallback_pix = QPixmap()
+                                if (
+                                    fallback_pix.loadFromData(raw_bytes)
+                                    and not fallback_pix.isNull()
+                                ):
+                                    store_cached_pixmap(cover_ref, fallback_pix)
+                        ListenMoePlayer._refresh_history_popover_if_visible(self)
+                        return
                     pix = QPixmap()
                     if pix.loadFromData(raw_bytes) and not pix.isNull():
                         self._current_cover_url = cover_ref
@@ -3804,7 +3812,7 @@ class ListenMoePlayer(QWidget):
                         self._current_cover_bytes_digest = digest
                         store_cached_pixmap(cover_ref, pix)
                         self._set_album_cover_pixmap(pix)
-                        self._refresh_history_popover_if_visible()
+                        ListenMoePlayer._refresh_history_popover_if_visible(self)
                         return
 
             cover_url = self._normalize_album_cover_url(cover_ref)
@@ -3892,7 +3900,7 @@ class ListenMoePlayer(QWidget):
 
             if cover_url and cover_url == self._current_cover_url:
                 self._set_album_cover_pixmap(pixmap)
-            self._refresh_history_popover_if_visible()
+            ListenMoePlayer._refresh_history_popover_if_visible(self)
         except Exception:
             pass
 
