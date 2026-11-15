@@ -651,3 +651,28 @@ def test_station_providers_deduplicate_now_playing_events():
     }
     t_prov._parse_and_emit_radiocloud(sample_t2)
     assert len(t_events) == 2
+
+
+def test_station_changed_log_omits_channel_for_local_and_single_feed_stations():
+    """Verify console log omits '(J-POP)' when switching to local or channel-less stations."""
+    from core.config import get_station_config
+    from ui.main_window import ListenMoePlayer
+
+    assert (
+        ListenMoePlayer._format_station_changed_log(
+            "listenmoe", "J-POP", bool(get_station_config("listenmoe").get("has_channels"))
+        )
+        == "[UI] Station changed to 'listenmoe' (J-POP)"
+    )
+    assert (
+        ListenMoePlayer._format_station_changed_log(
+            "local", "J-POP", bool(get_station_config("local").get("has_channels"))
+        )
+        == "[UI] Station changed to 'local'"
+    )
+    assert (
+        ListenMoePlayer._format_station_changed_log(
+            "gensokyo", "J-POP", bool(get_station_config("gensokyo").get("has_channels"))
+        )
+        == "[UI] Station changed to 'gensokyo'"
+    )

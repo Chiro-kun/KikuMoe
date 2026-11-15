@@ -2982,7 +2982,9 @@ class ListenMoePlayer(QWidget):
                         self._on_local_track_changed(curr_track)
                         if self.player and self.player.is_playing():
                             self.log.info(
-                                f"[UI] Station changed to '{clean_id}' ({target_channel})"
+                                ListenMoePlayer._format_station_changed_log(
+                                    clean_id, target_channel, bool(cfg.get("has_channels"))
+                                )
                             )
                             self.play_stream(is_retry=False)
                     else:
@@ -3015,13 +3017,26 @@ class ListenMoePlayer(QWidget):
                             QTimer.singleShot(100, self._prompt_local_music_if_needed)
                 else:
                     if self.player and self.player.is_playing():
-                        self.log.info(f"[UI] Station changed to '{clean_id}' ({target_channel})")
+                        self.log.info(
+                            ListenMoePlayer._format_station_changed_log(
+                                clean_id, target_channel, bool(cfg.get("has_channels"))
+                            )
+                        )
                         self.play_stream(is_retry=False)
 
         try:
             self.update_tray_texts()
         except Exception:
             pass
+
+    @staticmethod
+    def _format_station_changed_log(
+        station_id: str, channel: Optional[str], has_channels: bool
+    ) -> str:
+        """Format the station-switch log without attaching channels to single-feed/local sources."""
+        if has_channels and channel:
+            return f"[UI] Station changed to '{station_id}' ({channel})"
+        return f"[UI] Station changed to '{station_id}'"
 
     def _on_channel_switch_changed(self, new_channel: str) -> None:
         try:
