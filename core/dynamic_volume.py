@@ -383,10 +383,10 @@ class DynamicVolumeController(QObject):
         self,
         parent: QObject | None = None,
         *,
-        poll_interval_ms: int = 250,
+        poll_interval_ms: int = 150,
         ramp_interval_ms: int = 25,
         ramp_steps: int = 8,
-        unduck_ramp_steps: int = 40,
+        unduck_ramp_steps: int = 80,
         list_processes_fn: Callable[[], set[str]] | None = None,
         foreground_process_fn: Callable[[], str] | None = None,
     ) -> None:
@@ -522,8 +522,12 @@ class DynamicVolumeController(QObject):
                 self._ramp_timer.stop()
         else:
             t = self._ramp_step_index / float(total)
-            # Smoothstep ease when restoring volume so unducking swells gently without blasting.
-            eased = t * t * (3.0 - 2.0 * t) if self._ramp_is_unduck else t
+            if self._ramp_is_unduck:
+                # Blend linear start (prompt kick-in) with smoothstep taper (gentle mid-ramp & top).
+                smooth = t * t * (3.0 - 2.0 * t)
+                eased = 0.35 * smooth + 0.65 * t
+            else:
+                eased = t
             span = self._target_factor - self._ramp_start_factor
             next_factor = self._ramp_start_factor + span * eased
             if self._ramp_is_unduck:

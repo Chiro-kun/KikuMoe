@@ -457,16 +457,16 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
         player.deleteLater()
 
 
-def test_controller_unducks_promptly_and_gradually_on_process_exit(qapp):
+def test_controller_unducks_promptly_and_gently_on_process_exit(qapp):
     state = {"running": set(), "fg": ""}
     ctrl = DynamicVolumeController(
         list_processes_fn=lambda: set(state["running"]),
         foreground_process_fn=lambda: state["fg"],
     )
     try:
-        assert ctrl._poll_timer.interval() <= 250
+        assert ctrl._poll_timer.interval() <= 150
         assert ctrl._ramp_timer.interval() * ctrl._ramp_steps <= 250
-        assert ctrl._ramp_timer.interval() * ctrl._unduck_ramp_steps >= 800
+        assert ctrl._ramp_timer.interval() * ctrl._unduck_ramp_steps >= 2000
 
         # Empty app list -> poll timer stays idle even when enabled
         ctrl.configure(True, "", 25, DYNAMIC_MODE_ANY_OPEN)
@@ -477,27 +477,26 @@ def test_controller_unducks_promptly_and_gradually_on_process_exit(qapp):
         assert ctrl._poll_timer.isActive() is True
 
         state["running"] = {"game"}
-        QTest.qWait(550)
+        QTest.qWait(500)
         assert ctrl.is_ducked() is True
         assert abs(ctrl.current_factor() - 0.25) < 1e-6
 
-        # Selected process exits -> exit is detected promptly,
-        # and volume swells gradually (not blasted to 1.0)
+        # Process exits -> shared poll detects it quickly and fade starts gently (~2.0s nominal)
         state["running"] = set()
-        QTest.qWait(400)
+        QTest.qWait(350)
         assert ctrl.is_ducked() is False
         assert ctrl.active_app() == ""
         assert ctrl.target_factor() == 1.0
-        assert 0.25 < ctrl.current_factor() < 0.90
+        assert 0.25 < ctrl.current_factor() < 0.60
 
-        # Remainder of the gradual fade completes smoothly to 1.0
-        QTest.qWait(1200)
+        # Remainder of the slow gentle fade completes smoothly to 1.0
+        QTest.qWait(2700)
         assert abs(ctrl.current_factor() - 1.0) < 1e-6
     finally:
         ctrl.stop()
 
 
-def test_controller_gradual_unduck_easing_and_reduck_mid_fade(qapp):
+def test_controller_unduck_curve_kicks_in_gently_and_reducks_mid_fade(qapp):
     state = {"running": {"game"}, "fg": ""}
     events: list[tuple[float, str]] = []
     ctrl = DynamicVolumeController(
@@ -516,16 +515,20 @@ def test_controller_gradual_unduck_easing_and_reduck_mid_fade(qapp):
         events.clear()
         state["running"] = set()
         ctrl.evaluate_now()
-        # First tick rises very gently (smoothstep start), never snapping
-        assert events[0][0] < 0.22
+        # First tick kicks in faster than pure smoothstep (0.2058) yet gentler than linear (0.24)
+        assert ctrl._ramp_total_steps == 20
+        assert 0.215 < events[0][0] < 0.238
         assert ctrl._ramp_step_index == 1
 
-        # Advance 5 ticks (quarter of unduck fade) -> stays below linear midpoint (still gentle)
-        for _ in range(4):
+        # Advance to midpoint (10/20 ticks) -> stays gentler than pure cubic smoothstep
+        for _ in range(9):
             ctrl._on_ramp_tick()
-        assert 0.20 < events[-1][0] < 0.40
+        assert abs(events[-1][0] - 0.60) < 1e-6
+        mid_delta = events[-1][0] - events[-2][0]
+        pure_smoothstep_mid_delta = 0.80 * (0.50 - (0.45 * 0.45 * (3.0 - 2.0 * 0.45)))
+        assert mid_delta < pure_smoothstep_mid_delta
 
-        # Monotonically non-decreasing upward ticks until mid-fade
+        # Monotonically increasing upward ticks
         up_factors = [f for f, _ in events]
         assert up_factors == sorted(up_factors)
 
