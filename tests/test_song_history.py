@@ -476,3 +476,132 @@ def test_song_history_thumbnail_resolves_cached_cover_pixmap(qapp):
     assert row.thumb._pixmap is not None
     assert not row.thumb._pixmap.isNull()
     clear_cached_pixmaps()
+
+
+def test_song_history_local_track_caches_file_uri_cover_even_when_digest_deduped(qapp, tmp_path):
+    """Verify local file:// cover artwork is cached for history rows even after temp file unlink."""
+    import hashlib
+    import types
+
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from network.image_cache import clear_cached_pixmaps, get_cached_pixmap
+    from ui.history_popover import SongHistoryRowWidget
+    from ui.main_window import ListenMoePlayer
+
+    clear_cached_pixmaps()
+    try:
+        cover_path = tmp_path / "kikumoe_cover_test.png"
+        pm = QPixmap(48, 48)
+        pm.fill(QColor("#38BDF8"))
+        assert pm.save(str(cover_path), "PNG")
+
+        raw_bytes = cover_path.read_bytes()
+        digest = hashlib.blake2b(raw_bytes, digest_size=16).digest()
+        cover_uri = cover_path.as_uri()
+
+        # Simulate _on_local_track_changed having already decoded cover_bytes
+        # before LocalProvider emitted on_now_playing(cover_uri).
+        dummy = types.SimpleNamespace(
+            _current_cover_url=None,
+            _current_local_cover_sig=None,
+            _current_cover_bytes_digest=digest,
+            _current_cover_pixmap=pm,
+            _history_popover=None,
+            _set_album_cover_pixmap=lambda pix: None,
+        )
+
+        ListenMoePlayer._request_album_cover(dummy, cover_uri)
+        assert get_cached_pixmap(cover_uri) is not None
+
+        # Simulate LocalProvider unlinking the temp cover file on the next track switch.
+        cover_path.unlink()
+        assert not cover_path.exists()
+
+        entry = SongHistoryEntry(
+            title="Local Track",
+            artist="Local Artist",
+            station_id="local",
+            station_name="Local Music",
+            timestamp=time.time(),
+            art_url=cover_uri,
+        )
+        row = SongHistoryRowWidget(entry, i18n=I18n("it"))
+        assert row.thumb._pixmap is not None
+        assert not row.thumb._pixmap.isNull()
+    finally:
+        clear_cached_pixmaps()
+
+
+def test_song_history_on_now_playing_caches_local_cover_before_add_entry(qapp, tmp_path):
+    """Verify _on_now_playing caches file:// artwork before adding the song history entry."""
+    import types
+
+    from PyQt6.QtCore import QThread
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from network.image_cache import clear_cached_pixmaps
+    from ui.history_popover import SongHistoryPopover, SongHistoryRowWidget
+    from ui.main_window import ListenMoePlayer
+
+    clear_cached_pixmaps()
+    try:
+        cover_path = tmp_path / "kikumoe_cover_live.png"
+        pm = QPixmap(48, 48)
+        pm.fill(QColor("#A855F7"))
+        assert pm.save(str(cover_path), "PNG")
+        cover_uri = cover_path.as_uri()
+
+        history_mgr = SongHistoryManager(max_entries=10)
+        popover = SongHistoryPopover(history_mgr, i18n=I18n("it"))
+
+        class _SignalStub:
+            def emit(self, *args):
+                pass
+
+        dummy = types.SimpleNamespace(
+            _current_radio_provider="local",
+            _current_title="Track A",
+            _current_artist="Artist A",
+            _last_notified_track=None,
+            _current_duration_seconds=120,
+            _current_start_epoch=None,
+            _current_cover_ref=cover_uri,
+            _current_cover_url=None,
+            _current_local_cover_sig=None,
+            _current_cover_bytes_digest=None,
+            _current_cover_pixmap=None,
+            i18n=I18n("it"),
+            history_mgr=history_mgr,
+            label_refresh=_SignalStub(),
+            notify_tray=_SignalStub(),
+            backend_status_refresh=_SignalStub(),
+            song_progress=types.SimpleNamespace(
+                set_live_mode=lambda *_: None,
+                setMaximum=lambda *_: None,
+                setValue=lambda *_: None,
+                show=lambda: None,
+            ),
+            _get_bool=lambda *_: False,
+            _refresh_lyrics=lambda: None,
+            update_tray_texts=lambda: None,
+            thread=lambda: QThread.currentThread(),
+        )
+
+        # Simulate on_now_playing arriving when label_refresh hasn't run _request_album_cover yet.
+        ListenMoePlayer._on_now_playing(
+            dummy,
+            "Track A",
+            "Artist A",
+            120,
+            None,
+            cover_uri,
+        )
+
+        rows = popover.findChildren(SongHistoryRowWidget)
+        assert len(rows) == 1
+        assert rows[0].thumb._pixmap is not None
+        assert not rows[0].thumb._pixmap.isNull()
+    finally:
+        popover.deleteLater()
+        clear_cached_pixmaps()
