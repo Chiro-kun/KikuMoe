@@ -6,7 +6,7 @@ import logging
 from types import SimpleNamespace
 from typing import Any
 
-from PyQt6.QtCore import QPoint, QPointF, QSettings, Qt
+from PyQt6.QtCore import QParallelAnimationGroup, QPoint, QPointF, QSettings, Qt, qInstallMessageHandler
 from PyQt6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import QApplication
 
@@ -26,7 +26,7 @@ from core.constants import (
 )
 from core.i18n import I18n
 from ui.equalizer_popover import EqualizerPopover
-from ui.themes.cyber_moe import apply_theme_palette
+from ui.themes.cyber_moe import apply_theme_palette, get_cyber_moe_stylesheet
 from ui.widgets.history_button import EqualizerIconButton
 from ui.widgets.playback_controls import PlaybackControls
 
@@ -268,3 +268,68 @@ def test_playback_controls_eq_button_and_main_window_persistence(tmp_path) -> No
         assert pb.eq_button.is_active() is False
     finally:
         pb.deleteLater()
+
+
+def test_equalizer_preset_combo_no_qfont_pointsize_warning() -> None:
+    """Opening GlassComboBox under the app stylesheet must not emit QFont::setPointSize warnings."""
+    app = _get_qapp()
+    prev_qss = app.styleSheet()
+    qt_warnings: list[str] = []
+
+    def _capture(_msg_type: object, _ctx: object, msg: str | None) -> None:
+        if msg and "setPointSize" in msg:
+            qt_warnings.append(msg)
+
+    prev_handler = qInstallMessageHandler(_capture)
+    pop = EqualizerPopover(i18n=I18n("it"))
+    try:
+        app.setStyleSheet(get_cyber_moe_stylesheet())
+        assert pop.cmb_preset.font().pointSize() > 0
+        pop.cmb_preset.showPopup()
+        app.processEvents()
+        pop.cmb_preset.hidePopup()
+        assert qt_warnings == []
+    finally:
+        pop.close()
+        pop.deleteLater()
+        app.setStyleSheet(prev_qss)
+        qInstallMessageHandler(prev_handler)
+
+
+def test_equalizer_popover_open_and_close_animations(monkeypatch) -> None:
+    """Verify directional slide+fade open/close animations and outside-click dismissal."""
+    app = _get_qapp()
+    import ui.equalizer_popover as eq_mod
+
+    monkeypatch.setattr(eq_mod, "_IS_LINUX", False)
+    pop = EqualizerPopover(i18n=I18n("it"))
+    try:
+        pop.set_state(True, "rock", -3.5, list(EQ_PRESETS["rock"][1]))
+        pop.open_at(QPoint(120, 200), slide_from_bottom=True)
+        assert pop.isVisible()
+        assert pop._anim_group is not None
+        assert pop._anim_group.state() == QParallelAnimationGroup.State.Running
+        assert pop.fader_deck._anim_timer.isActive()
+        assert pop._app_filter_installed is True
+
+        # Clicking outside triggers animated exit rather than instant hide
+        outside_ev = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(5.0, 5.0),
+            QPointF(5.0, 5.0),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        pop.eventFilter(app, outside_ev)
+        assert pop._is_closing is True
+        assert pop._app_filter_installed is False
+        assert pop._anim_group is not None
+        assert pop._anim_group.state() == QParallelAnimationGroup.State.Running
+    finally:
+        if pop._anim_group is not None:
+            pop._anim_group.stop()
+        pop.fader_deck._anim_timer.stop()
+        pop.close()
+        pop.deleteLater()
+

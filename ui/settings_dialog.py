@@ -484,7 +484,7 @@ class GlassComboBox(QComboBox):
 
         font = QFont()
         font.setFamilies(["Segoe UI", "Inter", "Cantarell", "Ubuntu", "DejaVu Sans", "sans-serif"])
-        font.setPixelSize(12)
+        font.setPointSize(9)
         font.setWeight(QFont.Weight.Medium)
         self.setFont(font)
         list_view.setFont(font)
@@ -515,7 +515,7 @@ class GlassComboBox(QComboBox):
                 border: 1px solid rgba(255, 255, 255, 0.16);
                 border-radius: 10px;
                 color: {PALETTE["text_primary"]};
-                font-size: 12px;
+                font-size: 9pt;
                 font-weight: 500;
                 selection-background-color: transparent;
                 selection-color: #ffffff;
@@ -2946,7 +2946,7 @@ class SettingsDialog(QDialog):
                 border-radius: 10px;
                 padding: 5px;
                 color: {PALETTE["text_primary"]};
-                font-size: 12px;
+                font-size: 9pt;
                 font-weight: 500;
                 outline: none;
             }}

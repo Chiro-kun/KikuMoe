@@ -491,7 +491,7 @@ def get_cyber_moe_stylesheet(accent: Optional[str] = None) -> str:
         border: 1px solid {border_subtle};
         border-radius: 8px;
         padding: 5px 10px;
-        font-size: 12px;
+        font-size: 9pt;
         font-weight: 500;
     }}
     QSpinBox {{
@@ -520,7 +520,7 @@ def get_cyber_moe_stylesheet(accent: Optional[str] = None) -> str:
         background-color: {bg_popover};
         border: 1px solid rgba(255, 255, 255, 0.16);
         color: {text_primary};
-        font-size: 12px;
+        font-size: 9pt;
         font-weight: 500;
         selection-background-color: transparent;
         selection-color: #ffffff;

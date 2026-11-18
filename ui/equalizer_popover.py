@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Callable
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QElapsedTimer,
     QEvent,
+    QObject,
     QParallelAnimationGroup,
     QPoint,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
     Qt,
     QTimer,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
+    QCloseEvent,
     QColor,
     QFont,
     QHideEvent,
@@ -27,9 +32,11 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPaintEvent,
     QPen,
+    QPixmap,
     QWheelEvent,
 )
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -53,6 +60,8 @@ from audio.equalizer import (
 from core.i18n import I18n
 from ui.settings_dialog import GlassComboBox
 from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
+
+_IS_LINUX = sys.platform.startswith("linux")
 
 
 class _CompactPillSwitch(QPushButton):
@@ -156,6 +165,16 @@ class _EqFaderDeck(QWidget):
         self._enabled = False
         self._preamp_db = 0.0
         self._bands_db: list[float] = [0.0] * EQ_NUM_BANDS
+        self._display_preamp = 0.0
+        self._display_bands: list[float] = [0.0] * EQ_NUM_BANDS
+        self._start_preamp = 0.0
+        self._start_bands: list[float] = [0.0] * EQ_NUM_BANDS
+        self._anim_duration_ms = 190.0
+        self._anim_elapsed = QElapsedTimer()
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_curve_anim)
         self._hover_idx: int = self._IDX_NONE
         self._drag_idx: int = self._IDX_NONE
 
@@ -167,10 +186,47 @@ class _EqFaderDeck(QWidget):
         self.i18n = i18n
         self.update()
 
-    def set_values(self, enabled: bool, preamp_db: float, bands_db: list[float]) -> None:
+    def _start_curve_glide(self, duration_ms: float = 190.0) -> None:
+        self._start_preamp = self._display_preamp
+        self._start_bands = list(self._display_bands)
+        self._anim_duration_ms = max(16.0, float(duration_ms))
+        self._anim_elapsed.start()
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
+
+    def _tick_curve_anim(self) -> None:
+        t = min(1.0, max(0.0, float(self._anim_elapsed.elapsed()) / self._anim_duration_ms))
+        ease = 1.0 - ((1.0 - t) ** 3)
+        self._display_preamp = self._start_preamp + (self._preamp_db - self._start_preamp) * ease
+        self._display_bands = [
+            s + (dst - s) * ease for s, dst in zip(self._start_bands, self._bands_db)
+        ]
+        if t >= 1.0:
+            self._display_preamp = self._preamp_db
+            self._display_bands = list(self._bands_db)
+            self._anim_timer.stop()
+        self.update()
+
+    def set_values(
+        self, enabled: bool, preamp_db: float, bands_db: list[float], animate: bool = False
+    ) -> None:
         self._enabled = bool(enabled)
         self._preamp_db = clamp_eq_db(preamp_db)
         self._bands_db = normalize_eq_bands(bands_db)
+        if animate and self.isVisible():
+            self._start_curve_glide(duration_ms=190.0)
+        else:
+            self._anim_timer.stop()
+            self._display_preamp = self._preamp_db
+            self._display_bands = list(self._bands_db)
+        self.update()
+
+    def animate_entrance_from_flat(self) -> None:
+        """Glide faders smoothly from 0 dB baseline up into the active EQ curve on open."""
+        self._display_preamp = 0.0
+        self._display_bands = [0.0] * EQ_NUM_BANDS
+        if abs(self._preamp_db) >= 0.05 or any(abs(g) >= 0.05 for g in self._bands_db):
+            self._start_curve_glide(duration_ms=220.0)
         self.update()
 
     def _geometry_metrics(self) -> tuple[float, float, float, list[float], float]:
@@ -222,12 +278,16 @@ class _EqFaderDeck(QWidget):
         val = clamp_eq_db(new_db)
         if col_idx == self._IDX_PREAMP:
             if abs(val - self._preamp_db) >= 0.05:
+                self._anim_timer.stop()
                 self._preamp_db = val
+                self._display_preamp = val
                 self.preamp_changed.emit(val)
                 self.update()
         elif 0 <= col_idx < EQ_NUM_BANDS:
             if abs(val - self._bands_db[col_idx]) >= 0.05:
+                self._anim_timer.stop()
                 self._bands_db[col_idx] = val
+                self._display_bands[col_idx] = val
                 self.band_changed.emit(col_idx, val)
                 self.update()
 
@@ -368,7 +428,9 @@ class _EqFaderDeck(QWidget):
         painter.drawLine(QPointF(divider_x, top - 6.0), QPointF(divider_x, bot + 18.0))
 
         # 4. Smooth cubic spline EQ response curve across the 10 bands
-        pts = [QPointF(bx, self._db_to_y(g, top, bot)) for bx, g in zip(band_xs, self._bands_db)]
+        pts = [
+            QPointF(bx, self._db_to_y(g, top, bot)) for bx, g in zip(band_xs, self._display_bands)
+        ]
         curve = QPainterPath()
         curve.moveTo(pts[0])
         for i in range(len(pts) - 1):
@@ -419,9 +481,9 @@ class _EqFaderDeck(QWidget):
         val_font.setWeight(QFont.Weight.Bold)
 
         columns: list[tuple[int, float, float, str]] = [
-            (self._IDX_PREAMP, preamp_x, self._preamp_db, self.i18n.t("eq_preamp")),
+            (self._IDX_PREAMP, preamp_x, self._display_preamp, self.i18n.t("eq_preamp")),
         ]
-        for idx, (bx, g, lbl) in enumerate(zip(band_xs, self._bands_db, EQ_BAND_LABELS)):
+        for idx, (bx, g, lbl) in enumerate(zip(band_xs, self._display_bands, EQ_BAND_LABELS)):
             columns.append((idx, bx, g, lbl))
 
         for col_idx, cx, gain_db, label in columns:
@@ -501,7 +563,7 @@ class EqualizerPopover(QWidget):
         i18n: I18n | None = None,
     ) -> None:
         flags = (
-            Qt.WindowType.Popup
+            Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.NoDropShadowWindowHint
         )
@@ -520,6 +582,10 @@ class EqualizerPopover(QWidget):
         self._updating_ui: bool = False
 
         self._anim_group: QParallelAnimationGroup | None = None
+        self._blurred_backdrop: QPixmap | None = None
+        self._slide_from_bottom: bool = True
+        self._anchor_widget: QWidget | None = None
+        self._app_filter_installed: bool = False
         self._is_closing = False
         self._closed_emitted = False
 
@@ -642,8 +708,10 @@ class EqualizerPopover(QWidget):
         """Return the last remembered custom (preamp_db, bands_db)."""
         return self._custom_preamp_db, list(self._custom_bands_db)
 
-    def _emit_state(self) -> None:
-        self.fader_deck.set_values(self._eq_enabled, self._preamp_db, self._bands_db)
+    def _emit_state(self, animate_curve: bool = False) -> None:
+        self.fader_deck.set_values(
+            self._eq_enabled, self._preamp_db, self._bands_db, animate=animate_curve
+        )
         self.eq_changed.emit(
             self._eq_enabled,
             self._preset_id,
@@ -675,7 +743,7 @@ class EqualizerPopover(QWidget):
             self._select_combo_preset(pid)
         finally:
             self._updating_ui = False
-        self._emit_state()
+        self._emit_state(animate_curve=True)
 
     def _on_preset_index_changed(self, idx: int) -> None:
         if self._updating_ui or idx < 0:
@@ -739,29 +807,136 @@ class EqualizerPopover(QWidget):
         self.fader_deck.update()
         self.update()
 
-    def open_at(self, target_pos: QPoint) -> None:
-        """Position and smoothly animate popover entrance."""
+    def _install_app_filter(self) -> None:
+        if not self._app_filter_installed:
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+                self._app_filter_installed = True
+
+    def _remove_app_filter(self) -> None:
+        if self._app_filter_installed:
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self)
+            self._app_filter_installed = False
+
+    def _capture_backdrop(self, global_x: int, global_y: int) -> None:
+        """Capture and softly blur the underlying app window for Cyber-Glass depth."""
+        self._blurred_backdrop = None
+        parent = self.parentWidget()
+        if parent is None or not parent.isVisible():
+            return
+        source = parent.window()
+        if source is None:
+            return
+        local = source.mapFromGlobal(QPoint(global_x, global_y))
+        popup_rect = QRect(local, self.size())
+        visible = popup_rect.intersected(source.rect())
+        if visible.isEmpty():
+            return
+        ratio = max(1.0, float(source.devicePixelRatioF()))
+        snapshot = QPixmap(round(self.width() * ratio), round(self.height() * ratio))
+        snapshot.setDevicePixelRatio(ratio)
+        snapshot.fill(QColor(PALETTE.get("station_glass_fallback", PALETTE["bg_popover"])))
+        painter = QPainter(snapshot)
+        painter.drawPixmap(visible.topLeft() - local, source.grab(visible))
+        painter.end()
+        tiny = snapshot.scaled(
+            max(1, snapshot.width() // 14),
+            max(1, snapshot.height() // 14),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        blurred = tiny.scaled(
+            snapshot.width(),
+            snapshot.height(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        blurred.setDevicePixelRatio(ratio)
+        self._blurred_backdrop = blurred
+
+    def eventFilter(self, watched: QObject | None, event: QEvent | None) -> bool:
+        if event is None or not self.isVisible() or self._is_closing:
+            return super().eventFilter(watched, event)
+
+        etype = event.type()
+        if etype == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
+            gpos = event.globalPosition().toPoint()
+            if self.frameGeometry().contains(gpos):
+                return super().eventFilter(watched, event)
+            # Keep popover open when interacting with the preset dropdown list
+            combo_view = self.cmb_preset.view()
+            if combo_view is not None:
+                combo_popup = combo_view.window()
+                if (
+                    combo_popup is not None
+                    and combo_popup is not self
+                    and combo_popup.isVisible()
+                    and combo_popup.frameGeometry().contains(gpos)
+                ):
+                    return super().eventFilter(watched, event)
+            # Let the anchor EQ button toggle cleanly via its own clicked signal
+            if self._anchor_widget is not None and self._anchor_widget.isVisible():
+                anchor_tl = self._anchor_widget.mapToGlobal(QPoint(0, 0))
+                anchor_rect = QRect(anchor_tl, self._anchor_widget.size())
+                if anchor_rect.contains(gpos):
+                    return super().eventFilter(watched, event)
+            self._animate_exit()
+        elif etype == QEvent.Type.ApplicationDeactivate:
+            if not getattr(self.cmb_preset, "_popup_open", False):
+                self._animate_exit()
+
+        return super().eventFilter(watched, event)
+
+    def open_at(
+        self,
+        target_pos: QPoint,
+        slide_from_bottom: bool = True,
+        anchor_widget: QWidget | None = None,
+    ) -> None:
+        """Position and smoothly animate popover entrance (slide + fade + curve glide)."""
         self._is_closing = False
         self._closed_emitted = False
+        self._slide_from_bottom = bool(slide_from_bottom)
+        self._anchor_widget = anchor_widget
 
-        start_pos = QPoint(target_pos.x(), target_pos.y() - 10)
-        self.move(start_pos)
-        self.setWindowOpacity(0.0)
-        self.show()
+        self._capture_backdrop(target_pos.x(), target_pos.y())
 
         if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
             self._anim_group.stop()
 
+        if _IS_LINUX:
+            self.move(target_pos)
+            self.setWindowOpacity(1.0)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            self.fader_deck.animate_entrance_from_flat()
+            self._install_app_filter()
+            return
+
+        offset_y = 14 if self._slide_from_bottom else -14
+        start_pos = QPoint(target_pos.x(), target_pos.y() + offset_y)
+        self.move(start_pos)
+        self.setWindowOpacity(0.0)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.fader_deck.animate_entrance_from_flat()
+        self._install_app_filter()
+
         group = QParallelAnimationGroup(self)
 
         anim_pos = QPropertyAnimation(self, b"pos", group)
-        anim_pos.setDuration(190)
+        anim_pos.setDuration(210)
         anim_pos.setStartValue(start_pos)
         anim_pos.setEndValue(target_pos)
         anim_pos.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         anim_op = QPropertyAnimation(self, b"windowOpacity", group)
-        anim_op.setDuration(180)
+        anim_op.setDuration(200)
         anim_op.setStartValue(0.0)
         anim_op.setEndValue(1.0)
         anim_op.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -770,12 +945,24 @@ class EqualizerPopover(QWidget):
         group.start()
 
     def _animate_exit(self, callback: Callable[[], None] | None = None) -> None:
-        """Smooth slide-up & fade exit animation."""
+        """Smooth directional slide & fade exit animation."""
         if self._is_closing:
             return
         self._is_closing = True
+        self._remove_app_filter()
+        if getattr(self.cmb_preset, "_popup_open", False):
+            self.cmb_preset.hidePopup()
 
         if not self.isVisible():
+            if not self._closed_emitted:
+                self._closed_emitted = True
+                self.closed.emit()
+            if callback:
+                callback()
+            return
+
+        if _IS_LINUX:
+            self.hide()
             if not self._closed_emitted:
                 self._closed_emitted = True
                 self.closed.emit()
@@ -787,21 +974,23 @@ class EqualizerPopover(QWidget):
             self._anim_group.stop()
 
         group = QParallelAnimationGroup(self)
+        offset_y = 12 if self._slide_from_bottom else -12
 
         anim_pos = QPropertyAnimation(self, b"pos", group)
-        anim_pos.setDuration(120)
+        anim_pos.setDuration(145)
         anim_pos.setStartValue(self.pos())
-        anim_pos.setEndValue(QPoint(self.x(), self.y() - 8))
+        anim_pos.setEndValue(QPoint(self.x(), self.y() + offset_y))
         anim_pos.setEasingCurve(QEasingCurve.Type.InCubic)
 
         anim_op = QPropertyAnimation(self, b"windowOpacity", group)
-        anim_op.setDuration(120)
+        anim_op.setDuration(145)
         anim_op.setStartValue(self.windowOpacity())
         anim_op.setEndValue(0.0)
         anim_op.setEasingCurve(QEasingCurve.Type.InCubic)
 
         def _finish() -> None:
-            self.close()
+            self.hide()
+            self._is_closing = False
             if not self._closed_emitted:
                 self._closed_emitted = True
                 self.closed.emit()
@@ -813,10 +1002,18 @@ class EqualizerPopover(QWidget):
         group.start()
 
     def hideEvent(self, a0: QHideEvent | None) -> None:
+        self._remove_app_filter()
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit()
         super().hideEvent(a0)
+
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        self._remove_app_filter()
+        if not self._closed_emitted:
+            self._closed_emitted = True
+            self.closed.emit()
+        super().closeEvent(a0)
 
     def keyPressEvent(self, a0: QKeyEvent | None) -> None:
         if a0 is not None and a0.key() == Qt.Key.Key_Escape:
@@ -825,12 +1022,24 @@ class EqualizerPopover(QWidget):
         super().keyPressEvent(a0)
 
     def paintEvent(self, a0: QPaintEvent | None) -> None:
-        """Draw Cyber-Moe frosted dark glass popover frame."""
+        """Draw Cyber-Moe frosted dark glass popover frame with blurred backdrop."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         rect = QRectF(0.5, 0.5, float(self.width()) - 1.0, float(self.height()) - 1.0)
-        painter.setBrush(surface_qcolor(245, "bg_popover"))
+        path = QPainterPath()
+        path.addRoundedRect(rect, 12.0, 12.0)
+
+        painter.save()
+        painter.setClipPath(path)
+        if self._blurred_backdrop is not None:
+            painter.drawPixmap(QPointF(0.0, 0.0), self._blurred_backdrop)
+            painter.fillRect(rect, QColor(PALETTE.get("station_glass_overlay", "#c00c0e18")))
+        else:
+            painter.fillRect(rect, surface_qcolor(245, "bg_popover"))
+        painter.restore()
+
         painter.setPen(QPen(accent_qcolor(95), 1.0))
-        painter.drawRoundedRect(rect, 12.0, 12.0)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
         painter.end()

@@ -4468,6 +4468,7 @@ class ListenMoePlayer(QWidget):
                 hasattr(self, "_eq_popover")
                 and self._eq_popover is not None
                 and self._eq_popover.isVisible()
+                and not getattr(self._eq_popover, "_is_closing", False)
             ):
                 self._eq_popover._animate_exit()
                 return
@@ -4495,18 +4496,24 @@ class ListenMoePlayer(QWidget):
                 target_x = btn_tl.x() + self.eq_button.width() - pop_w + 12
                 target_y = btn_tl.y() - pop_h - 8
 
+                slide_from_bottom = True
                 screen = self.screen() or QApplication.primaryScreen()
                 if screen is not None:
                     avail = screen.availableGeometry()
                     if target_y < avail.top() + 8:
                         target_y = btn_tl.y() + self.eq_button.height() + 8
+                        slide_from_bottom = False
                     target_x = max(avail.left() + 8, min(target_x, avail.right() - pop_w - 8))
                     target_y = max(avail.top() + 8, min(target_y, avail.bottom() - pop_h - 8))
                 else:
                     target_x = max(10, target_x)
                     target_y = max(10, target_y)
 
-                self._eq_popover.open_at(QPoint(target_x, target_y))
+                self._eq_popover.open_at(
+                    QPoint(target_x, target_y),
+                    slide_from_bottom=slide_from_bottom,
+                    anchor_widget=self.eq_button,
+                )
             else:
                 geo = self.geometry()
                 self._eq_popover.open_at(QPoint(geo.x() + 20, geo.y() + 80))

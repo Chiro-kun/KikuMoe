@@ -50,7 +50,7 @@ jobs:
         run: pipx install poetry==2.5.1
 
       - name: Set up Python
-        uses: actions/setup-python@42375524e23c212d93fbdf74499a350bfb567436 # v5.3.0
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
           cache: 'poetry'
@@ -100,7 +100,7 @@ jobs:
         run: pipx install poetry==2.5.1
 
       - name: Set up Python
-        uses: actions/setup-python@42375524e23c212d93fbdf74499a350bfb567436 # v5.3.0
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
           cache: 'poetry'
@@ -132,7 +132,7 @@ jobs:
           QT_QPA_PLATFORM=offscreen timeout 20 dist/*.AppImage --appimage-extract-and-run --check-audio
 
       - name: Upload Linux AppImage artifact
-        uses: actions/upload-artifact@654628066af4008efd573fdaf46659533399b0ba # v4.3.3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: KikuMoe-Linux-AppImage
           path: dist/*.AppImage
@@ -151,7 +151,7 @@ jobs:
         run: pipx install poetry==2.5.1
 
       - name: Set up Python
-        uses: actions/setup-python@42375524e23c212d93fbdf74499a350bfb567436 # v5.3.0
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
           cache: 'poetry'
@@ -191,7 +191,7 @@ jobs:
           Compress-Archive -Path "$zipDir\*" -DestinationPath "dist\KikuMoe-$appVersion-Windows-x64.zip" -Force
 
       - name: Upload Windows ZIP artifact
-        uses: actions/upload-artifact@654628066af4008efd573fdaf46659533399b0ba # v4.3.3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: KikuMoe-Windows-ZIP
           path: dist/*.zip
@@ -199,7 +199,7 @@ jobs:
           retention-days: 7
 
       - name: Upload Windows EXE artifact
-        uses: actions/upload-artifact@654628066af4008efd573fdaf46659533399b0ba # v4.3.3
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: KikuMoe-Windows-EXE
           path: dist/*.exe
@@ -227,7 +227,7 @@ jobs:
           fi
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@fa0a91b85d4f404e4b4e04edac75f914f1496b88 # v4.1.8
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: release-artifacts/
           merge-multiple: true
