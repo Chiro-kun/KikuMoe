@@ -497,3 +497,44 @@ def test_ttml_xml_guard_rejects_doctype_beyond_512_bytes():
         '<tt><body><div><p begin="00:01.00">Hello</p></div></body></tt>'
     )
     assert ttml_to_lrc(malicious_ttml) == ""
+
+
+def test_settings_dialog_apply_detects_lyrics_provider_and_api_key_changes(
+    qapp, tmp_path, monkeypatch
+):
+    """Verify changing lyrics provider or API key and clicking Apply saves instead of unchanged."""
+    from PyQt6.QtCore import QSettings
+
+    from core.constants import (
+        KEY_BETTERLYRICS_API_KEY,
+        KEY_LYRICS_PROVIDER,
+        LYRICS_PROVIDER_BETTERLYRICS,
+    )
+    from ui import settings_dialog as sd_mod
+    from ui.settings_dialog import SettingsDialog
+
+    settings = QSettings(str(tmp_path / "lyrics_apply.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(sd_mod, "QSettings", lambda *args: settings)
+
+    dlg = SettingsDialog(embedded=True)
+    toasts: list[str] = []
+    monkeypatch.setattr(dlg, "_show_apply_toast", toasts.append)
+    changed_signals: list[bool] = []
+    dlg.settings_changed.connect(lambda: changed_signals.append(True))
+
+    try:
+        idx = dlg.cmb_lyrics_provider.findData(LYRICS_PROVIDER_BETTERLYRICS)
+        assert idx >= 0
+        dlg.cmb_lyrics_provider.setCurrentIndex(idx)
+        dlg._on_apply()
+        assert toasts[-1] == "settings_saved"
+        assert len(changed_signals) == 1
+        assert settings.value(KEY_LYRICS_PROVIDER) == LYRICS_PROVIDER_BETTERLYRICS
+
+        dlg.txt_betterlyrics_api_key.setText("my-api-key")
+        dlg._on_apply()
+        assert toasts[-1] == "settings_saved"
+        assert len(changed_signals) == 2
+        assert settings.value(KEY_BETTERLYRICS_API_KEY) == "my-api-key"
+    finally:
+        dlg.deleteLater()

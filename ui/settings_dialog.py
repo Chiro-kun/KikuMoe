@@ -2315,6 +2315,13 @@ class SettingsDialog(QDialog):
             self.chk_ambient_mode.setChecked(
                 self.settings.value(KEY_AMBIENT_MODE_ENABLED, def_amb) == "true"
             )
+            if hasattr(self, "chk_visualizer"):
+                def_vis = "true" if DEFAULT_VISUALIZER_ENABLED else "false"
+                self.chk_visualizer.blockSignals(True)
+                self.chk_visualizer.setChecked(
+                    self.settings.value(KEY_VISUALIZER_ENABLED, def_vis) == "true"
+                )
+                self.chk_visualizer.blockSignals(False)
 
             target_lang_idx = 0 if lang == "it" else 1
             if self.cmb_lang.currentIndex() != target_lang_idx:
@@ -2423,6 +2430,24 @@ class SettingsDialog(QDialog):
             self.chk_dev_show_dev.setChecked(
                 self.settings.value(KEY_DEV_CONSOLE_SHOW_DEV, "false") == "true"
             )
+            if hasattr(self, "chk_update_startup"):
+                self.chk_update_startup.setChecked(
+                    self.settings.value(KEY_UPDATE_CHECK_ON_STARTUP, "true") == "true"
+                )
+            if hasattr(self, "cmb_update_channel"):
+                default_channel = (
+                    UPDATE_CHANNEL_BETA
+                    if ("-" in APP_VERSION or "beta" in APP_VERSION.lower())
+                    else UPDATE_CHANNEL_STABLE
+                )
+                saved_upd_ch = (
+                    str(self.settings.value(KEY_UPDATE_CHANNEL, default_channel)).strip().lower()
+                )
+                for i in range(self.cmb_update_channel.count()):
+                    if self.cmb_update_channel.itemData(i) == saved_upd_ch:
+                        if self.cmb_update_channel.currentIndex() != i:
+                            self.cmb_update_channel.setCurrentIndex(i)
+                        break
             if not self._devices_populated and not self._enumerating_devices:
                 self._device_enum_timer.start(250)
             if (
@@ -2685,6 +2710,16 @@ class SettingsDialog(QDialog):
             "show_sleep_timer": self.chk_show_sleep_timer.isChecked(),
             "sleep_stop": self.chk_sleep_stop.isChecked(),
             "session_timer": self.chk_session_timer.isChecked(),
+            "lyrics_provider": (
+                self.cmb_lyrics_provider.currentData() or DEFAULT_LYRICS_PROVIDER
+                if hasattr(self, "cmb_lyrics_provider")
+                else DEFAULT_LYRICS_PROVIDER
+            ),
+            "betterlyrics_api_key": (
+                self.txt_betterlyrics_api_key.text().strip()
+                if hasattr(self, "txt_betterlyrics_api_key")
+                else ""
+            ),
             "dev_console": self.chk_dev_console.isChecked(),
             "dev_show": self.chk_dev_show_dev.isChecked(),
             "language": self.cmb_lang.currentIndex(),
