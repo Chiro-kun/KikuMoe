@@ -6,7 +6,14 @@ import logging
 from types import SimpleNamespace
 from typing import Any
 
-from PyQt6.QtCore import QParallelAnimationGroup, QPoint, QPointF, QSettings, Qt, qInstallMessageHandler
+from PyQt6.QtCore import (
+    QParallelAnimationGroup,
+    QPoint,
+    QPointF,
+    QSettings,
+    Qt,
+    qInstallMessageHandler,
+)
 from PyQt6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import QApplication
 
@@ -332,4 +339,3 @@ def test_equalizer_popover_open_and_close_animations(monkeypatch) -> None:
         pop.fader_deck._anim_timer.stop()
         pop.close()
         pop.deleteLater()
-
