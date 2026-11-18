@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
 
 from core.i18n import I18n, resolve_i18n
 from ui.themes.cyber_moe import PALETTE, accent_qcolor
+from ui.widgets.history_button import EqualizerIconButton
 
 
 class AnimatedVectorButton(QPushButton):
@@ -533,6 +534,7 @@ class PlaybackControls(QFrame):
     volume_changed = pyqtSignal(int)
     mute_toggled = pyqtSignal(bool)
     autoplay_toggled = pyqtSignal(bool)
+    eq_clicked = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None, i18n: Optional[I18n] = None):
         super().__init__(parent)
@@ -629,9 +631,16 @@ class PlaybackControls(QFrame):
             " font-size: 11px; font-weight: 700;"
         )
 
+        self.eq_button = EqualizerIconButton(self)
+        self.eq_button.setObjectName("eqToggleButton")
+        self.eq_button.setToolTip(self._i18n.t("eq_button"))
+        self.eq_button.setAccessibleName(self._i18n.t("eq_button"))
+        self.eq_button.clicked.connect(self.eq_clicked.emit)
+
         vol_row.addWidget(self.speaker_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         vol_row.addWidget(self.volume_slider, 1, Qt.AlignmentFlag.AlignVCenter)
         vol_row.addWidget(self.volume_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        vol_row.addWidget(self.eq_button, 0, Qt.AlignmentFlag.AlignVCenter)
 
         root.addLayout(vol_row)
 
@@ -651,6 +660,8 @@ class PlaybackControls(QFrame):
         self.btn_next.setToolTip(i18n.t("tt_next_track"))
         self.btn_queue.setToolTip(i18n.t("tt_queue"))
         self.speaker_btn.setToolTip(i18n.t("tt_mute_toggle"))
+        self.eq_button.setToolTip(i18n.t("eq_button"))
+        self.eq_button.setAccessibleName(i18n.t("eq_button"))
         self.set_autoplay_text(i18n.t("settings_autoplay"))
 
     def _on_hero_clicked(self) -> None:
@@ -750,4 +761,5 @@ class PlaybackControls(QFrame):
         self.btn_stop.update()
         self.speaker_btn.update()
         self.volume_slider.update()
+        self.eq_button.refresh_theme()
         self.update()

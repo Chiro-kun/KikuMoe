@@ -398,6 +398,27 @@ I18N: dict[str, dict[str, str]] = {
         "dynamic_volume_ducked_tooltip": (
             "Volume ridotto al {effective}% per {app} (volume base: {base}%)"
         ),
+        # Equalizzatore audio (10 bande ISO)
+        "eq_button": "Equalizzatore",
+        "eq_title": "Equalizzatore",
+        "eq_enable": "Attivo",
+        "eq_reset": "Reset",
+        "eq_reset_tip": "Ripristina tutte le bande e il preamp a 0.0 dB (Flat)",
+        "eq_preamp": "Pre",
+        "eq_preamp_tip": "Preamplificatore ({val:+.1f} dB) — doppio clic per azzerare",
+        "eq_band_tip": "{freq} Hz ({val:+.1f} dB) — doppio clic per azzerare",
+        "eq_preset_flat": "Flat",
+        "eq_preset_bass_boost": "Bass Boost",
+        "eq_preset_treble_boost": "Treble Boost",
+        "eq_preset_pop": "Pop",
+        "eq_preset_anime_jpop": "Anime / J-Pop",
+        "eq_preset_rock": "Rock",
+        "eq_preset_electronic": "Elettronica",
+        "eq_preset_vocal": "Vocale",
+        "eq_preset_headphones": "Cuffie",
+        "eq_preset_classical": "Classica",
+        "eq_preset_night_soft": "Notte / Soft",
+        "eq_preset_custom": "Personalizzato",
     },
     "en": {
         "lyrics_button": "Lyrics",
@@ -780,6 +801,27 @@ I18N: dict[str, dict[str, str]] = {
         "dynamic_volume_ducked_tooltip": (
             "Volume ducked to {effective}% for {app} (base volume: {base}%)"
         ),
+        # Audio Equalizer (10-band ISO)
+        "eq_button": "Equalizer",
+        "eq_title": "Equalizer",
+        "eq_enable": "On",
+        "eq_reset": "Reset",
+        "eq_reset_tip": "Reset all bands and preamp to 0.0 dB (Flat)",
+        "eq_preamp": "Pre",
+        "eq_preamp_tip": "Preamp ({val:+.1f} dB) — double-click to reset",
+        "eq_band_tip": "{freq} Hz ({val:+.1f} dB) — double-click to reset",
+        "eq_preset_flat": "Flat",
+        "eq_preset_bass_boost": "Bass Boost",
+        "eq_preset_treble_boost": "Treble Boost",
+        "eq_preset_pop": "Pop",
+        "eq_preset_anime_jpop": "Anime / J-Pop",
+        "eq_preset_rock": "Rock",
+        "eq_preset_electronic": "Electronic",
+        "eq_preset_vocal": "Vocal",
+        "eq_preset_headphones": "Headphones",
+        "eq_preset_classical": "Classical",
+        "eq_preset_night_soft": "Night / Soft",
+        "eq_preset_custom": "Custom",
     },
 }
 

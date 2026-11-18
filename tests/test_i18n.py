@@ -12,6 +12,7 @@ from core.local_playlist import LocalPlaylistManager
 from core.updater import ReleaseInfo, SemVer
 from ui.about_dialog import AboutDialog
 from ui.custom_titlebar import CustomTitleBar
+from ui.equalizer_popover import EqualizerPopover
 from ui.local_queue_dialog import LocalQueueDialog
 from ui.update_dialog import UpdateDialog
 from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
@@ -301,12 +302,23 @@ def test_widgets_render_en_and_retranslate() -> None:
     pb = PlaybackControls(i18n=I18n("en"))
     assert pb.hero_play.toolTip() == I18N["en"]["tt_play_pause"]
     assert pb.btn_queue.toolTip() == I18N["en"]["tt_queue"]
+    assert pb.eq_button.toolTip() == I18N["en"]["eq_button"]
     assert pb.chk_autoplay.text() == I18N["en"]["settings_autoplay"]
     pb.apply_translations(I18n("it"))
     assert pb.hero_play.toolTip() == I18N["it"]["tt_play_pause"]
     assert pb.btn_queue.toolTip() == I18N["it"]["tt_queue"]
+    assert pb.eq_button.toolTip() == I18N["it"]["eq_button"]
     assert pb.chk_autoplay.text() == I18N["it"]["settings_autoplay"]
     pb.close()
+
+    # EqualizerPopover in EN -> retranslate IT
+    eq_pop = EqualizerPopover(i18n=I18n("en"))
+    assert eq_pop.lbl_title.text() == I18N["en"]["eq_title"]
+    assert eq_pop.btn_reset.text() == I18N["en"]["eq_reset"]
+    eq_pop.retranslate(I18n("it"))
+    assert eq_pop.lbl_title.text() == I18N["it"]["eq_title"]
+    assert eq_pop.btn_reset.text() == I18N["it"]["eq_reset"]
+    eq_pop.close()
 
     # SleepTimerWidget in EN -> retranslate IT
     sleep_w = SleepTimerWidget(i18n=I18n("en"))

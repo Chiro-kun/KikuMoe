@@ -172,3 +172,53 @@ class SleepIconButton(LyricsButton):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fg)
         painter.drawPath(crescent)
+
+
+class EqualizerIconButton(HistoryIconButton):
+    """Equalizer popover trigger with 3-slider vector glyph and active-EQ indicator."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._eq_enabled = False
+        self._custom_accent: str | None = None
+
+    def set_eq_enabled(self, enabled: bool) -> None:
+        val = bool(enabled)
+        if self._eq_enabled != val:
+            self._eq_enabled = val
+            self.update()
+
+    def is_eq_enabled(self) -> bool:
+        return self._eq_enabled
+
+    def refresh_theme(self) -> None:
+        self._custom_accent = None
+        self.update()
+
+    def _draw_icon(self, painter, cx, cy, fg):
+        # 3 vertical equalizer tracks with circular fader knobs
+        xs = (cx - 4.5, cx, cx + 4.5)
+        knob_ys = (cy + 1.8, cy - 2.4, cy + 0.6)
+        top_y = cy - 5.2
+        bot_y = cy + 5.2
+
+        track_pen = QPen(fg, 1.45, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(track_pen)
+        for x in xs:
+            painter.drawLine(QPointF(x, top_y), QPointF(x, bot_y))
+
+        # Knob color: highlight with accent when EQ is enabled and popover is closed
+        if self._eq_enabled and not self._active:
+            knob_col = QColor(PALETTE.get("accent_hover", "#FF3388"))
+        else:
+            knob_col = fg
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(knob_col)
+        for x, ky in zip(xs, knob_ys):
+            painter.drawEllipse(QPointF(x, ky), 1.9, 1.9)
+
+        # Small corner status dot when EQ is enabled and popover is closed
+        if self._eq_enabled and not self._active:
+            painter.setBrush(QColor(PALETTE.get("accent", "#EC186C")))
+            painter.drawEllipse(QPointF(float(self.width()) - 5.0, 5.0), 2.1, 2.1)

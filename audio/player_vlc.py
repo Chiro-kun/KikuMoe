@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from audio.equalizer import EQ_NUM_BANDS, clamp_eq_db, normalize_eq_bands
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import PORTAUDIO_LOCK, get_logger, silence_stderr
 
@@ -221,6 +222,9 @@ class PlayerVLC:
         self._cached_device_val: str = ""
         self._cached_device_name: str | None = None
         self._applied_audio_device: str | None = None
+        self._eq_enabled: bool = False
+        self._eq_preamp: float = 0.0
+        self._eq_bands: list[float] = [0.0] * EQ_NUM_BANDS
         self.log = get_logger("PlayerVLC")
         # Build dynamic User-Agent similar to ffmpeg backend
         try:
@@ -539,6 +543,7 @@ class PlayerVLC:
                         self.log.debug("[DEBUG] play_url: set_media + play")
                         self.player.set_media(media)
                         self._apply_linux_audio_device()
+                        self._apply_equalizer_to_vlc()
                         self._stopping = False
                         ret = self.player.play()
                         self.log.debug("[DEBUG] play_url: play() returned %s", ret)
@@ -629,6 +634,34 @@ class PlayerVLC:
     def set_audio_tap(self, callback: Any | None) -> None:
         """Interfaccia opzionale tap audio (non implementata per VLC)."""
         self._audio_tap = callback
+
+    def _apply_equalizer_to_vlc(self) -> None:
+        if not self.is_ready() or vlc is None or self.player is None:
+            return
+        try:
+            if not self._eq_enabled:
+                self.player.set_equalizer(None)
+                return
+            eq_cls = getattr(vlc, "AudioEqualizer", None)
+            if eq_cls is None:
+                return
+            eq = eq_cls()
+            eq.set_preamp(float(self._eq_preamp))
+            for idx, gain in enumerate(self._eq_bands):
+                eq.set_amp_at_index(float(gain), idx)
+            self.player.set_equalizer(eq)
+        except Exception as e:
+            self.log.debug("[VLC] Could not apply AudioEqualizer: %s", e)
+
+    def set_equalizer(
+        self, enabled: bool, preamp_db: float, bands_db: list[float] | tuple[float, ...]
+    ) -> None:
+        """Update real-time 10-band EQ via libVLC AudioEqualizer."""
+        with self._lock:
+            self._eq_enabled = bool(enabled)
+            self._eq_preamp = clamp_eq_db(preamp_db)
+            self._eq_bands = normalize_eq_bands(bands_db)
+            self._apply_equalizer_to_vlc()
 
     def get_volume(self) -> int:
         return self._volume
@@ -811,6 +844,7 @@ class PlayerVLC:
                 if self.is_ready():
                     self.set_volume(current_volume)
                     self.set_mute(current_mute)
+                    self._apply_equalizer_to_vlc()
             except Exception:
                 pass
             finally:

@@ -55,6 +55,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from audio.equalizer import (
+    EQ_PRESET_CUSTOM,
+    EQ_PRESET_ORDER,
+    EQ_PRESETS,
+    clamp_eq_db,
+    normalize_eq_bands,
+    parse_eq_bands,
+    serialize_eq_bands,
+)
 from audio.player_ffmpeg import PlayerFFmpeg
 from audio.player_mpv import PlayerMPV
 from audio.player_vlc import PlayerVLC
@@ -79,6 +88,9 @@ from core.constants import (
     DEFAULT_DYNAMIC_VOLUME_ENABLED,
     DEFAULT_DYNAMIC_VOLUME_LEVEL,
     DEFAULT_DYNAMIC_VOLUME_MODE,
+    DEFAULT_EQ_ENABLED,
+    DEFAULT_EQ_PREAMP,
+    DEFAULT_EQ_PRESET,
     DEFAULT_LYRICS_PROVIDER,
     DEFAULT_STATION,
     DEFAULT_THEME,
@@ -101,6 +113,12 @@ from core.constants import (
     KEY_DYNAMIC_VOLUME_ENABLED,
     KEY_DYNAMIC_VOLUME_LEVEL,
     KEY_DYNAMIC_VOLUME_MODE,
+    KEY_EQ_BANDS,
+    KEY_EQ_CUSTOM_BANDS,
+    KEY_EQ_CUSTOM_PREAMP,
+    KEY_EQ_ENABLED,
+    KEY_EQ_PREAMP,
+    KEY_EQ_PRESET,
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
@@ -161,6 +179,7 @@ from ui.about_dialog import AboutDialog
 from ui.close_dialog import CloseConfirmDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
+from ui.equalizer_popover import EqualizerPopover
 from ui.history_popover import SongHistoryPopover
 from ui.local_queue_dialog import LocalQueueDialog
 from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
@@ -585,6 +604,7 @@ class ListenMoePlayer(QWidget):
         self._about_dialog: Optional[AboutDialog] = None
         self.history_mgr = SongHistoryManager(max_entries=100, parent=self)
         self._history_popover: Optional[SongHistoryPopover] = None
+        self._eq_popover: Optional[EqualizerPopover] = None
         self.local_playlist = LocalPlaylistManager(self)
         self._queue_dialog: Optional[LocalQueueDialog] = None
         self._local_prompt_dialog: Optional[QDialog] = None
@@ -1371,6 +1391,7 @@ class ListenMoePlayer(QWidget):
         self.playback_controls.volume_changed.connect(self.change_volume)
         self.playback_controls.mute_toggled.connect(self.toggle_mute)
         self.playback_controls.autoplay_toggled.connect(self._on_autoplay_toggled)
+        self.playback_controls.eq_clicked.connect(self.toggle_eq_popover)
 
         # Backward compatibility references
         self.play_button = self.playback_controls.hero_play
@@ -1378,6 +1399,7 @@ class ListenMoePlayer(QWidget):
         self.stop_button = self.playback_controls.btn_stop
         self.volume_slider = self.playback_controls.volume_slider
         self.mute_button = self.playback_controls.speaker_btn
+        self.eq_button = self.playback_controls.eq_button
         self.volume_value_label = self.playback_controls.volume_label
         self.volume_label = QLabel("")
         self.volume_label.setVisible(False)
@@ -1392,6 +1414,7 @@ class ListenMoePlayer(QWidget):
 
         self.playback_controls.set_autoplay(self._get_bool(KEY_AUTOPLAY, False))
         self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
+        self.eq_button.set_eq_enabled(self._get_bool(KEY_EQ_ENABLED, DEFAULT_EQ_ENABLED))
 
         self._layout.addWidget(self.playback_controls)
 
@@ -1562,6 +1585,7 @@ class ListenMoePlayer(QWidget):
                 self.mute_button.setChecked(is_muted)
             self.player.set_mute(is_muted)
             self.mute_button.setText(self.i18n.t("unmute") if is_muted else self.i18n.t("mute"))
+            self._apply_equalizer_to_player()
         except Exception:
             pass
 
@@ -3459,6 +3483,8 @@ class ListenMoePlayer(QWidget):
             self.playback_controls.apply_translations(self.i18n)
         if getattr(self, "_queue_dialog", None) is not None:
             self._queue_dialog.retranslate(self.i18n)
+        if getattr(self, "_eq_popover", None) is not None:
+            self._eq_popover.retranslate(self.i18n)
         # Update dev console translator and dialog texts if open
         try:
             if hasattr(self, "dev_console") and self.dev_console:
@@ -3667,6 +3693,9 @@ class ListenMoePlayer(QWidget):
             history_pop = getattr(self, "_history_popover", None)
             if history_pop is not None:
                 history_pop.update()
+            eq_pop = getattr(self, "_eq_popover", None)
+            if eq_pop is not None and hasattr(eq_pop, "refresh_theme"):
+                eq_pop.refresh_theme()
             settings_dlg = getattr(self, "_settings_dlg", None)
             if settings_dlg is not None and hasattr(settings_dlg, "refresh_theme"):
                 settings_dlg.refresh_theme()
@@ -4359,6 +4388,138 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _load_equalizer_state(
+        self,
+    ) -> tuple[bool, str, float, list[float], float, list[float]]:
+        """Read persisted 10-band EQ state from QSettings."""
+        enabled = self._get_bool(KEY_EQ_ENABLED, DEFAULT_EQ_ENABLED)
+        preset = (
+            str(self.settings.value(KEY_EQ_PRESET, DEFAULT_EQ_PRESET) or DEFAULT_EQ_PRESET)
+            .strip()
+            .lower()
+        )
+        if preset not in EQ_PRESET_ORDER:
+            preset = DEFAULT_EQ_PRESET
+        try:
+            preamp = clamp_eq_db(float(self.settings.value(KEY_EQ_PREAMP, DEFAULT_EQ_PREAMP)))
+        except (TypeError, ValueError):
+            preamp = DEFAULT_EQ_PREAMP
+        raw_bands = self.settings.value(KEY_EQ_BANDS, "")
+        bands = parse_eq_bands(raw_bands)
+        if preset != EQ_PRESET_CUSTOM and preset in EQ_PRESETS and not raw_bands:
+            p_pre, p_bands = EQ_PRESETS[preset]
+            preamp = clamp_eq_db(p_pre)
+            bands = normalize_eq_bands(p_bands)
+        try:
+            custom_preamp = clamp_eq_db(float(self.settings.value(KEY_EQ_CUSTOM_PREAMP, preamp)))
+        except (TypeError, ValueError):
+            custom_preamp = preamp
+        raw_custom_bands = self.settings.value(KEY_EQ_CUSTOM_BANDS, "")
+        custom_bands = parse_eq_bands(raw_custom_bands) if raw_custom_bands else list(bands)
+        return enabled, preset, preamp, bands, custom_preamp, custom_bands
+
+    def _apply_equalizer_to_player(self) -> None:
+        """Apply persisted EQ configuration to the active audio backend."""
+        try:
+            enabled, _preset, preamp, bands, _cpre, _cbands = self._load_equalizer_state()
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_eq_enabled(enabled)
+            if (
+                hasattr(self, "player")
+                and self.player is not None
+                and hasattr(self.player, "set_equalizer")
+            ):
+                self.player.set_equalizer(enabled, preamp, bands)
+        except Exception as e:
+            self.log.debug("[UI] _apply_equalizer_to_player failed: %s", e)
+
+    def _on_eq_changed(
+        self, enabled: bool, preset_id: str, preamp_db: float, bands_db: list[float]
+    ) -> None:
+        """Persist real-time EQ changes and push them immediately to the active backend."""
+        try:
+            clean_pre = clamp_eq_db(preamp_db)
+            clean_bands = normalize_eq_bands(bands_db)
+            self.settings.setValue(KEY_EQ_ENABLED, "true" if enabled else "false")
+            self.settings.setValue(KEY_EQ_PRESET, str(preset_id))
+            self.settings.setValue(KEY_EQ_PREAMP, clean_pre)
+            self.settings.setValue(KEY_EQ_BANDS, serialize_eq_bands(clean_bands))
+            if preset_id == EQ_PRESET_CUSTOM:
+                self.settings.setValue(KEY_EQ_CUSTOM_PREAMP, clean_pre)
+                self.settings.setValue(KEY_EQ_CUSTOM_BANDS, serialize_eq_bands(clean_bands))
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_eq_enabled(bool(enabled))
+            if (
+                hasattr(self, "player")
+                and self.player is not None
+                and hasattr(self.player, "set_equalizer")
+            ):
+                self.player.set_equalizer(bool(enabled), clean_pre, clean_bands)
+        except Exception as e:
+            self.log.debug("[UI] _on_eq_changed failed: %s", e)
+
+    def toggle_eq_popover(self) -> None:
+        """Open or close the 10-band Cyber-Glass Equalizer popover."""
+        try:
+            if not self.isVisible():
+                self.showNormal()
+
+            if (
+                hasattr(self, "_eq_popover")
+                and self._eq_popover is not None
+                and self._eq_popover.isVisible()
+            ):
+                self._eq_popover._animate_exit()
+                return
+
+            if not hasattr(self, "_eq_popover") or self._eq_popover is None:
+                self._eq_popover = EqualizerPopover(parent=self, i18n=self.i18n)
+                self._eq_popover.eq_changed.connect(self._on_eq_changed)
+                self._eq_popover.closed.connect(self._on_eq_popover_closed)
+
+            enabled, preset, preamp, bands, c_pre, c_bands = self._load_equalizer_state()
+            self._eq_popover.set_state(
+                enabled=enabled,
+                preset_id=preset,
+                preamp_db=preamp,
+                bands_db=bands,
+                custom_preamp_db=c_pre,
+                custom_bands_db=c_bands,
+            )
+
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_active(True)
+                btn_tl = self.eq_button.mapToGlobal(QPoint(0, 0))
+                pop_w = self._eq_popover.width()
+                pop_h = self._eq_popover.height()
+                target_x = btn_tl.x() + self.eq_button.width() - pop_w + 12
+                target_y = btn_tl.y() - pop_h - 8
+
+                screen = self.screen() or QApplication.primaryScreen()
+                if screen is not None:
+                    avail = screen.availableGeometry()
+                    if target_y < avail.top() + 8:
+                        target_y = btn_tl.y() + self.eq_button.height() + 8
+                    target_x = max(avail.left() + 8, min(target_x, avail.right() - pop_w - 8))
+                    target_y = max(avail.top() + 8, min(target_y, avail.bottom() - pop_h - 8))
+                else:
+                    target_x = max(10, target_x)
+                    target_y = max(10, target_y)
+
+                self._eq_popover.open_at(QPoint(target_x, target_y))
+            else:
+                geo = self.geometry()
+                self._eq_popover.open_at(QPoint(geo.x() + 20, geo.y() + 80))
+        except Exception as e:
+            self.log.debug("[UI] toggle_eq_popover failed: %s", e)
+
+    def _on_eq_popover_closed(self) -> None:
+        try:
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_active(False)
+        except Exception:
+            pass
+
     def _on_track_labels_clicked(self) -> None:
         """Handler for click on track title, artist, or hover group."""
         if self._is_local_mode() and self.local_playlist.is_empty():
@@ -4651,6 +4812,7 @@ class ListenMoePlayer(QWidget):
                         )
                     self._apply_effective_volume(self.volume_slider.value())
                     self.player.set_mute(self.mute_button.isChecked())
+                    self._apply_equalizer_to_player()
                     self.update_vlc_status_label()
                     if resume_after_recreate:
                         QTimer.singleShot(200, self.play_stream)

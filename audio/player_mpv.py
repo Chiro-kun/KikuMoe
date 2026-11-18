@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from audio.equalizer import EQ_NUM_BANDS, build_mpv_af_string, clamp_eq_db, normalize_eq_bands
 from core.constants import (
     APP_NAME,
     APP_SETTINGS,
@@ -258,6 +259,9 @@ class PlayerMPV:
         self._cached_device_val: str = ""
         self._cached_device_name: str | None = None
         self._applied_audio_device: str | None = None
+        self._eq_enabled: bool = False
+        self._eq_preamp: float = 0.0
+        self._eq_bands: list[float] = [0.0] * EQ_NUM_BANDS
         self.log = get_logger("PlayerMPV")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
@@ -403,6 +407,7 @@ class PlayerMPV:
             player.mute = self._muted
             self._attach_mpv_callbacks(player)
             self._ready = True
+            self._apply_equalizer_to_mpv()
             try:
                 self.log.info(
                     "[BACKEND] PlayerMPV: backend initialized (version: %s)", self.get_version()
@@ -616,6 +621,25 @@ class PlayerMPV:
     def set_audio_tap(self, callback: Any | None) -> None:
         """Interfaccia opzionale tap audio (non implementata per MPV)."""
         self._audio_tap = callback
+
+    def _apply_equalizer_to_mpv(self) -> None:
+        if not self.is_ready() or self._player is None:
+            return
+        af_str = build_mpv_af_string(self._eq_enabled, self._eq_preamp, self._eq_bands)
+        try:
+            self._player.af = af_str
+        except Exception as e:
+            self.log.debug("[MPV] Could not apply equalizer af=%r: %s", af_str, e)
+
+    def set_equalizer(
+        self, enabled: bool, preamp_db: float, bands_db: list[float] | tuple[float, ...]
+    ) -> None:
+        """Update real-time 10-band EQ via libmpv 'af' lavfi filter graph."""
+        with self._lock:
+            self._eq_enabled = bool(enabled)
+            self._eq_preamp = clamp_eq_db(preamp_db)
+            self._eq_bands = normalize_eq_bands(bands_db)
+            self._apply_equalizer_to_mpv()
 
     def get_volume(self) -> int:
         return self._volume

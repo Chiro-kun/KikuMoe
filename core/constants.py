@@ -215,3 +215,14 @@ LYRICS_PROVIDER_BETTERLYRICS_FIRST = "betterlyrics_first"
 LYRICS_PROVIDER_LRCLIB = "lrclib"
 LYRICS_PROVIDER_BETTERLYRICS = "betterlyrics"
 DEFAULT_LYRICS_PROVIDER = LYRICS_PROVIDER_AUTO
+
+# 10-band ISO Audio Equalizer (EQ)
+KEY_EQ_ENABLED = "eq_enabled"
+DEFAULT_EQ_ENABLED = False
+KEY_EQ_PRESET = "eq_preset"
+DEFAULT_EQ_PRESET = "flat"
+KEY_EQ_PREAMP = "eq_preamp"
+DEFAULT_EQ_PREAMP = 0.0
+KEY_EQ_BANDS = "eq_bands"
+KEY_EQ_CUSTOM_PREAMP = "eq_custom_preamp"
+KEY_EQ_CUSTOM_BANDS = "eq_custom_bands"

@@ -19,6 +19,7 @@ def test_player_backends_interface_consistency():
         "force_cleanup",
         "get_init_error",
         "set_audio_tap",
+        "set_equalizer",
     ]
 
     backends = [PlayerFFmpeg, PlayerVLC, PlayerMPV]

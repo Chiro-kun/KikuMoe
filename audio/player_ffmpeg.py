@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from PyQt6.QtCore import QSettings
 
+from audio.equalizer import BiquadEqualizerProcessor
 from core.constants import APP_NAME, APP_SETTINGS, APP_VERSION, KEY_AUDIO_DEVICE_INDEX, ORG_NAME
 from core.logger import PORTAUDIO_LOCK, get_logger, silence_stderr
 
@@ -104,6 +105,7 @@ class PlayerFFmpeg:
         self._ffmpeg_verified: bool = False
         self._seek_seq: int = 0
         self._seek_pending: bool = False
+        self._eq_processor = BiquadEqualizerProcessor()
         self.log = get_logger("PlayerFFmpeg")
         self._ffmpeg_bin = _find_ffmpeg_bin()
         # Build dynamic User-Agent from constants (e.g., "KikuMoe/1.11.0")
@@ -457,6 +459,7 @@ class PlayerFFmpeg:
                     self._stop_event.clear()
                     self._worker_stop_event = worker_stop
                     self._playing = True
+                    self._eq_processor.reset_state()
 
                 self.log.debug("[DEBUG] play_url: starting stream thread (session=%d)", session_id)
                 try:
@@ -531,6 +534,17 @@ class PlayerFFmpeg:
         """Registra callback per intercettare i chunk PCM raw per il visualizzatore."""
         self._audio_tap = callback
 
+    def set_equalizer(
+        self, enabled: bool, preamp_db: float, bands_db: list[float] | tuple[float, ...]
+    ) -> None:
+        """Update real-time 10-band biquad EQ parameters without restarting playback."""
+        self._eq_processor.configure(
+            enabled=enabled,
+            preamp_db=preamp_db,
+            bands_db=bands_db,
+            sample_rate=self._stream_sample_rate,
+        )
+
     def get_volume(self) -> int:
         return self._user_volume
 
@@ -561,6 +575,7 @@ class PlayerFFmpeg:
             self._bytes_streamed = 0
             self._seek_seq += 1
             self._seek_pending = True
+            self._eq_processor.reset_state()
             proc = self._ffmpeg_process
         # Kill only the active decoder subprocess so _stream_worker restarts at
         # the new offset immediately without blocking the UI thread or reopening audio.
@@ -827,6 +842,13 @@ class PlayerFFmpeg:
                 except Exception:
                     pass
                 return
+
+            if self._eq_processor.is_active():
+                try:
+                    data = self._eq_processor.process_pcm_s16le(data, self._stream_sample_rate)
+                    n_bytes = len(data)
+                except Exception:
+                    pass
 
             vol = self._volume
             # Ottimizzazione: a volume massimo (o quasi), invia direttamente il chunk raw
