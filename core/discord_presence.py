@@ -142,6 +142,9 @@ class DiscordPresence(QObject):
                 except (ValueError, UnicodeError):
                     self._failed()
                     return
+                if not isinstance(message, dict):
+                    self._failed()
+                    return
                 if message.get("evt") == "READY":
                     self.timeout.stop()
                     self.ready = True

@@ -250,6 +250,12 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
             self.playlist_mgr.get_initial_picker_dir(),
         )
         if folder:
+            add_async = getattr(self.playlist_mgr, "add_folder_async", None)
+            if callable(add_async):
+                add_async(
+                    folder, on_done=lambda count: self._finish_with_tracks() if count > 0 else None
+                )
+                return
             self._self_loading = True
             try:
                 count = self.playlist_mgr.add_folder(folder)
@@ -267,6 +273,12 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
             filters,
         )
         if files:
+            add_async = getattr(self.playlist_mgr, "add_files_async", None)
+            if callable(add_async):
+                add_async(
+                    files, on_done=lambda count: self._finish_with_tracks() if count > 0 else None
+                )
+                return
             self._self_loading = True
             try:
                 count = self.playlist_mgr.add_files(files)
@@ -297,18 +309,37 @@ class LocalMusicPromptDialog(CyberMoeDialogAnimationMixin, QDialog):
             return
         urls = mime.urls()
         files_to_add: list[str] = []
+        folders_to_add: list[str] = []
+        for url in urls:
+            path_str = url.toLocalFile()
+            if not path_str:
+                continue
+            p = Path(path_str)
+            if p.is_dir():
+                folders_to_add.append(str(p))
+            elif p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                files_to_add.append(str(p))
+
+        add_folder_async = getattr(self.playlist_mgr, "add_folder_async", None)
+        add_files_async = getattr(self.playlist_mgr, "add_files_async", None)
+        if callable(add_folder_async) and callable(add_files_async):
+            for folder in folders_to_add:
+                add_folder_async(
+                    folder,
+                    on_done=lambda count: self._finish_with_tracks() if count > 0 else None,
+                )
+            if files_to_add:
+                add_files_async(
+                    files_to_add,
+                    on_done=lambda count: self._finish_with_tracks() if count > 0 else None,
+                )
+            a0.acceptProposedAction()
+            return
+
         self._self_loading = True
         try:
-            for url in urls:
-                path_str = url.toLocalFile()
-                if not path_str:
-                    continue
-                p = Path(path_str)
-                if p.is_dir():
-                    self.playlist_mgr.add_folder(str(p))
-                elif p.is_file() and p.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
-                    files_to_add.append(str(p))
-
+            for folder in folders_to_add:
+                self.playlist_mgr.add_folder(folder)
             if files_to_add:
                 self.playlist_mgr.add_files(files_to_add)
         finally:

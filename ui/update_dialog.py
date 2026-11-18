@@ -33,7 +33,12 @@ from core.constants import (
     ORG_NAME,
 )
 from core.i18n import I18n
-from core.updater import AssetDownloadWorker, ReleaseAsset, ReleaseInfo
+from core.updater import (
+    AssetDownloadWorker,
+    ReleaseAsset,
+    ReleaseInfo,
+    is_allowed_github_url,
+)
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dialog_animations import CyberMoeDialogAnimationMixin
 from ui.themes.cyber_moe import PALETTE, get_cyber_moe_stylesheet
@@ -62,6 +67,7 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.i18n = i18n or I18n("it")
         self._download_worker: AssetDownloadWorker | None = None
         self._downloaded_file_path: str | None = None
+        self._checksum_verified: bool = False
         self._target_asset: ReleaseAsset | None = release.get_platform_asset()
 
         self.setObjectName("updateDialogRoot")
@@ -290,18 +296,20 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
 
     def _open_github_release(self) -> None:
         """Open release URL in user's default web browser."""
+        raw_url = self.release.html_url
         url = (
-            self.release.html_url
-            or f"https://github.com/Chiro-kun/KikuMoe/releases/tag/{self.release.tag_name}"
+            raw_url
+            if is_allowed_github_url(raw_url)
+            else f"https://github.com/Chiro-kun/KikuMoe/releases/tag/{self.release.tag_name}"
         )
         QDesktopServices.openUrl(QUrl(url))
 
     def _on_action_clicked(self) -> None:
         """Handle download or post-download action."""
         if self._downloaded_file_path:
-            # If already downloaded, open folder or launch
+            # If already downloaded, launch only if SHA256 was verified; otherwise show in folder
             path = Path(self._downloaded_file_path)
-            if _IS_WIN32 and path.suffix.lower() == ".exe":
+            if _IS_WIN32 and path.suffix.lower() == ".exe" and self._checksum_verified:
                 try:
                     startfile = getattr(os, "startfile", None)
                     if callable(startfile):
@@ -328,7 +336,11 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.btn_action.setEnabled(False)
         self.btn_action.setText(self.i18n.t("updates_downloading", pct=0))
 
-        self._download_worker = AssetDownloadWorker(self._target_asset, parent=self)
+        self._download_worker = AssetDownloadWorker(
+            self._target_asset,
+            checksums_asset=self.release.get_checksums_asset(),
+            parent=self,
+        )
         self._download_worker.progress.connect(self._on_download_progress)
         self._download_worker.finished.connect(self._on_download_finished)
         self._download_worker.error.connect(self._on_download_error)
@@ -345,11 +357,12 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
 
     def _on_download_finished(self, saved_path: str) -> None:
         self._downloaded_file_path = saved_path
+        self._checksum_verified = bool(getattr(self._download_worker, "checksum_verified", False))
         self.progress_bar.setValue(100)
         self.status_lbl.setText(self.i18n.t("updates_download_complete"))
         self.status_lbl.setStyleSheet("color: #10B981; font-size: 11px; font-weight: 700;")
         self.btn_action.setEnabled(True)
-        if _IS_WIN32 and saved_path.lower().endswith(".exe"):
+        if _IS_WIN32 and saved_path.lower().endswith(".exe") and self._checksum_verified:
             self.btn_action.setText(self.i18n.t("updates_launch_installer"))
         else:
             self.btn_action.setText(self.i18n.t("updates_open_folder"))

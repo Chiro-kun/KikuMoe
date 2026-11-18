@@ -1,5 +1,6 @@
 """Compact controls for the existing player window."""
 
+import html
 from typing import Optional
 
 from PyQt6.QtCore import (
@@ -53,7 +54,7 @@ class MarqueeLabel(QWidget):
         self._text = text
         self._offset = 0
         self._pause = 40
-        self.setToolTip(text)
+        self.setToolTip(html.escape(text) if text else "")
         self._timer.start()
         self.update()
 

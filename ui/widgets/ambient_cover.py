@@ -412,6 +412,7 @@ class AnimatedTrackLabel(QLabel):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(text, parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self._font_px = font_px
         self._font_weight = font_weight
         self._text_color = QColor(text_color)

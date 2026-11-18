@@ -676,3 +676,25 @@ def test_station_changed_log_omits_channel_for_local_and_single_feed_stations():
         )
         == "[UI] Station changed to 'gensokyo'"
     )
+
+
+def test_gensokyo_non_numeric_duration_does_not_drop_update():
+    """Verify GensokyoProvider emits track updates even if DURATION is non-numeric."""
+    from network.providers.gensokyo_provider import GensokyoProvider
+
+    events = []
+    prov = GensokyoProvider(
+        on_now_playing=lambda *args: events.append(args),
+        on_error_text=lambda _: None,
+    )
+    prov._parse_and_emit(
+        {
+            "SONGINFO": {"TITLE": "Bad Apple!!", "ARTIST": "nomico"},
+            "SONGTIMES": {"DURATION": "N/A"},
+            "SONGDATA": {"SONGID": "999"},
+            "MISC": {},
+        }
+    )
+    assert len(events) == 1
+    assert events[0][0] == "Bad Apple!!"
+    assert events[0][2] == 0

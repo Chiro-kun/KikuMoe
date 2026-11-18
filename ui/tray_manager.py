@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import os
 import sys
 from typing import Callable
@@ -175,9 +176,11 @@ class TrayNowPlayingCard(QFrame):
         pill_row.setSpacing(6)
 
         self._badge_station = QLabel("LISTEN.MOE", self)
+        self._badge_station.setTextFormat(Qt.TextFormat.PlainText)
         pill_row.addWidget(self._badge_station)
 
         self._lbl_session = QLabel("00:00", self)
+        self._lbl_session.setTextFormat(Qt.TextFormat.PlainText)
         self._lbl_session.setStyleSheet("color: #8E95A5; font-size: 10px; font-weight: 500;")
         pill_row.addWidget(self._lbl_session)
         pill_row.addStretch()
@@ -185,11 +188,13 @@ class TrayNowPlayingCard(QFrame):
 
         # Title label
         self._lbl_title = QLabel("KikuMoe", self)
+        self._lbl_title.setTextFormat(Qt.TextFormat.PlainText)
         self._lbl_title.setStyleSheet("color: #FFFFFF; font-size: 12px; font-weight: bold;")
         meta_col.addWidget(self._lbl_title)
 
         # Artist label
         self._lbl_artist = QLabel(self._t("tray_no_track", "Nessun brano in riproduzione"), self)
+        self._lbl_artist.setTextFormat(Qt.TextFormat.PlainText)
         self._lbl_artist.setStyleSheet("color: #94A3B8; font-size: 11px;")
         meta_col.addWidget(self._lbl_artist)
 
@@ -279,7 +284,7 @@ class TrayNowPlayingCard(QFrame):
             else "KikuMoe"
         )
         self._lbl_title.setText(display_title)
-        self._lbl_title.setToolTip(self._raw_title if self._raw_title else "KikuMoe")
+        self._lbl_title.setToolTip(html.escape(self._raw_title) if self._raw_title else "KikuMoe")
 
         fm_artist = QFontMetrics(self._lbl_artist.font())
         display_artist = (
@@ -288,7 +293,7 @@ class TrayNowPlayingCard(QFrame):
             else self._t("tray_no_track", "Nessun brano in riproduzione")
         )
         self._lbl_artist.setText(display_artist)
-        self._lbl_artist.setToolTip(self._raw_artist if self._raw_artist else "")
+        self._lbl_artist.setToolTip(html.escape(self._raw_artist) if self._raw_artist else "")
 
     def resizeEvent(self, a0) -> None:
         super().resizeEvent(a0)

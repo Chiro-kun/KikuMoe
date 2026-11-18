@@ -603,3 +603,30 @@ def test_tray_header_initial_labels_and_submenu_ownership(qapp, monkeypatch):
     tray_mgr.sync_stream_settings(station=STATION_TRUCKERSFM, fmt="MP3 320k")
     assert all(act.parent() is tray_mgr._sub_format for act in tray_mgr._format_actions.values())
     assert all(act.parent() is tray_mgr._sub_station for act in tray_mgr._station_actions.values())
+
+
+def test_tray_card_and_mini_hud_prevent_html_injection_in_labels_and_tooltips(qapp):
+    """Verify metadata labels force PlainText and escape tooltips against UNC HTML injection."""
+    from PyQt6.QtCore import Qt
+
+    from ui.tray_manager import TrayNowPlayingCard
+    from ui.widgets.mini_hud import MarqueeLabel
+
+    card = TrayNowPlayingCard()
+    payload = '<img src="\\\\attacker-host\\s\\a.png"><b>Track</b>'
+    card.set_track_info(title=payload, artist=payload, station="LOCAL", session="00:10")
+
+    assert card._lbl_title.textFormat() == Qt.TextFormat.PlainText
+    assert card._lbl_artist.textFormat() == Qt.TextFormat.PlainText
+    assert card._badge_station.textFormat() == Qt.TextFormat.PlainText
+    assert card._lbl_session.textFormat() == Qt.TextFormat.PlainText
+    assert "<img" not in card._lbl_title.toolTip()
+    assert "&lt;img" in card._lbl_title.toolTip()
+    assert "<img" not in card._lbl_artist.toolTip()
+
+    marquee = MarqueeLabel("#ffffff")
+    marquee.set_text(payload)
+    assert "<img" not in marquee.toolTip()
+    assert "&lt;img" in marquee.toolTip()
+    card.deleteLater()
+    marquee.deleteLater()

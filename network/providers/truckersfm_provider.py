@@ -87,10 +87,10 @@ class TruckersFMProvider(BaseMetadataProvider):
         try:
             req = urllib.request.Request(TRUCKERSFM_API_URL, headers=headers)
             with urllib.request.urlopen(req, timeout=6.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(resp.read(262144).decode("utf-8"))
             if self._stop_event.is_set() or not self._is_running:
                 return
-            if self._parse_and_emit_radiocloud(data):
+            if isinstance(data, dict) and self._parse_and_emit_radiocloud(data):
                 return
         except Exception as e:
             logger.debug("TruckersFM primary API failed, falling back to Icecast: %s", e)
@@ -102,10 +102,11 @@ class TruckersFMProvider(BaseMetadataProvider):
         try:
             req_ice = urllib.request.Request(TRUCKERSFM_ICECAST_URL, headers=headers)
             with urllib.request.urlopen(req_ice, timeout=6.0) as resp:
-                ice_data = json.loads(resp.read().decode("utf-8"))
+                ice_data = json.loads(resp.read(262144).decode("utf-8"))
             if self._stop_event.is_set() or not self._is_running:
                 return
-            self._parse_and_emit_icecast(ice_data)
+            if isinstance(ice_data, dict):
+                self._parse_and_emit_icecast(ice_data)
         except Exception as e:
             if self._stop_event.is_set() or not self._is_running:
                 return

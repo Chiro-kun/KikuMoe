@@ -6,13 +6,17 @@ release channel filtering (Stable vs. Beta), and asynchronous Qt workers.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import platform
 import re
+import ssl
 import sys
+import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -148,6 +152,13 @@ class ReleaseInfo:
     is_prerelease: bool
     assets: list[ReleaseAsset] = field(default_factory=list)
 
+    def get_checksums_asset(self) -> ReleaseAsset | None:
+        """Return the SHA256SUMS.txt asset if published with this release."""
+        for a in self.assets:
+            if a.name.strip().lower() == "sha256sums.txt":
+                return a
+        return None
+
     def get_platform_asset(self) -> ReleaseAsset | None:
         """Find the most appropriate asset for the current OS."""
         if _IS_WIN32:
@@ -162,7 +173,70 @@ class ReleaseInfo:
                 for a in self.assets:
                     if a.name.lower().endswith(ext):
                         return a
-        return self.assets[0] if self.assets else None
+        non_sums = [a for a in self.assets if a.name.strip().lower() != "sha256sums.txt"]
+        return non_sums[0] if non_sums else None
+
+
+def is_allowed_github_url(url: str | None) -> bool:
+    """Return True only for HTTPS URLs hosted on GitHub or githubusercontent."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url.strip())
+    except Exception:
+        return False
+    if parts.scheme.lower() != "https" or parts.port not in (None, 443):
+        return False
+    host = (parts.hostname or "").lower()
+    return (
+        host in ("github.com", "api.github.com")
+        or host.endswith(".github.com")
+        or host.endswith(".githubusercontent.com")
+    )
+
+
+def parse_sha256sums(text: str) -> dict[str, str]:
+    """Parse a SHA256SUMS.txt payload into {basename: sha256_hex_lower}."""
+    sums: dict[str, str] = {}
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = re.match(r"^([0-9a-fA-F]{64})\s+\*?(.+)$", line)
+        if not m:
+            continue
+        digest = m.group(1).lower()
+        fname = os.path.basename(m.group(2).strip().replace("\\", "/"))
+        if fname:
+            sums[fname] = digest
+    return sums
+
+
+def _sanitize_asset_filename(name: str) -> str:
+    clean = os.path.basename((name or "").replace("\\", "/")).strip()
+    if not clean or clean in (".", ".."):
+        raise ValueError("Invalid release asset filename")
+    return clean
+
+
+def _unique_destination_path(dest_dir: Path, filename: str) -> Path:
+    candidate = dest_dir / filename
+    if not candidate.exists():
+        return candidate
+    lower = filename.lower()
+    if lower.endswith(".tar.gz"):
+        stem = filename[:-7]
+        suffix = filename[-7:]
+    else:
+        p = Path(filename)
+        stem = p.stem
+        suffix = p.suffix
+    idx = 1
+    while True:
+        alt = dest_dir / f"{stem} ({idx}){suffix}"
+        if not alt.exists():
+            return alt
+        idx += 1
 
 
 def fetch_github_releases(
@@ -315,14 +389,19 @@ class AssetDownloadWorker(QThread):
         self,
         asset: ReleaseAsset,
         destination_dir: Path | None = None,
+        checksums_asset: ReleaseAsset | None = None,
+        require_checksum: bool = False,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.asset = asset
+        self.checksums_asset = checksums_asset
+        self.require_checksum = require_checksum
+        self.checksum_verified = False
         if destination_dir is None:
-            # Default to user's Downloads or temp folder
+            # Default to user's Downloads or system temp folder
             downloads = Path.home() / "Downloads"
-            self.destination_dir = downloads if downloads.is_dir() else Path(os.getcwd())
+            self.destination_dir = downloads if downloads.is_dir() else Path(tempfile.gettempdir())
         else:
             self.destination_dir = destination_dir
         self._cancelled = False
@@ -330,38 +409,85 @@ class AssetDownloadWorker(QThread):
     def cancel(self) -> None:
         self._cancelled = True
 
+    def _fetch_expected_sha256(self, safe_name: str, ctx: ssl.SSLContext) -> str | None:
+        if self.checksums_asset is None:
+            if self.require_checksum:
+                raise ValueError("Release is missing SHA256SUMS.txt verification asset")
+            return None
+        if not is_allowed_github_url(self.checksums_asset.download_url):
+            raise ValueError("Untrusted SHA256SUMS.txt URL host or scheme")
+        req = urllib.request.Request(
+            self.checksums_asset.download_url,
+            headers={"User-Agent": f"KikuMoe/{APP_VERSION}"},
+        )
+        with urllib.request.urlopen(req, timeout=10.0, context=ctx) as resp:
+            if not is_allowed_github_url(resp.geturl()):
+                raise ValueError("Redirected SHA256SUMS.txt to untrusted host")
+            raw = resp.read(65536).decode("utf-8", errors="replace")
+        sums = parse_sha256sums(raw)
+        expected = sums.get(safe_name)
+        if not expected:
+            raise ValueError(f"Missing SHA256 entry for {safe_name} in SHA256SUMS.txt")
+        return expected
+
     def run(self) -> None:
+        part_file: Path | None = None
         try:
-            target_file = self.destination_dir / self.asset.name
+            self.checksum_verified = False
+            safe_name = _sanitize_asset_filename(self.asset.name)
+            if not is_allowed_github_url(self.asset.download_url):
+                raise ValueError("Untrusted release asset download URL")
+
+            ctx = get_ssl_context()
+            expected_sha = self._fetch_expected_sha256(safe_name, ctx)
+
+            part_file = self.destination_dir / f".{safe_name}.{os.getpid()}.part"
             req = urllib.request.Request(
                 self.asset.download_url,
                 headers={"User-Agent": f"KikuMoe/{APP_VERSION}"},
             )
-            ctx = get_ssl_context()
+            hasher = hashlib.sha256()
 
             with urllib.request.urlopen(req, timeout=15.0, context=ctx) as resp:
+                if not is_allowed_github_url(resp.geturl()):
+                    raise ValueError("Redirected release asset download to untrusted host")
                 total_bytes = int(resp.headers.get("Content-Length", self.asset.size_bytes))
                 downloaded = 0
                 chunk_size = 65536  # 64 KB
 
-                with open(target_file, "wb") as f:
+                with open(part_file, "wb") as f:
                     while not self._cancelled:
                         chunk = resp.read(chunk_size)
                         if not chunk:
                             break
                         f.write(chunk)
+                        hasher.update(chunk)
                         downloaded += len(chunk)
                         self.progress.emit(downloaded, total_bytes)
 
             if self._cancelled:
-                if target_file.exists():
+                if part_file.exists():
                     try:
-                        target_file.unlink()
+                        part_file.unlink()
                     except Exception:
                         pass
                 return
 
+            if expected_sha is not None:
+                actual_sha = hasher.hexdigest().lower()
+                if actual_sha != expected_sha.lower():
+                    raise ValueError("SHA256 checksum mismatch for downloaded asset")
+                self.checksum_verified = True
+
+            target_file = _unique_destination_path(self.destination_dir, safe_name)
+            os.replace(part_file, target_file)
+            part_file = None
             self.finished.emit(str(target_file))
         except Exception as e:
+            if part_file is not None and part_file.exists():
+                try:
+                    part_file.unlink()
+                except Exception:
+                    pass
             logger.error("[UPDATER] Asset download failed: %s", e)
             self.error.emit(str(e))

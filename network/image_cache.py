@@ -42,7 +42,11 @@ def normalize_cover_url(cover_ref: str | None) -> str | None:
             return None
 
         low = value.lower()
-        if low.startswith("http://"):
+        if (
+            low.startswith(("http://", "file://", "\\\\", "//"))
+            or "\\" in value
+            or (len(value) >= 2 and value[1] == ":")
+        ):
             return None
 
         if low.startswith("https://"):

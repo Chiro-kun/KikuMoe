@@ -155,3 +155,102 @@ class TestReleaseParsing(unittest.TestCase):
         self.assertTrue(dialog.release.is_prerelease)
         dialog.close()
         dialog.deleteLater()
+
+    def test_updater_security_host_allowlist_and_sha256_verification(self):
+        import hashlib
+        import io
+        import tempfile
+        from pathlib import Path
+
+        from core.updater import (
+            AssetDownloadWorker,
+            ReleaseAsset,
+            _unique_destination_path,
+            is_allowed_github_url,
+            parse_sha256sums,
+        )
+
+        self.assertTrue(
+            is_allowed_github_url(
+                "https://github.com/Chiro-kun/KikuMoe/releases/download/v2.0.0/app.exe"
+            )
+        )
+        self.assertTrue(
+            is_allowed_github_url("https://objects.githubusercontent.com/github-production/a")
+        )
+        self.assertFalse(
+            is_allowed_github_url("http://github.com/Chiro-kun/KikuMoe/releases/app.exe")
+        )
+        self.assertFalse(is_allowed_github_url("https://evil.example.com/app.exe"))
+
+        payload = b"verified-binary-payload"
+        digest = hashlib.sha256(payload).hexdigest()
+        sums_txt = f"{digest}  KikuMoe-Setup.exe\n"
+        self.assertEqual(parse_sha256sums(sums_txt), {"KikuMoe-Setup.exe": digest})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            existing = tmp_dir / "KikuMoe-Setup.exe"
+            existing.write_bytes(b"old")
+            unique_target = _unique_destination_path(tmp_dir, "KikuMoe-Setup.exe")
+            self.assertEqual(unique_target.name, "KikuMoe-Setup (1).exe")
+
+            # Untrusted host must be rejected without creating files
+            bad_asset = ReleaseAsset(
+                name="KikuMoe-Setup.exe",
+                download_url="https://evil.example.com/KikuMoe-Setup.exe",
+                size_bytes=len(payload),
+            )
+            errors: list[str] = []
+            w_bad = AssetDownloadWorker(bad_asset, destination_dir=tmp_dir)
+            w_bad.error.connect(errors.append)
+            w_bad.run()
+            self.assertEqual(len(errors), 1)
+            self.assertFalse((tmp_dir / "KikuMoe-Setup (1).exe").exists())
+
+            # Valid GitHub URL + valid SHA256SUMS.txt succeeds and avoids overwriting existing file
+            good_asset = ReleaseAsset(
+                name="KikuMoe-Setup.exe",
+                download_url="https://github.com/Chiro-kun/KikuMoe/releases/download/v2/KikuMoe-Setup.exe",
+                size_bytes=len(payload),
+            )
+            sums_asset = ReleaseAsset(
+                name="SHA256SUMS.txt",
+                download_url="https://github.com/Chiro-kun/KikuMoe/releases/download/v2/SHA256SUMS.txt",
+                size_bytes=len(sums_txt),
+            )
+
+            class _FakeResp(io.BytesIO):
+                def __init__(self, body: bytes, url: str) -> None:
+                    super().__init__(body)
+                    self.headers = {"Content-Length": str(len(body))}
+                    self._url = url
+
+                def geturl(self) -> str:
+                    return self._url
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    pass
+
+            def fake_urlopen(req, timeout=15.0, context=None):
+                u = req.full_url
+                if u.endswith("SHA256SUMS.txt"):
+                    return _FakeResp(sums_txt.encode("utf-8"), u)
+                return _FakeResp(payload, u)
+
+            finished_paths: list[str] = []
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                w_ok = AssetDownloadWorker(
+                    good_asset, destination_dir=tmp_dir, checksums_asset=sums_asset
+                )
+                w_ok.finished.connect(finished_paths.append)
+                w_ok.run()
+
+            self.assertTrue(w_ok.checksum_verified)
+            self.assertEqual(len(finished_paths), 1)
+            self.assertEqual(Path(finished_paths[0]).name, "KikuMoe-Setup (1).exe")
+            self.assertEqual(Path(finished_paths[0]).read_bytes(), payload)
+            self.assertEqual(existing.read_bytes(), b"old")

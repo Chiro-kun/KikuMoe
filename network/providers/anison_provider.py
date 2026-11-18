@@ -87,11 +87,12 @@ class AnisonProvider(BaseMetadataProvider):
                 headers={"User-Agent": f"KikuMoe/{APP_VERSION} (Anime Radio Client)"},
             )
             with urllib.request.urlopen(req, timeout=8.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(resp.read(262144).decode("utf-8"))
 
             if self._stop_event.is_set() or not self._is_running:
                 return
-            self._parse_and_emit(data)
+            if isinstance(data, dict):
+                self._parse_and_emit(data)
         except Exception as e:
             if self._stop_event.is_set() or not self._is_running:
                 return

@@ -105,7 +105,7 @@ def parse_ttml_time(value: str | None) -> float | None:
 
 
 def _has_unsafe_xml_decl(xml_text: str) -> bool:
-    lowered = xml_text[:512].lower()
+    lowered = xml_text.lower()
     return "<!doctype" in lowered or "<!entity" in lowered
 
 

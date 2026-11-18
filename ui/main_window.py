@@ -638,9 +638,22 @@ class ListenMoePlayer(QWidget):
         self.log = get_logger("KikuMoe")
         self._sync_clock_with_server()
 
-    def _sync_clock_with_server(self):
+    def _sync_clock_with_server(self) -> None:
+        """Schedule asynchronous clock skew sync with LISTEN.moe off the UI thread."""
+        try:
+            threading.Thread(
+                target=self._sync_clock_worker,
+                name="ClockSyncWorker",
+                daemon=True,
+            ).start()
+        except Exception:
+            self._clock_sync_offset = 0.0
+
+    def _sync_clock_worker(self) -> None:
         """Fetches the current server time from LISTEN.moe to calculate clock skew."""
         try:
+            if getattr(self, "_closing", False):
+                return
             # We use a HEAD request to the main page which is faster
             # and guaranteed to have a Date header
             req = urllib.request.Request("https://listen.moe/", method="HEAD")
@@ -650,6 +663,8 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as res:
+                if getattr(self, "_closing", False):
+                    return
                 server_date_str = res.headers.get("Date")
                 if server_date_str:
                     server_dt = email.utils.parsedate_to_datetime(server_date_str)
@@ -665,7 +680,8 @@ class ListenMoePlayer(QWidget):
                         f"[UI] Clock sync performed. Server offset: {self._clock_sync_offset:+.2f}s"
                     )
         except Exception as e:
-            self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
+            if not getattr(self, "_closing", False):
+                self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
             self._clock_sync_offset = 0.0
 
     def _init_icons(self):
@@ -1033,6 +1049,7 @@ class ListenMoePlayer(QWidget):
 
         # Legacy label
         self.now_playing_label = QLabel("–")
+        self.now_playing_label.setTextFormat(Qt.TextFormat.PlainText)
         self.now_playing_label.setVisible(False)
 
         # 4. Scrubber Progress bar & dual-timestamp HUD row
@@ -3714,27 +3731,48 @@ class ListenMoePlayer(QWidget):
     def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
         return normalize_cover_url(cover_ref)
 
+    def _allows_local_cover_files(self) -> bool:
+        """Return True only when the active station is local music."""
+        is_local_fn = getattr(self, "_is_local_mode", None)
+        if callable(is_local_fn):
+            try:
+                return bool(is_local_fn())
+            except Exception:
+                pass
+        return (
+            str(getattr(self, "_current_radio_provider", STATION_LOCAL) or "").lower()
+            == STATION_LOCAL
+        )
+
     def _resolve_system_media_cover_url(self, cover_ref: Optional[str]) -> str:
         """Resolve an MPRIS/SMTC artwork URI, preserving verified local file:// covers."""
-        if isinstance(cover_ref, str):
-            val = cover_ref.strip()
-            if val.lower().startswith("file://"):
-                local_file = urllib.request.url2pathname(urllib.parse.urlsplit(val).path)
-                if local_file and os.path.isfile(local_file):
-                    return Path(local_file).resolve().as_uri()
+        if ListenMoePlayer._allows_local_cover_files(self):
+            local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
+            if local_file:
+                return Path(local_file).resolve().as_uri()
+            if isinstance(cover_ref, str) and cover_ref.strip().lower().startswith("file://"):
                 return ""
-            if val and os.path.isfile(val):
-                return Path(val).resolve().as_uri()
         return self._normalize_album_cover_url(cover_ref) or ""
 
     @staticmethod
     def _resolve_local_cover_file(cover_ref: Optional[str]) -> Optional[str]:
-        if not cover_ref:
+        if not cover_ref or not isinstance(cover_ref, str):
             return None
-        if cover_ref.startswith("file://"):
-            local_file = urllib.request.url2pathname(urllib.parse.urlsplit(cover_ref).path)
+        val = cover_ref.strip()
+        if not val or val.startswith("\\\\") or val.startswith("//"):
+            return None
+        lower = val.lower()
+        if lower.startswith(("http://", "https://")):
+            return None
+        if lower.startswith("file://"):
+            parts = urllib.parse.urlsplit(val)
+            if parts.netloc and parts.netloc.lower() != "localhost":
+                return None
+            local_file = urllib.request.url2pathname(parts.path)
+            if not local_file or local_file.startswith("\\\\") or local_file.startswith("//"):
+                return None
             return local_file if os.path.isfile(local_file) else None
-        return cover_ref if os.path.isfile(cover_ref) else None
+        return val if os.path.isfile(val) else None
 
     @staticmethod
     def _read_local_cover_bytes(local_file: str) -> Optional[bytes]:
@@ -3757,7 +3795,7 @@ class ListenMoePlayer(QWidget):
 
     def _ensure_local_cover_cached(self, cover_ref: Optional[str]) -> Optional[QPixmap]:
         """Cache local file/URI cover artwork in the shared pixmap cache for history thumbs."""
-        if not cover_ref:
+        if not cover_ref or not ListenMoePlayer._allows_local_cover_files(self):
             return None
         cached = get_cached_pixmap(cover_ref)
         if cached is not None and not cached.isNull():
@@ -3782,7 +3820,11 @@ class ListenMoePlayer(QWidget):
 
     def _request_album_cover(self, cover_ref: Optional[str]) -> None:
         try:
-            local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
+            local_file = (
+                ListenMoePlayer._resolve_local_cover_file(cover_ref)
+                if ListenMoePlayer._allows_local_cover_files(self)
+                else None
+            )
             if local_file and cover_ref:
                 try:
                     st = os.stat(local_file)
@@ -4944,7 +4986,7 @@ class ListenMoePlayer(QWidget):
             pass
         title = self._current_title or self.t("unknown")
         artist = self._current_artist or ""
-        text = f"<b>{title}</b>" + (f" — {artist}" if artist and title != "–" else "")
+        text = f"{title}" + (f" — {artist}" if artist and title != "–" else "")
         # Append remaining or total duration
         time_text = "--:--"
         try:

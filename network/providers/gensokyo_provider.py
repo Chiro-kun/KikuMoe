@@ -86,11 +86,12 @@ class GensokyoProvider(BaseMetadataProvider):
                 headers={"User-Agent": f"KikuMoe/{APP_VERSION} (Touhou Music Client)"},
             )
             with urllib.request.urlopen(req, timeout=8.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                data = json.loads(resp.read(262144).decode("utf-8"))
 
             if self._stop_event.is_set() or not self._is_running:
                 return
-            self._parse_and_emit(data)
+            if isinstance(data, dict):
+                self._parse_and_emit(data)
         except Exception as e:
             if self._stop_event.is_set() or not self._is_running:
                 return
@@ -99,10 +100,16 @@ class GensokyoProvider(BaseMetadataProvider):
                 self.on_status_text(f"Gensokyo API sync: {e}")
 
     def _parse_and_emit(self, data: dict[str, Any]) -> None:
-        song_info = data.get("SONGINFO", {})
-        song_times = data.get("SONGTIMES", {})
-        song_data = data.get("SONGDATA", {})
-        misc = data.get("MISC", {})
+        if not isinstance(data, dict):
+            return
+        raw_info = data.get("SONGINFO")
+        song_info = raw_info if isinstance(raw_info, dict) else {}
+        raw_times = data.get("SONGTIMES")
+        song_times = raw_times if isinstance(raw_times, dict) else {}
+        raw_data = data.get("SONGDATA")
+        song_data = raw_data if isinstance(raw_data, dict) else {}
+        raw_misc = data.get("MISC")
+        misc = raw_misc if isinstance(raw_misc, dict) else {}
 
         song_id = song_data.get("SONGID")
         title = (song_info.get("TITLE") or "").strip()
@@ -117,7 +124,10 @@ class GensokyoProvider(BaseMetadataProvider):
             display_artist = circle or artist or "Touhou Project"
 
         duration = song_times.get("DURATION")
-        duration_sec = int(duration) if duration is not None and int(duration) > 0 else 0
+        try:
+            duration_sec = max(0, int(float(duration))) if duration is not None else 0
+        except (ValueError, TypeError):
+            duration_sec = 0
 
         # Calculate expected track end epoch (SONGEND matches KikuMoe ticker semantics)
         song_end = song_times.get("SONGEND")

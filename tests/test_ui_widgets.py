@@ -825,11 +825,14 @@ def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
         player.deleteLater()
 
 
-def test_main_window_minimum_size_keeps_track_below_cover(qapp, monkeypatch):
-    from PyQt6.QtCore import QPoint
+def test_main_window_minimum_size_keeps_track_below_cover(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint, QSettings
 
+    from ui import main_window
     from ui.main_window import ListenMoePlayer
 
+    settings = QSettings(str(tmp_path / "min_size.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
     monkeypatch.setattr(ListenMoePlayer, "_sync_clock_with_server", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
     monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)

@@ -848,3 +848,70 @@ def test_request_album_cover_does_not_reload_unchanged_local_file(tmp_path: Path
     assert not first_cache.exists()
     if provider._cover_cache_file is not None:
         provider._cover_cache_file.unlink(missing_ok=True)
+
+
+def test_history_indices_remapped_on_remove_and_move(tmp_path: Path, monkeypatch):
+    """Verify remove_track and move_track keep _history indices pointing to the right tracks."""
+    from PyQt6.QtCore import QSettings
+
+    import core.local_playlist as lp_mod
+
+    settings = QSettings(str(tmp_path / "hist_remap.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(lp_mod, "QSettings", lambda *args: settings)
+
+    files = []
+    for i in range(4):
+        p = tmp_path / f"t{i}.mp3"
+        p.write_bytes(b"ID3" + bytes([3, 0, 0, 0, 0, 0, 0]))
+        files.append(str(p))
+
+    mgr = LocalPlaylistManager()
+    mgr.add_files(files)
+    # Play 0 -> 2 -> 3
+    mgr.play_index(0)
+    mgr.play_index(2)
+    mgr.play_index(3)
+
+    # Remove track 1 (between 0 and 2): old indices 2 and 3 become 1 and 2
+    assert mgr.remove_track(1) is True
+    assert mgr.current_index == 2
+    prev = mgr.previous_track()
+    assert prev is not None and Path(prev.file_path).name == "t2.mp3"
+
+    # Move track 0 ("t0.mp3") to index 2: history pointing to "t0.mp3" must follow it to index 2
+    assert mgr.move_track(0, 2) is True
+    prev2 = mgr.previous_track()
+    assert prev2 is not None and Path(prev2.file_path).name == "t0.mp3"
+    assert mgr.current_index == 2
+
+
+def test_remote_station_blocks_local_and_unc_cover_paths(tmp_path: Path):
+    """Verify remote stations never resolve local file paths or UNC shares for cover art."""
+    from types import SimpleNamespace
+    from typing import Any
+
+    from network.image_cache import normalize_cover_url
+    from ui.main_window import ListenMoePlayer
+
+    local_img = tmp_path / "secret.png"
+    local_img.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    applied: list[object] = []
+    remote_fake: Any = SimpleNamespace(
+        _current_radio_provider="listenmoe",
+        _current_cover_url="sentinel",
+        _current_cover_bytes_digest=None,
+        _current_local_cover_sig=None,
+        _cover_cache={},
+        _normalize_album_cover_url=normalize_cover_url,
+        _set_album_cover_pixmap=lambda pm: applied.append(pm),
+    )
+
+    # Remote station receiving a local path or UNC path must treat it as invalid remote cover
+    ListenMoePlayer._request_album_cover(remote_fake, str(local_img))
+    assert applied == [None]
+    assert ListenMoePlayer._resolve_system_media_cover_url(remote_fake, local_img.as_uri()) == ""
+
+    # Even in local mode, UNC paths and remote file:// hosts must be rejected before os.path.isfile
+    assert ListenMoePlayer._resolve_local_cover_file(r"\\attacker-host\share\a.png") is None
+    assert ListenMoePlayer._resolve_local_cover_file("file://attacker-host/share/a.png") is None

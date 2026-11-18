@@ -623,7 +623,11 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             filters,
         )
         if files:
-            self.playlist_mgr.add_files(files)
+            add_async = getattr(self.playlist_mgr, "add_files_async", None)
+            if callable(add_async):
+                add_async(files)
+            else:
+                self.playlist_mgr.add_files(files)
 
     def _on_add_folder_clicked(self) -> None:
         folder = get_existing_directory(
@@ -632,7 +636,11 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             self.playlist_mgr.get_initial_picker_dir(),
         )
         if folder:
-            self.playlist_mgr.add_folder(folder)
+            add_async = getattr(self.playlist_mgr, "add_folder_async", None)
+            if callable(add_async):
+                add_async(folder)
+            else:
+                self.playlist_mgr.add_folder(folder)
 
     def _on_context_menu(self, pos: QPoint) -> None:
         item = self.list_widget.itemAt(pos)
@@ -692,12 +700,23 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
     def dropEvent(self, event) -> None:
         urls = event.mimeData().urls()
         paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        files_to_add: list[str] = []
+        add_folder_async = getattr(self.playlist_mgr, "add_folder_async", None)
+        add_files_async = getattr(self.playlist_mgr, "add_files_async", None)
         for p in paths:
             path_obj = Path(p)
             if path_obj.is_dir():
-                self.playlist_mgr.add_folder(str(path_obj))
+                if callable(add_folder_async):
+                    add_folder_async(str(path_obj))
+                else:
+                    self.playlist_mgr.add_folder(str(path_obj))
             elif path_obj.is_file():
-                self.playlist_mgr.add_files([str(path_obj)])
+                files_to_add.append(str(path_obj))
+        if files_to_add:
+            if callable(add_files_async):
+                add_files_async(files_to_add)
+            else:
+                self.playlist_mgr.add_files(files_to_add)
         event.acceptProposedAction()
 
     # Window Dragging

@@ -9,8 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import random
+import threading
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from PyQt6.QtCore import QObject, QSettings, QStandardPaths, pyqtSignal
 
@@ -47,6 +48,7 @@ class LocalPlaylistManager(QObject):
     queue_updated = pyqtSignal()
     playback_ended = pyqtSignal()
     mode_changed = pyqtSignal(bool, int)  # shuffle, repeat_mode
+    _async_tracks_extracted = pyqtSignal(object, object, object)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -59,6 +61,7 @@ class LocalPlaylistManager(QObject):
         self._settings = QSettings(ORG_NAME, APP_SETTINGS)
         self._shuffle: bool = self._settings.value(KEY_LOCAL_SHUFFLE, False, type=bool)
         self._repeat_mode: int = int(self._settings.value(KEY_LOCAL_REPEAT_MODE, REPEAT_ALL))
+        self._async_tracks_extracted.connect(self._on_async_tracks_extracted)
 
     @property
     def tracks(self) -> list[LocalTrackInfo]:
@@ -101,9 +104,9 @@ class LocalPlaylistManager(QObject):
             return last_dir
         return get_default_music_dir()
 
-    def add_files(self, paths: Sequence[str]) -> int:
-        """Extract metadata and append supported audio files to the queue."""
-        added = 0
+    @staticmethod
+    def _extract_files_list(paths: Sequence[str]) -> tuple[list[LocalTrackInfo], Path | None]:
+        infos: list[LocalTrackInfo] = []
         last_parent: Path | None = None
         for p in paths:
             path_obj = Path(p)
@@ -114,13 +117,18 @@ class LocalPlaylistManager(QObject):
             try:
                 resolved = path_obj.resolve()
                 info = extract_track_metadata(str(resolved))
-                self._tracks.append(info)
+                infos.append(info)
                 last_parent = resolved.parent
-                added += 1
             except Exception as e:
                 logger.warning("Could not extract metadata for '%s': %s", p, e)
+        return infos, last_parent
 
+    def _commit_extracted_tracks(
+        self, infos: list[LocalTrackInfo], last_parent: Path | None
+    ) -> int:
+        added = len(infos)
         if added > 0:
+            self._tracks.extend(infos)
             if last_parent is not None and last_parent.is_dir():
                 self._settings.setValue(KEY_LOCAL_LAST_DIR, str(last_parent))
             self._rebuild_shuffle_order()
@@ -130,6 +138,50 @@ class LocalPlaylistManager(QObject):
                 self.play_index(0)
         return added
 
+    def _on_async_tracks_extracted(
+        self,
+        infos: list[LocalTrackInfo],
+        last_parent_str: str | None,
+        on_done: Callable[[int], None] | None,
+    ) -> None:
+        last_parent = Path(last_parent_str) if last_parent_str else None
+        added = self._commit_extracted_tracks(infos, last_parent)
+        if callable(on_done):
+            try:
+                on_done(added)
+            except Exception:
+                pass
+
+    def add_files(self, paths: Sequence[str]) -> int:
+        """Extract metadata and append supported audio files to the queue."""
+        infos, last_parent = self._extract_files_list(paths)
+        return self._commit_extracted_tracks(infos, last_parent)
+
+    def add_files_async(
+        self,
+        paths: Sequence[str],
+        on_done: Callable[[int], None] | None = None,
+    ) -> None:
+        """Extract metadata on a background worker thread and commit tracks on the UI thread."""
+        path_list = list(paths)
+
+        def _worker() -> None:
+            infos, last_parent = self._extract_files_list(path_list)
+            self._async_tracks_extracted.emit(
+                infos, str(last_parent) if last_parent is not None else None, on_done
+            )
+
+        threading.Thread(target=_worker, name="LocalMetadataFilesWorker", daemon=True).start()
+
+    @staticmethod
+    def _collect_folder_audio_files(folder: Path, recursive: bool = True) -> list[str]:
+        files_to_add: list[str] = []
+        iterator = folder.rglob("*") if recursive else folder.glob("*")
+        for item in sorted(iterator):
+            if item.is_file() and item.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                files_to_add.append(str(item.resolve()))
+        return files_to_add
+
     def add_folder(self, folder_path: str, recursive: bool = True) -> int:
         """Scan a directory for supported audio files and add them."""
         folder = Path(folder_path)
@@ -137,14 +189,35 @@ class LocalPlaylistManager(QObject):
             return 0
 
         self._settings.setValue(KEY_LOCAL_LAST_DIR, str(folder.resolve()))
-
-        files_to_add: list[str] = []
-        iterator = folder.rglob("*") if recursive else folder.glob("*")
-        for item in sorted(iterator):
-            if item.is_file() and item.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS:
-                files_to_add.append(str(item.resolve()))
-
+        files_to_add = self._collect_folder_audio_files(folder, recursive=recursive)
         return self.add_files(files_to_add)
+
+    def add_folder_async(
+        self,
+        folder_path: str,
+        recursive: bool = True,
+        on_done: Callable[[int], None] | None = None,
+    ) -> None:
+        """Scan a folder and extract track metadata on a background worker thread."""
+        folder = Path(folder_path)
+        if not folder.is_dir():
+            if callable(on_done):
+                on_done(0)
+            return
+
+        resolved_folder = str(folder.resolve())
+        self._settings.setValue(KEY_LOCAL_LAST_DIR, resolved_folder)
+
+        def _worker() -> None:
+            files_to_add = self._collect_folder_audio_files(
+                Path(resolved_folder), recursive=recursive
+            )
+            infos, last_parent = self._extract_files_list(files_to_add)
+            self._async_tracks_extracted.emit(
+                infos, str(last_parent) if last_parent is not None else resolved_folder, on_done
+            )
+
+        threading.Thread(target=_worker, name="LocalMetadataFolderWorker", daemon=True).start()
 
     def remove_track(self, index: int) -> bool:
         """Remove a track at the given index."""
@@ -153,7 +226,7 @@ class LocalPlaylistManager(QObject):
 
         is_current = index == self._current_index
         del self._tracks[index]
-        self._history = [h for h in self._history if h != index]
+        self._history = [h - 1 if h > index else h for h in self._history if h != index]
 
         if is_current:
             if len(self._tracks) == 0:
@@ -171,6 +244,16 @@ class LocalPlaylistManager(QObject):
         self.queue_updated.emit()
         return True
 
+    @staticmethod
+    def _remap_moved_index(idx: int, from_idx: int, to_idx: int) -> int:
+        if idx == from_idx:
+            return to_idx
+        if from_idx < idx <= to_idx:
+            return idx - 1
+        if to_idx <= idx < from_idx:
+            return idx + 1
+        return idx
+
     def move_track(self, from_idx: int, to_idx: int) -> bool:
         """Reorder tracks in the playlist."""
         if not (0 <= from_idx < len(self._tracks) and 0 <= to_idx < len(self._tracks)):
@@ -181,12 +264,8 @@ class LocalPlaylistManager(QObject):
         track = self._tracks.pop(from_idx)
         self._tracks.insert(to_idx, track)
 
-        if self._current_index == from_idx:
-            self._current_index = to_idx
-        elif from_idx < self._current_index <= to_idx:
-            self._current_index -= 1
-        elif to_idx <= self._current_index < from_idx:
-            self._current_index += 1
+        self._current_index = self._remap_moved_index(self._current_index, from_idx, to_idx)
+        self._history = [self._remap_moved_index(h, from_idx, to_idx) for h in self._history]
 
         self._rebuild_shuffle_order()
         self.save_queue()

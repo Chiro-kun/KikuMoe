@@ -52,6 +52,7 @@ class _ElidedLabel(QLabel):
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
+        self.setTextFormat(Qt.TextFormat.PlainText)
         self._full_text = text
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(0)

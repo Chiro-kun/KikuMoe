@@ -68,9 +68,6 @@ STATIONS: dict[str, dict[str, Any]] = {
         "streams": {
             "MP3 320k": "https://pool.anison.fm/AniSonFM(320)",
         },
-        "fallback_streams": [
-            "http://pool.anison.fm:9000/AniSonFM(320)",
-        ],
         "metadata_url": "https://anison.fm/status.php?widget=true&layer=1",
         "homepage": "https://en.anison.fm/",
     },

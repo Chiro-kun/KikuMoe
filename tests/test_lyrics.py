@@ -485,3 +485,15 @@ def test_betterlyrics_omits_album_without_api_key_and_caches_401_misses(qapp, mo
     _wait_for_lyrics_results(qapp, results, 2)
     assert results[-1] == (None, "missing")
     assert calls == []
+
+
+def test_ttml_xml_guard_rejects_doctype_beyond_512_bytes():
+    """Verify padded XML with <!DOCTYPE or <!ENTITY after 512 bytes is still rejected."""
+    from core.lyrics import ttml_to_lrc
+
+    padding = " " * 1024
+    malicious_ttml = (
+        f'<?xml version="1.0"?>{padding}<!DOCTYPE tt [<!ENTITY xxe "boom">]>'
+        '<tt><body><div><p begin="00:01.00">Hello</p></div></body></tt>'
+    )
+    assert ttml_to_lrc(malicious_ttml) == ""

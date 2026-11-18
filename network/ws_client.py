@@ -71,9 +71,12 @@ class NowPlayingWS:
                     data = json.loads(message)
                 except Exception:
                     return
+                if not isinstance(data, dict):
+                    return
                 op = data.get("op")
                 if op == 0:
-                    d = data.get("d", {})
+                    raw_d = data.get("d")
+                    d = raw_d if isinstance(raw_d, dict) else {}
                     hb = d.get("heartbeat")
                     if isinstance(hb, int):
                         self.ws_heartbeat_interval_ms = hb
@@ -84,7 +87,10 @@ class NowPlayingWS:
                     except Exception:
                         pass
                 elif op == 1:
-                    d = data.get("d", {})
+                    raw_d = data.get("d")
+                    if not isinstance(raw_d, dict):
+                        return
+                    d = raw_d
                     t = data.get("t")
                     if t in ("TRACK_UPDATE", "TRACK_UPDATE_REQUEST"):
                         try:
@@ -92,10 +98,15 @@ class NowPlayingWS:
                                 return
                         except Exception:
                             pass
-                        song = d.get("song") or {}
+                        raw_song = d.get("song")
+                        song = raw_song if isinstance(raw_song, dict) else {}
                         title = song.get("title") or "Unknown"
-                        artists = song.get("artists") or []
-                        artist_name = artists[0].get("name") if artists else ""
+                        artists = song.get("artists")
+                        artist_name = ""
+                        if isinstance(artists, list) and artists:
+                            first_artist = artists[0]
+                            if isinstance(first_artist, dict):
+                                artist_name = str(first_artist.get("name") or "")
                         duration = song.get("duration")
                         try:
                             duration = int(duration) if duration is not None else None

@@ -206,3 +206,96 @@ def test_ogg_metadata(tmp_path: Path):
     info = extract_track_metadata(str(ogg_file))
     assert info.title == "Akeboshi"
     assert info.artist == "LiSA"
+
+
+def test_ogg_multipage_large_comment_and_synced_lyrics_detection(tmp_path: Path):
+    """Verify Ogg packets > 64KB spanning multiple Ogg pages and strict LRC timestamp detection."""
+    ogg_file = tmp_path / "large_comments.ogg"
+    vendor = b"Xiph.Org"
+    big_padding = "A" * 70000
+    comments = [
+        f"DESCRIPTION={big_padding}",
+        "TITLE=Crossing Field",
+        "ARTIST=LiSA",
+        "LYRICS=[Chorus]:\nWake up in the dream",
+    ]
+    vc_body = struct.pack("<I", len(vendor)) + vendor
+    vc_body += struct.pack("<I", len(comments))
+    for c in comments:
+        c_bytes = c.encode("utf-8")
+        vc_body += struct.pack("<I", len(c_bytes)) + c_bytes
+
+    packet = b"\x03vorbis" + vc_body
+    # Split packet across multiple laced OggS pages (each max 255 * 255 = 65025 bytes)
+    pages = bytearray()
+    pos = 0
+    page_seq = 0
+    while pos < len(packet):
+        chunk = packet[pos : pos + (254 * 255)]
+        pos += len(chunk)
+        full_segs, rem = divmod(len(chunk), 255)
+        if pos < len(packet):
+            seg_table = bytes([255] * full_segs)
+        else:
+            seg_table = bytes([255] * full_segs + [rem])
+        hdr = (
+            b"OggS"
+            + b"\x00"
+            + (b"\x01" if page_seq > 0 else b"\x00")
+            + b"\x00" * 8
+            + struct.pack("<III", 1, page_seq, 0)
+            + bytes([len(seg_table)])
+            + seg_table
+        )
+        pages.extend(hdr)
+        pages.extend(chunk)
+        page_seq += 1
+
+    ogg_file.write_bytes(bytes(pages))
+    info = extract_track_metadata(str(ogg_file))
+    assert info.title == "Crossing Field"
+    assert info.artist == "LiSA"
+    # "[Chorus]:" must not be misclassified as synced LRC
+    assert info.is_synced_lyrics is False
+
+    lrc_sidecar = tmp_path / "large_comments.lrc"
+    lrc_sidecar.write_text("[00:12.34] Synced line\n", encoding="utf-8")
+    info_synced = extract_track_metadata(str(ogg_file))
+    assert info_synced.is_synced_lyrics is True
+
+
+def test_wav_parser_seeks_past_data_chunk():
+    """Verify _parse_wav does not read the entire WAV data payload into memory."""
+    import io
+
+    from core.local_metadata import LocalTrackInfo, _parse_wav
+
+    class _TrackingStream(io.BytesIO):
+        def __init__(self, data: bytes) -> None:
+            super().__init__(data)
+            self.max_read_size = 0
+
+        def read(self, size: int | None = -1) -> bytes:
+            if size is None or size < 0 or size > 1024:
+                raise AssertionError(f"Unexpected large read({size}) in _parse_wav")
+            self.max_read_size = max(self.max_read_size, size)
+            return super().read(size)
+
+    # fmt chunk (16B) with byte_rate=176400, followed by 10s data chunk header (1764000B)
+    fmt_payload = struct.pack("<HHIIHH", 1, 2, 44100, 176400, 4, 16)
+    wav_bytes = (
+        b"RIFF"
+        + struct.pack("<I", 36 + 1764000)
+        + b"WAVE"
+        + b"fmt "
+        + struct.pack("<I", 16)
+        + fmt_payload
+        + b"data"
+        + struct.pack("<I", 1764000)
+        + b"\x00" * 64
+    )
+    stream = _TrackingStream(wav_bytes)
+    info = LocalTrackInfo(file_path="dummy.wav")
+    _parse_wav(stream, 44 + 1764000, info)
+    assert info.duration_seconds == 10.0
+    assert stream.max_read_size <= 64

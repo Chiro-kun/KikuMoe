@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+
+_LRC_TIMESTAMP_RE = re.compile(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]")
+_MAX_ID3_TAG_BYTES = 16 * 1024 * 1024
+_MAX_OGG_COMMENT_BYTES = 8 * 1024 * 1024
 
 
 @dataclass
@@ -96,7 +101,7 @@ def _parse_id3v2(f: io.BufferedReader, info: LocalTrackInfo) -> None:
         return
 
     version_major = header[3]
-    tag_size = _read_synchsafe_int(header[6:10])
+    tag_size = min(_read_synchsafe_int(header[6:10]), _MAX_ID3_TAG_BYTES)
     tag_data = f.read(tag_size)
     offset = 0
     data_len = len(tag_data)
@@ -367,23 +372,78 @@ def _parse_vorbis_comments(data: bytes, info: LocalTrackInfo) -> None:
 # =========================================================================
 
 
+def _extract_ogg_comment_packet(f: io.BufferedReader) -> tuple[bytes, int] | None:
+    """Reassemble Ogg packets across pages and return (comment_packet_bytes, header_len)."""
+    f.seek(0)
+    packet_buf = bytearray()
+    total_read = 0
+
+    while total_read < _MAX_OGG_COMMENT_BYTES:
+        page_hdr = f.read(27)
+        if len(page_hdr) < 27 or page_hdr[:4] != b"OggS":
+            break
+        num_segments = page_hdr[26]
+        if num_segments == 0:
+            break
+        seg_table = f.read(num_segments)
+        if len(seg_table) < num_segments:
+            break
+        page_payload_len = sum(seg_table)
+        page_payload = f.read(page_payload_len)
+        if len(page_payload) < page_payload_len:
+            break
+        total_read += 27 + num_segments + page_payload_len
+
+        pos = 0
+        for seg_len in seg_table:
+            if len(packet_buf) + seg_len <= _MAX_OGG_COMMENT_BYTES:
+                packet_buf.extend(page_payload[pos : pos + seg_len])
+            pos += seg_len
+            if seg_len < 255:
+                pkt = bytes(packet_buf)
+                packet_buf.clear()
+                if pkt.startswith(b"\x03vorbis"):
+                    return pkt, 7
+                if pkt.startswith(b"OpusTags"):
+                    return pkt, 8
+
+        # If a comment packet is still spanning further pages, keep reading;
+        # if a non-comment packet grows huge (e.g. audio data), abort early.
+        if (
+            len(packet_buf) > 65536
+            and not packet_buf.startswith(b"\x03vorbis")
+            and not packet_buf.startswith(b"OpusTags")
+        ):
+            break
+
+    if packet_buf.startswith(b"\x03vorbis"):
+        return bytes(packet_buf), 7
+    if packet_buf.startswith(b"OpusTags"):
+        return bytes(packet_buf), 8
+    return None
+
+
 def _parse_ogg(f: io.BufferedReader, file_size: int, info: LocalTrackInfo) -> None:
     """Extract metadata from OGG Vorbis or Opus file."""
     f.seek(0)
-    chunk = f.read(65536)
-    if not chunk.startswith(b"OggS"):
+    magic = f.read(4)
+    if magic != b"OggS":
         return
 
-    # Check for Vorbis comment marker
-    vorbis_pos = chunk.find(b"\x03vorbis")
-    if vorbis_pos != -1:
-        # Vorbis comments start right after the 7-byte header
-        _parse_vorbis_comments(chunk[vorbis_pos + 7 :], info)
-
-    # Check for Opus tags marker
-    opus_pos = chunk.find(b"OpusTags")
-    if opus_pos != -1:
-        _parse_vorbis_comments(chunk[opus_pos + 8 :], info)
+    pkt_info = _extract_ogg_comment_packet(f)
+    if pkt_info is not None:
+        pkt_bytes, hdr_len = pkt_info
+        _parse_vorbis_comments(pkt_bytes[hdr_len:], info)
+    else:
+        # Fallback for synthetic or non-laced streams up to _MAX_OGG_COMMENT_BYTES
+        f.seek(0)
+        chunk = f.read(min(max(file_size, 65536), _MAX_OGG_COMMENT_BYTES))
+        vorbis_pos = chunk.find(b"\x03vorbis")
+        if vorbis_pos != -1:
+            _parse_vorbis_comments(chunk[vorbis_pos + 7 :], info)
+        opus_pos = chunk.find(b"OpusTags")
+        if opus_pos != -1:
+            _parse_vorbis_comments(chunk[opus_pos + 8 :], info)
 
     # Duration fallback from file size at 160kbps
     if info.duration_seconds <= 0 and file_size > 0:
@@ -506,15 +566,27 @@ def _parse_wav(f: io.BufferedReader, file_size: int, info: LocalTrackInfo) -> No
         if len(head) < 8:
             break
         chunk_id, chunk_size = struct.unpack("<4sI", head)
-        chunk_data = f.read(chunk_size)
-        if chunk_id == b"fmt " and len(chunk_data) >= 16:
-            byte_rate = struct.unpack("<I", chunk_data[8:12])[0]
+        if chunk_id == b"fmt ":
+            read_len = min(chunk_size, 64)
+            chunk_data = f.read(read_len)
+            if len(chunk_data) >= 16:
+                byte_rate = struct.unpack("<I", chunk_data[8:12])[0]
+            remaining = chunk_size - len(chunk_data)
+            if remaining > 0:
+                f.seek(remaining, io.SEEK_CUR)
         elif chunk_id == b"data":
             data_size = chunk_size
+            if byte_rate > 0:
+                break
+            f.seek(chunk_size, io.SEEK_CUR)
+        else:
+            f.seek(chunk_size, io.SEEK_CUR)
 
         # Pad to word boundary
         if chunk_size % 2 == 1:
             f.seek(1, io.SEEK_CUR)
+        if byte_rate > 0 and data_size > 0:
+            break
 
     if byte_rate > 0 and data_size > 0:
         info.duration_seconds = round(data_size / float(byte_rate), 2)
@@ -632,8 +704,6 @@ def extract_track_metadata(file_path: str) -> LocalTrackInfo:
 
     # Check if lyrics have synchronized timestamps [mm:ss.xx]
     if info.lyrics:
-        info.is_synced_lyrics = bool(
-            "[" in info.lyrics and ":" in info.lyrics and "]" in info.lyrics
-        )
+        info.is_synced_lyrics = bool(_LRC_TIMESTAMP_RE.search(info.lyrics))
 
     return info

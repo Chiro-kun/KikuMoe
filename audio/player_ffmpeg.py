@@ -1215,6 +1215,35 @@ class PlayerFFmpeg:
                     except Exception:
                         pass
 
+                    stderr_chunks: list[bytes] = []
+
+                    def _drain_stderr(
+                        _proc=local_proc,
+                        _chunks=stderr_chunks,
+                    ) -> None:
+                        try:
+                            if _proc is None or _proc.stderr is None:
+                                return
+                            total = 0
+                            while True:
+                                buf = _proc.stderr.read(4096)
+                                if not buf:
+                                    break
+                                if total < 65536:
+                                    take = buf[: 65536 - total]
+                                    _chunks.append(take)
+                                    total += len(take)
+                        except Exception:
+                            pass
+
+                    stderr_thread = threading.Thread(
+                        target=_drain_stderr, name="FFmpegStderrDrain", daemon=True
+                    )
+                    try:
+                        stderr_thread.start()
+                    except Exception:
+                        pass
+
                     while True:
                         if self._is_seek_interrupted(seek_seq_at_start):
                             seek_restarted = True
@@ -1254,7 +1283,11 @@ class PlayerFFmpeg:
                             code = proc.poll()
                             err = b""
                             try:
-                                if proc.stderr:
+                                if stderr_thread.is_alive():
+                                    stderr_thread.join(timeout=0.1)
+                                if stderr_chunks:
+                                    err = b"".join(stderr_chunks)
+                                elif proc.stderr:
                                     err = proc.stderr.read() or b""  # type: ignore[assignment]
                             except Exception as e:
                                 self.log.debug("[DEBUG] error reading ffmpeg stderr: %s", e)
