@@ -907,9 +907,11 @@ def test_remote_station_blocks_local_and_unc_cover_paths(tmp_path: Path):
         _set_album_cover_pixmap=lambda pm: applied.append(pm),
     )
 
-    # Remote station receiving a local path or UNC path must treat it as invalid remote cover
+    # Remote station receiving a local path, POSIX path, or UNC path must treat it as invalid
     ListenMoePlayer._request_album_cover(remote_fake, str(local_img))
     assert applied == [None]
+    assert normalize_cover_url("/tmp/secret.png") is None
+    assert normalize_cover_url("/covers/sample.png") == "https://cdn.listen.moe/covers/sample.png"
     assert ListenMoePlayer._resolve_system_media_cover_url(remote_fake, local_img.as_uri()) == ""
 
     # Even in local mode, UNC paths and remote file:// hosts must be rejected before os.path.isfile

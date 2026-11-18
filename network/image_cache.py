@@ -46,6 +46,7 @@ def normalize_cover_url(cover_ref: str | None) -> str | None:
             low.startswith(("http://", "file://", "\\\\", "//"))
             or "\\" in value
             or (len(value) >= 2 and value[1] == ":")
+            or (value.startswith("/") and not low.startswith("/covers/"))
         ):
             return None
 
