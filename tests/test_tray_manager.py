@@ -630,3 +630,47 @@ def test_tray_card_and_mini_hud_prevent_html_injection_in_labels_and_tooltips(qa
     assert "&lt;img" in marquee.toolTip()
     card.deleteLater()
     marquee.deleteLater()
+
+
+def test_closing_to_tray_twice_does_not_quit_app(qapp):
+    """Verify choosing 'Minimize to tray' twice (window close then tray quit) keeps app alive."""
+    from PyQt6.QtCore import Qt, QTimer
+
+    from ui.close_dialog import CloseConfirmDialog
+
+    dlg = CloseConfirmDialog(parent=None)
+    assert dlg.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose) is False
+    dlg.deleteLater()
+
+    last_window_closed_events: list[str] = []
+    conn = qapp.lastWindowClosed.connect(lambda: last_window_closed_events.append("closed"))
+    main_win = QWidget()
+    main_win.show()
+    steps: list[str] = []
+
+    def _run_sequence() -> None:
+        # 1. Close main window -> choose Minimize to tray
+        d1 = CloseConfirmDialog(parent=main_win)
+        QTimer.singleShot(10, d1._on_tray)
+        d1.exec()
+        assert d1.action == "tray"
+        main_win.hide()
+        steps.append("first_tray")
+
+        # 2. Hidden in tray; right-click tray -> Quit -> choose Minimize to tray again
+        d2 = CloseConfirmDialog(parent=None)
+        QTimer.singleShot(10, d2._on_tray)
+        d2.exec()
+        assert d2.action == "tray"
+        steps.append("second_tray")
+
+        QTimer.singleShot(20, qapp.quit)
+
+    try:
+        QTimer.singleShot(10, _run_sequence)
+        qapp.exec()
+        assert steps == ["first_tray", "second_tray"]
+        assert last_window_closed_events == []
+    finally:
+        qapp.lastWindowClosed.disconnect(conn)
+        main_win.deleteLater()

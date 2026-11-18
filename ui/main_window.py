@@ -2231,8 +2231,7 @@ class ListenMoePlayer(QWidget):
 
         tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
         if not tray_enabled:
-            self._cleanup_before_close()
-            event.accept()
+            self._finalize_quit_close(event)
             return
 
         dont_ask = self._get_bool(KEY_DONT_ASK_ON_CLOSE, False)
@@ -2244,8 +2243,7 @@ class ListenMoePlayer(QWidget):
                 self.hide()
                 event.ignore()
             else:
-                self._cleanup_before_close()
-                event.accept()
+                self._finalize_quit_close(event)
             return
 
         try:
@@ -2284,11 +2282,17 @@ class ListenMoePlayer(QWidget):
                 self.hide()
                 event.ignore()
             else:
-                self._cleanup_before_close()
-                event.accept()
+                self._finalize_quit_close(event)
         except Exception:
-            self._cleanup_before_close()
-            event.accept()
+            self._finalize_quit_close(event)
+
+    def _finalize_quit_close(self, event) -> None:
+        """Clean up resources, accept close event, and exit QApplication even if hidden."""
+        self._cleanup_before_close()
+        event.accept()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""

@@ -305,6 +305,7 @@ class SongHistoryPopover(QWidget):
         )
         super().__init__(parent, flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
 
         self.history_manager = history_manager
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")

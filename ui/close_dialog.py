@@ -200,6 +200,7 @@ class CloseConfirmDialog(QDialog):
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setFixedWidth(430)
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
