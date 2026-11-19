@@ -1678,20 +1678,48 @@ class ListenMoePlayer(QWidget):
         self.discord_presence = DiscordPresence(self)
         self._discord_timer = QTimer(self)
         self._discord_timer.setInterval(1000)
-        self._discord_timer.timeout.connect(self._sync_discord_presence)
-        self._discord_timer.start()
-        self._sync_discord_presence()
+        self._discord_timer.timeout.connect(self._on_discord_timer_tick)
+        self._sync_discord_settings()
 
-    def _sync_discord_presence(self):
-        rpc = self.discord_presence
+    def _on_discord_timer_tick(self) -> None:
+        self._sync_discord_presence(refresh_settings=False)
+
+    def _sync_discord_settings(self) -> None:
+        """Reload Discord RPC settings once and start/stop the 1s polling timer accordingly."""
+        rpc = getattr(self, "discord_presence", None)
+        if rpc is None:
+            return
         client_id = str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
         client_id = (
             client_id
             or os.environ.get("KIKUMOE_DISCORD_CLIENT_ID", "").strip()
             or DEFAULT_DISCORD_CLIENT_ID
         )
-        rpc.configure(self._get_bool(KEY_DISCORD_RPC_ENABLED, False), client_id)
+        enabled = self._get_bool(KEY_DISCORD_RPC_ENABLED, False)
+        rpc.configure(enabled, client_id)
+        timer = getattr(self, "_discord_timer", None)
+        if rpc.enabled:
+            if timer is not None and not timer.isActive():
+                timer.start()
+            self._sync_discord_presence(refresh_settings=False)
+        else:
+            if timer is not None and timer.isActive():
+                timer.stop()
+
+    def _sync_discord_presence(self, refresh_settings: bool = True):
+        rpc = self.discord_presence
+        if refresh_settings:
+            client_id = str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
+            client_id = (
+                client_id
+                or os.environ.get("KIKUMOE_DISCORD_CLIENT_ID", "").strip()
+                or DEFAULT_DISCORD_CLIENT_ID
+            )
+            rpc.configure(self._get_bool(KEY_DISCORD_RPC_ENABLED, False), client_id)
         if not rpc.enabled:
+            timer = getattr(self, "_discord_timer", None)
+            if timer is not None and timer.isActive():
+                timer.stop()
             return
         try:
             paused = bool(self._ui_paused or getattr(self.player, "is_paused", lambda: False)())
@@ -4929,6 +4957,7 @@ class ListenMoePlayer(QWidget):
                 self._sync_ambient_mode()
                 self._sync_dynamic_volume_settings()
                 self._sync_lyrics_settings()
+                self._sync_discord_settings()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
                 if new_tray_enabled != prev["tray_enabled"]:

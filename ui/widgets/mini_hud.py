@@ -35,6 +35,7 @@ class MarqueeLabel(QWidget):
     def __init__(self, color: str, bold: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._text = ""
+        self._text_width = 0
         self._color = QColor(color)
         self._offset = 0
         self._pause = 40
@@ -48,14 +49,28 @@ class MarqueeLabel(QWidget):
         self._timer.setInterval(35)
         self._timer.timeout.connect(self._tick)
 
+    def _needs_scroll(self) -> bool:
+        return bool(self._text and self.width() > 0 and self._text_width > self.width())
+
+    def _sync_timer_state(self) -> None:
+        if self.isVisible() and self._needs_scroll():
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            if self._timer.isActive():
+                self._timer.stop()
+            self._offset = 0
+            self._pause = 40
+
     def set_text(self, text: str) -> None:
         if self._text == text:
             return
         self._text = text
+        self._text_width = self.fontMetrics().horizontalAdvance(text) if text else 0
         self._offset = 0
         self._pause = 40
         self.setToolTip(html.escape(text) if text else "")
-        self._timer.start()
+        self._sync_timer_state()
         self.update()
 
     def set_color(self, color: str) -> None:
@@ -63,34 +78,41 @@ class MarqueeLabel(QWidget):
         self.update()
 
     def _tick(self) -> None:
-        if not self.isVisible() or self.fontMetrics().horizontalAdvance(self._text) <= self.width():
+        if not self.isVisible() or not self._needs_scroll():
             self._offset = 0
+            self._pause = 40
             self._timer.stop()
         elif self._pause:
             self._pause -= 1
         else:
             self._offset += 1
-            if self._offset > self.fontMetrics().horizontalAdvance(self._text) + 32:
+            if self._offset > self._text_width + 32:
                 self._offset = 0
                 self._pause = 40
         self.update()
 
     def showEvent(self, a0) -> None:
         super().showEvent(a0)
-        self._timer.start()
+        self._sync_timer_state()
+
+    def hideEvent(self, a0) -> None:
+        self._timer.stop()
+        self._offset = 0
+        self._pause = 40
+        super().hideEvent(a0)
 
     def resizeEvent(self, a0) -> None:
         super().resizeEvent(a0)
         self._offset = 0
         self._pause = 40
-        self._timer.start()
+        self._sync_timer_state()
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.setFont(self.font())
         painter.setPen(self._color)
-        width = self.fontMetrics().horizontalAdvance(self._text)
+        width = self._text_width
         painter.drawText(
             QRectF(-self._offset, 0, width + 2, self.height()),
             Qt.AlignmentFlag.AlignVCenter,

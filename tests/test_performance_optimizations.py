@@ -468,3 +468,152 @@ def test_main_window_does_not_eagerly_import_player_backends():
     assert "audio.player_ffmpeg" not in eager_modules
     assert "audio.player_mpv" not in eager_modules
     assert "audio.player_vlc" not in eager_modules
+
+
+# ---------------------------------------------------------------------------
+# 7. Discord RPC timer idle stop, History thumbnail cache, MarqueeLabel
+# ---------------------------------------------------------------------------
+
+
+def test_discord_settings_stops_timer_when_disabled_and_skips_qsettings_on_tick():
+    class _FakeTimer:
+        def __init__(self, active: bool = True) -> None:
+            self._active = active
+
+        def isActive(self) -> bool:
+            return self._active
+
+        def start(self) -> None:
+            self._active = True
+
+        def stop(self) -> None:
+            self._active = False
+
+    class _FakeRpc:
+        def __init__(self) -> None:
+            self.enabled = False
+            self.client_id = ""
+            self.activities: list[Any] = []
+
+        def configure(self, enabled: bool, client_id: str) -> None:
+            self.enabled = bool(enabled and client_id)
+            self.client_id = client_id
+
+        def set_activity(self, activity: Any) -> None:
+            self.activities.append(activity)
+
+    settings_reads = 0
+    rpc_enabled = {"val": False}
+
+    def _read_value(key: str, default: Any = "") -> Any:
+        nonlocal settings_reads
+        settings_reads += 1
+        return default
+
+    def _read_bool(key: str, default: bool = False) -> bool:
+        nonlocal settings_reads
+        settings_reads += 1
+        return bool(rpc_enabled["val"])
+
+    fake: Any = SimpleNamespace(
+        discord_presence=_FakeRpc(),
+        _discord_timer=_FakeTimer(active=True),
+        settings=SimpleNamespace(value=_read_value),
+        _get_bool=_read_bool,
+        player=SimpleNamespace(is_playing=lambda: True, is_paused=lambda: False),
+        _ui_paused=False,
+        _current_title="Track",
+        _current_artist="Artist",
+        _current_radio_provider="listenmoe",
+        _current_start_epoch=None,
+        _current_duration_seconds=None,
+        _clock_sync_offset=0.0,
+        _current_cover_ref=None,
+        _normalize_album_cover_url=lambda ref: None,
+        i18n=SimpleNamespace(t=lambda key: key),
+    )
+    fake._sync_discord_presence = lambda refresh_settings=True: (
+        ListenMoePlayer._sync_discord_presence(fake, refresh_settings=refresh_settings)
+    )
+
+    # Disabled -> stops 1s timer immediately
+    ListenMoePlayer._sync_discord_settings(fake)
+    assert not fake._discord_timer.isActive()
+    assert not fake.discord_presence.enabled
+
+    # Enabled -> starts 1s timer and reads settings once
+    rpc_enabled["val"] = True
+    ListenMoePlayer._sync_discord_settings(fake)
+    assert fake._discord_timer.isActive()
+    assert fake.discord_presence.enabled
+    reads_after_enable = settings_reads
+
+    # Periodic timer ticks must NOT re-read QSettings
+    ListenMoePlayer._on_discord_timer_tick(fake)
+    ListenMoePlayer._on_discord_timer_tick(fake)
+    assert settings_reads == reads_after_enable
+    assert len(fake.discord_presence.activities) >= 2
+
+
+def test_history_thumbnail_caches_scaled_pixmap_across_repaints():
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from network.image_cache import clear_cached_pixmaps, store_cached_pixmap
+    from ui.history_popover import _TrackThumbnail
+
+    app = _get_qapp()
+    clear_cached_pixmaps()
+    url = "https://cdn.listen.moe/covers/test_cached_thumb.png"
+    pm = QPixmap(128, 128)
+    pm.fill(QColor("#EC186C"))
+    store_cached_pixmap(url, pm)
+
+    thumb = _TrackThumbnail(url)
+    try:
+        scaled1 = thumb._get_scaled_pixmap()
+        scaled2 = thumb._get_scaled_pixmap()
+        assert scaled1 is not None
+        assert scaled1 is scaled2
+        assert scaled1.width() >= 34 and scaled1.height() >= 34
+        # Offscreen repaint uses the cached pixmap cleanly
+        thumb.grab()
+        assert thumb._get_scaled_pixmap() is scaled1
+    finally:
+        thumb.deleteLater()
+        app.processEvents()
+        clear_cached_pixmaps()
+
+
+def test_marquee_label_skips_timer_when_fitting_or_hidden_and_stops_on_hide():
+    from ui.widgets.mini_hud import MarqueeLabel
+
+    app = _get_qapp()
+    lbl = MarqueeLabel("#ffffff", bold=True)
+    lbl.resize(120, 18)
+    try:
+        # Hidden label must not start 35ms timer even for very long text
+        lbl.set_text("A very long anime song title that definitely overflows 120 pixels wide")
+        assert lbl._text_width > 120
+        assert not lbl._timer.isActive()
+
+        # Showing overflowing label starts timer
+        lbl.show()
+        app.processEvents()
+        assert lbl._timer.isActive()
+
+        # Hiding immediately stops timer and resets scroll offset
+        lbl._offset = 15
+        lbl.hide()
+        app.processEvents()
+        assert not lbl._timer.isActive()
+        assert lbl._offset == 0
+
+        # Visible short text that fits keeps timer stopped
+        lbl.show()
+        lbl.set_text("Hi")
+        app.processEvents()
+        assert not lbl._timer.isActive()
+    finally:
+        lbl.hide()
+        lbl.deleteLater()
+        app.processEvents()

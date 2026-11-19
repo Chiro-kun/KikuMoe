@@ -80,6 +80,8 @@ class _TrackThumbnail(QLabel):
         self.setFixedSize(34, 34)
         self.setStyleSheet("background: transparent; border: none;")
         self._pixmap: QPixmap | None = None
+        self._scaled_pixmap: QPixmap | None = None
+        self._scaled_target_px: int = 0
 
         if art_url:
             self._load_art(art_url)
@@ -88,7 +90,32 @@ class _TrackThumbnail(QLabel):
         cached = get_cached_pixmap(art_url)
         if cached is not None and not cached.isNull():
             self._pixmap = cached
+            self._scaled_pixmap = None
+            self._scaled_target_px = 0
             self.update()
+
+    def _get_scaled_pixmap(self) -> QPixmap | None:
+        if self._pixmap is None or self._pixmap.isNull():
+            return None
+        dpr = (
+            max(1.0, float(self.devicePixelRatioF())) if hasattr(self, "devicePixelRatioF") else 1.0
+        )
+        target_px = max(34, round(34 * dpr))
+        if self._scaled_pixmap is not None and self._scaled_target_px == target_px:
+            return self._scaled_pixmap
+        scaled = self._pixmap.scaled(
+            target_px,
+            target_px,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        cx = max(0, (scaled.width() - target_px) // 2)
+        cy = max(0, (scaled.height() - target_px) // 2)
+        cropped = scaled.copy(cx, cy, target_px, target_px)
+        cropped.setDevicePixelRatio(dpr)
+        self._scaled_pixmap = cropped
+        self._scaled_target_px = target_px
+        return cropped
 
     def paintEvent(self, a0: QPaintEvent | None) -> None:
         painter = QPainter(self)
@@ -96,22 +123,12 @@ class _TrackThumbnail(QLabel):
 
         rect = QRectF(0.5, 0.5, 33.0, 33.0)
 
-        if self._pixmap and not self._pixmap.isNull():
-            # Draw rounded cropped image
+        cropped = self._get_scaled_pixmap()
+        if cropped is not None and not cropped.isNull():
+            # Draw rounded cropped image (pre-scaled & cached per DPR)
             painter.setBrush(surface_qcolor(255, "bg_surface"))
             painter.setPen(QPen(QColor(255, 255, 255, 25), 1.0))
             painter.drawRoundedRect(rect, 6.0, 6.0)
-
-            scaled = self._pixmap.scaled(
-                34,
-                34,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            # Center crop
-            cx = (scaled.width() - 34) // 2
-            cy = (scaled.height() - 34) // 2
-            cropped = scaled.copy(cx, cy, 34, 34)
 
             # Paint with clip path
             painter.save()

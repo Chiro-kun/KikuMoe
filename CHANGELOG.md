@@ -21,10 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added a thread-safe bounded LRU cover-art byte pool (`intern_cover_bytes`, keyed by 16-byte `blake2b` digest, max 128 entries) so tracks from the same album share a single `bytes` object in memory.
   - Unified cover art `QPixmap` caching through `network/image_cache.py`, removing duplicate pixmap storage in `ListenMoePlayer._cover_cache`.
   - Made file/folder drag-and-drop (`dropEvent`) non-blocking by scanning paths off the UI thread and delegating metadata loading to `local_playlist.add_files_async()`.
-- **Startup Speed & UI Fluidity (`KikuMoe.py`, `ui/main_window.py`, `ui/history_popover.py`)**:
+- **Startup Speed & UI Fluidity (`KikuMoe.py`, `ui/main_window.py`, `ui/history_popover.py`, `ui/widgets/mini_hud.py`)**:
   - Deferred `PyQt6` and `ListenMoePlayer` imports in `KikuMoe.py` until after CLI flags (`--help`, `--version`, `--check-audio`) are handled.
   - Lazy-imported audio backends (`PlayerFFmpeg`, `PlayerMPV`, `PlayerVLC`) inside `_create_player()` so unused backend libraries and probes do not load at startup.
-  - Made `SongHistoryPopover` lazily rebuild row widgets on `open_at()` while keeping header badge counts and button states updated in O(1) when hidden; skipped scaling/blurring hidden legacy cover widgets.
+  - Made `SongHistoryPopover` lazily rebuild row widgets on `open_at()` while keeping header badge counts and button states updated in O(1) when hidden; cached HiDPI pre-scaled cover thumbnails in `_TrackThumbnail` instead of re-scaling on every `paintEvent`; skipped scaling/blurring hidden legacy cover widgets.
+  - Stopped the 1s Discord RPC polling timer whenever Discord Rich Presence is disabled and eliminated per-second `QSettings` reads on periodic ticks via `_sync_discord_settings()`.
+  - Optimized Mini-HUD `MarqueeLabel` to cache text widths, handle `hideEvent()`, and only run its 35 ms scroll timer when visible and overflowing.
 
 ### Fixed
 - **Embedded SettingsDialog close handling (`ui/settings_dialog.py`)**: accepted `closeEvent` and hid the dialog when `embedded=True`, preventing hidden/closed embedded settings dialogs from canceling `QApplication.quit()`.
