@@ -107,7 +107,7 @@ def test_synced_lyrics_center_and_animate_through_line_changes(qapp):
     panel = LyricsPanel()
     panel.resize(320, 222)
     panel.show()
-    assert panel.scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert panel.scroll_area.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     panel.show_record(
         {"syncedLyrics": "\n".join(f"[00:{n:02}.00]Line {n}" for n in range(1, 9))}, "Plain"
     )
@@ -119,8 +119,8 @@ def test_synced_lyrics_center_and_animate_through_line_changes(qapp):
     assert first._color.name() == panel._accent
     assert (
         abs(
-            first.mapTo(panel.scroll.viewport(), first.rect().center()).y()
-            - panel.scroll.viewport().height() // 2
+            first.mapTo(panel.scroll_area.viewport(), first.rect().center()).y()
+            - panel.scroll_area.viewport().height() // 2
         )
         < 5
     )
@@ -131,8 +131,8 @@ def test_synced_lyrics_center_and_animate_through_line_changes(qapp):
     assert first._color.alpha() == 165
     assert (
         abs(
-            last.mapTo(panel.scroll.viewport(), last.rect().center()).y()
-            - panel.scroll.viewport().height() // 2
+            last.mapTo(panel.scroll_area.viewport(), last.rect().center()).y()
+            - panel.scroll_area.viewport().height() // 2
         )
         < 5
     )
@@ -190,8 +190,8 @@ def test_lyrics_panel_responsive_scaling_and_recenter(qapp):
     active_lbl = panel.labels[panel.active]
     assert (
         abs(
-            active_lbl.mapTo(panel.scroll.viewport(), active_lbl.rect().center()).y()
-            - panel.scroll.viewport().height() // 2
+            active_lbl.mapTo(panel.scroll_area.viewport(), active_lbl.rect().center()).y()
+            - panel.scroll_area.viewport().height() // 2
         )
         < 5
     )

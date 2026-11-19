@@ -336,9 +336,9 @@ class SmoothProgressBar(QWidget):
         usable_w = max(1.0, float(self.width()) - 2 * margin_x)
         return max(0.0, min(1.0, (x - margin_x) / usable_w))
 
-    def mousePressEvent(self, event) -> None:
-        if self._seekable and event.button() == Qt.MouseButton.LeftButton:
-            ratio = self._ratio_from_x(float(event.position().x()))
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and a0.button() == Qt.MouseButton.LeftButton:
+            ratio = self._ratio_from_x(float(a0.position().x()))
             self._press_ratio = ratio
             self._is_dragging = True
             self._display_ratio = ratio
@@ -346,28 +346,33 @@ class SmoothProgressBar(QWidget):
             self.seek_requested.emit(ratio)
             self.update()
             return
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event) -> None:
-        if self._seekable and self._is_dragging:
-            ratio = self._ratio_from_x(float(event.position().x()))
+    def mouseMoveEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and self._is_dragging:
+            ratio = self._ratio_from_x(float(a0.position().x()))
             self._display_ratio = ratio
             self.setValue(int(ratio * self._max))
             self.update()
             return
-        super().mouseMoveEvent(event)
+        super().mouseMoveEvent(a0)
 
-    def mouseReleaseEvent(self, event) -> None:
-        if self._seekable and self._is_dragging and event.button() == Qt.MouseButton.LeftButton:
+    def mouseReleaseEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and self._seekable
+            and self._is_dragging
+            and a0.button() == Qt.MouseButton.LeftButton
+        ):
             self._is_dragging = False
-            ratio = self._ratio_from_x(float(event.position().x()))
+            ratio = self._ratio_from_x(float(a0.position().x()))
             if abs(ratio - self._press_ratio) > 0.002:
                 self._display_ratio = ratio
                 self.setValue(int(ratio * self._max))
                 self.seek_requested.emit(ratio)
             self.update()
             return
-        super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(a0)
 
     def _tick_anim(self) -> None:
         still_running = False
@@ -2039,7 +2044,7 @@ class ListenMoePlayer(QWidget):
             muted = bool(player and getattr(player, "get_mute", lambda: False)())
             resolver = getattr(self, "_resolve_system_media_cover_url", None)
             cover_url = (
-                resolver(self._current_cover_ref)
+                str(resolver(self._current_cover_ref) or "")
                 if callable(resolver)
                 else (self._normalize_album_cover_url(self._current_cover_ref) or "")
             )
@@ -2141,8 +2146,9 @@ class ListenMoePlayer(QWidget):
                 if hasattr(self, "song_progress"):
                     self.song_progress.setValue(0)
                     self.song_progress.set_seekable(True)
-                if hasattr(self, "time_label"):
-                    self.time_label.setText("00:00 / 00:00")
+                time_label = getattr(self, "time_label", None)
+                if time_label is not None:
+                    time_label.setText("00:00 / 00:00")
                 if hasattr(self, "playback_controls"):
                     self.playback_controls.set_nav_enabled(False, False)
                 QTimer.singleShot(400, self.prompt_select_local_music)
@@ -3167,8 +3173,9 @@ class ListenMoePlayer(QWidget):
                         self._current_duration_seconds = 0
                         if hasattr(self, "song_progress"):
                             self.song_progress.setValue(0)
-                        if hasattr(self, "time_label"):
-                            self.time_label.setText("00:00 / 00:00")
+                        time_label = getattr(self, "time_label", None)
+                        if time_label is not None:
+                            time_label.setText("00:00 / 00:00")
                         self.status_changed.emit(self.i18n.t("station_local"))
                         # Prompt the user to select local music!
                         if (
@@ -3606,10 +3613,12 @@ class ListenMoePlayer(QWidget):
             self.autoplay_checkbox.setText(self.i18n.t("settings_autoplay"))
         if hasattr(self, "playback_controls"):
             self.playback_controls.apply_translations(self.i18n)
-        if getattr(self, "_queue_dialog", None) is not None:
-            self._queue_dialog.retranslate(self.i18n)
-        if getattr(self, "_eq_popover", None) is not None:
-            self._eq_popover.retranslate(self.i18n)
+        queue_dialog = getattr(self, "_queue_dialog", None)
+        if queue_dialog is not None:
+            queue_dialog.retranslate(self.i18n)
+        eq_popover = getattr(self, "_eq_popover", None)
+        if eq_popover is not None:
+            eq_popover.retranslate(self.i18n)
         # Update dev console translator and dialog texts if open
         try:
             if hasattr(self, "dev_console") and self.dev_console:
@@ -6426,24 +6435,26 @@ class ListenMoePlayer(QWidget):
         self._playback_ended_stopped = True
         self.stop_stream()
 
-    def dragEnterEvent(self, event) -> None:
+    def dragEnterEvent(self, a0) -> None:
         """Accepts audio files or folders dragged directly onto the player."""
-        if event.mimeData().hasUrls():
-            for url in event.mimeData().urls():
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is not None and mime is not None and mime.hasUrls():
+            for url in mime.urls():
                 p = url.toLocalFile()
                 if os.path.isdir(p):
-                    event.acceptProposedAction()
+                    a0.acceptProposedAction()
                     return
                 ext = os.path.splitext(p)[1].lower()
                 if ext in SUPPORTED_AUDIO_EXTENSIONS:
-                    event.acceptProposedAction()
+                    a0.acceptProposedAction()
                     return
-        super().dragEnterEvent(event)
+        super().dragEnterEvent(a0)
 
-    def dropEvent(self, event) -> None:
+    def dropEvent(self, a0) -> None:
         """Appends dropped audio files/folders asynchronously, switches to Local, and plays."""
-        if event.mimeData().hasUrls():
-            paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is not None and mime is not None and mime.hasUrls():
+            paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
             valid_paths = [
                 p
                 for p in paths
@@ -6454,7 +6465,7 @@ class ListenMoePlayer(QWidget):
                 )
             ]
             if valid_paths:
-                event.acceptProposedAction()
+                a0.acceptProposedAction()
                 was_empty = len(self.local_playlist.tracks) == 0
 
                 def _collect_and_enqueue() -> None:
@@ -6485,4 +6496,4 @@ class ListenMoePlayer(QWidget):
 
                 threading.Thread(target=_collect_and_enqueue, daemon=True).start()
                 return
-        super().dropEvent(event)
+        super().dropEvent(a0)

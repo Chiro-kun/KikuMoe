@@ -202,7 +202,7 @@ def _resolve_folder_and_name(directory: str, is_save: bool) -> tuple[str, str]:
 
 async def _query_portal_file_chooser_version(bus: Any) -> int:
     """Return the ``org.freedesktop.portal.FileChooser.version`` property, or 0 on error."""
-    from dbus_next import Message, MessageType
+    from dbus_next import Message, MessageType  # pyright: ignore[reportMissingImports]
 
     reply = await asyncio.wait_for(
         bus.call(
@@ -234,8 +234,13 @@ async def _call_portal_file_chooser(
 ) -> _DialogResult:
     """Invoke ``org.freedesktop.portal.FileChooser`` over the session D-Bus."""
     try:
-        from dbus_next import BusType, Message, MessageType, Variant
-        from dbus_next.aio import MessageBus
+        from dbus_next import (  # pyright: ignore[reportMissingImports]
+            BusType,
+            Message,
+            MessageType,
+            Variant,
+        )
+        from dbus_next.aio import MessageBus  # pyright: ignore[reportMissingImports]
     except Exception as exc:
         _log.debug("dbus_next unavailable for native file picker: %s", exc)
         return _DialogResult(handled=False)

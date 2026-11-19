@@ -84,10 +84,10 @@ class _CompactPillSwitch(QPushButton):
         if not self._anim_timer.isActive():
             self._anim_timer.start()
 
-    def setChecked(self, checked: bool) -> None:
-        super().setChecked(checked)
+    def setChecked(self, a0: bool) -> None:
+        super().setChecked(a0)
         if not self.isVisible():
-            self._progress = 1.0 if checked else 0.0
+            self._progress = 1.0 if a0 else 0.0
             self._anim_timer.stop()
             self.update()
         elif not self._anim_timer.isActive():
@@ -857,15 +857,15 @@ class EqualizerPopover(QWidget):
         blurred.setDevicePixelRatio(ratio)
         self._blurred_backdrop = blurred
 
-    def eventFilter(self, watched: QObject | None, event: QEvent | None) -> bool:
-        if event is None or not self.isVisible() or self._is_closing:
-            return super().eventFilter(watched, event)
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if a1 is None or not self.isVisible() or self._is_closing:
+            return super().eventFilter(a0, a1)
 
-        etype = event.type()
-        if etype == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
-            gpos = event.globalPosition().toPoint()
+        etype = a1.type()
+        if etype == QEvent.Type.MouseButtonPress and isinstance(a1, QMouseEvent):
+            gpos = a1.globalPosition().toPoint()
             if self.frameGeometry().contains(gpos):
-                return super().eventFilter(watched, event)
+                return super().eventFilter(a0, a1)
             # Keep popover open when interacting with the preset dropdown list
             combo_view = self.cmb_preset.view()
             if combo_view is not None:
@@ -876,19 +876,19 @@ class EqualizerPopover(QWidget):
                     and combo_popup.isVisible()
                     and combo_popup.frameGeometry().contains(gpos)
                 ):
-                    return super().eventFilter(watched, event)
+                    return super().eventFilter(a0, a1)
             # Let the anchor EQ button toggle cleanly via its own clicked signal
             if self._anchor_widget is not None and self._anchor_widget.isVisible():
                 anchor_tl = self._anchor_widget.mapToGlobal(QPoint(0, 0))
                 anchor_rect = QRect(anchor_tl, self._anchor_widget.size())
                 if anchor_rect.contains(gpos):
-                    return super().eventFilter(watched, event)
+                    return super().eventFilter(a0, a1)
             self._animate_exit()
         elif etype == QEvent.Type.ApplicationDeactivate:
             if not getattr(self.cmb_preset, "_popup_open", False):
                 self._animate_exit()
 
-        return super().eventFilter(watched, event)
+        return super().eventFilter(a0, a1)
 
     def open_at(
         self,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import TYPE_CHECKING
 
 from core.config import get_station_config, get_station_stream_url
 from core.constants import (
@@ -31,7 +32,7 @@ from network.providers.local_provider import LocalProvider
 from network.providers.neuro21_provider import Neuro21Provider
 from network.providers.truckersfm_provider import TruckersFMProvider
 
-if False:
+if TYPE_CHECKING:
     from core.local_playlist import LocalPlaylistManager
 
 logger = logging.getLogger("kikumoe.station_manager")

@@ -73,7 +73,7 @@ class AnimatedVectorButton(QPushButton):
         self.update()
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
             self.trigger_click_animation()
         super().mousePressEvent(e)

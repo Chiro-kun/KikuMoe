@@ -2,7 +2,7 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from core.ssl_compat import get_websocket_sslopt
 
@@ -25,7 +25,7 @@ class NowPlayingWS:
         channel_filter: Optional[Callable[[dict], bool]] = None,
         ws_url: Optional[str] = None,
     ):
-        self.ws_app: Optional[WebSocketApp] = None
+        self.ws_app: Optional[Any] = None
         self.ws_thread: Optional[threading.Thread] = None
         self.ws_heartbeat_interval_ms: Optional[int] = None
         self.ws_heartbeat_timer: Optional[threading.Timer] = None
@@ -170,15 +170,16 @@ class NowPlayingWS:
                     self._reconnect_timer.daemon = True
                     self._reconnect_timer.start()
 
-            self.ws_app = WebSocketApp(
+            ws_app = WebSocketApp(
                 self.ws_url,
                 on_open=on_open,
                 on_message=on_message,
                 on_error=on_error,
                 on_close=on_close,
             )
+            self.ws_app = ws_app
             self.ws_thread = threading.Thread(
-                target=self.ws_app.run_forever,
+                target=ws_app.run_forever,
                 kwargs={
                     "ping_interval": None,
                     "sslopt": get_websocket_sslopt() if self.ws_url.startswith("wss://") else None,

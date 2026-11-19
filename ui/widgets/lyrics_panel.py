@@ -142,12 +142,12 @@ class LyricsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(5)
-        self.scroll = QScrollArea()
-        self.scroll.setObjectName("lyricsScroll")
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        vp = self.scroll.viewport()
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("lyricsScroll")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        vp = self.scroll_area.viewport()
         if vp is not None:
             vp.installEventFilter(self)
         self.content = QWidget()
@@ -155,13 +155,13 @@ class LyricsPanel(QWidget):
         self.content_layout.setContentsMargins(0, 0, 4, 0)
         self.content_layout.setSpacing(9)
         self.content_layout.addStretch()
-        self.scroll.setWidget(self.content)
+        self.scroll_area.setWidget(self.content)
         self.skeleton = LyricsSkeleton()
         self.stack = QStackedWidget()
-        self.stack.addWidget(self.scroll)
+        self.stack.addWidget(self.scroll_area)
         self.stack.addWidget(self.skeleton)
         layout.addWidget(self.stack, 1)
-        vbar = self.scroll.verticalScrollBar()
+        vbar = self.scroll_area.verticalScrollBar()
         self.animation = QPropertyAnimation(vbar, b"value", self)
         self.animation.setDuration(350)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -230,18 +230,18 @@ class LyricsPanel(QWidget):
         self.labels.append(label)
 
     def show_message(self, text):
-        self.stack.setCurrentWidget(self.scroll)
+        self.stack.setCurrentWidget(self.scroll_area)
         self._clear()
         self.content_layout.setContentsMargins(0, 0, 4, 0)
         self._add_line(text)
         self.content_layout.addStretch()
         self._update_styles()
-        vbar = self.scroll.verticalScrollBar()
+        vbar = self.scroll_area.verticalScrollBar()
         if vbar is not None:
             vbar.setValue(0)
 
     def show_record(self, record, plain_note, timing_note=""):
-        self.stack.setCurrentWidget(self.scroll)
+        self.stack.setCurrentWidget(self.scroll_area)
         self._clear()
         self.lines = parse_lrc(record.get("syncedLyrics"))
         if self.lines and not timing_note:
@@ -256,7 +256,7 @@ class LyricsPanel(QWidget):
             self._add_line(text)
             self.content_layout.addStretch()
         self._update_styles()
-        vbar = self.scroll.verticalScrollBar()
+        vbar = self.scroll_area.verticalScrollBar()
         if vbar is not None:
             vbar.setValue(0)
 
@@ -272,14 +272,14 @@ class LyricsPanel(QWidget):
             label.set_active(index == self.active, self._accent, animate)
 
     def _update_padding(self):
-        vp = self.scroll.viewport()
+        vp = self.scroll_area.viewport()
         padding = max(0, (vp.height() if vp is not None else 0) // 2)
         self.content_layout.setContentsMargins(0, padding, 4, padding)
 
     def eventFilter(self, a0, a1):
         if (
             a1 is not None
-            and a0 is self.scroll.viewport()
+            and a0 is self.scroll_area.viewport()
             and a1.type() == QEvent.Type.Resize
             and self.lines
         ):
@@ -296,8 +296,8 @@ class LyricsPanel(QWidget):
             return
         self.content_layout.activate()
         label = self.labels[self.active]
-        bar = self.scroll.verticalScrollBar()
-        vp = self.scroll.viewport()
+        bar = self.scroll_area.verticalScrollBar()
+        vp = self.scroll_area.viewport()
         if bar is None or vp is None:
             return
         target = label.y() + label.height() // 2 - vp.height() // 2

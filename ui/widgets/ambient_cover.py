@@ -522,8 +522,9 @@ class AnimatedTrackLabel(QLabel):
             return
         if self._hovered != hovered:
             self._hovered = hovered
-            if self._chevron_btn and hasattr(self._chevron_btn, "set_hovered"):
-                self._chevron_btn.set_hovered(hovered)
+            set_chevron_hovered = getattr(self._chevron_btn, "set_hovered", None)
+            if callable(set_chevron_hovered):
+                set_chevron_hovered(hovered)
             self.update()
             if self._hover_group is not None:
                 self._hover_group.set_hovered(hovered)

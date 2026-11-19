@@ -798,7 +798,7 @@ class PlayerFFmpeg:
         if target_stream is not None:
             with self._stream_lock:
                 stream = self._audio_stream
-                if stream is target_stream:
+                if stream is not None and stream is target_stream:
                     try:
                         if getattr(stream, "is_active", lambda: False)():
                             stream.write(b"\x00" * chunk_size, exception_on_underflow=False)

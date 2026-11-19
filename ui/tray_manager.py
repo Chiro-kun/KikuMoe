@@ -140,9 +140,10 @@ class TrayNowPlayingCard(QFrame):
         self.refresh_theme()
 
     def _t(self, key: str, fallback: str) -> str:
-        if self._i18n is not None and hasattr(self._i18n, "t"):
+        t_fn = getattr(self._i18n, "t", None)
+        if callable(t_fn):
             try:
-                res = self._i18n.t(key)
+                res = t_fn(key)
                 if res:
                     return str(res)
             except Exception:
@@ -592,14 +593,24 @@ class TrayManager(QObject):
         self._last_tooltip: str | None = None
 
     def _t(self, key: str, fallback: str) -> str:
-        if self._i18n is not None and hasattr(self._i18n, "t"):
+        t_fn = getattr(self._i18n, "t", None)
+        if callable(t_fn):
             try:
-                res = self._i18n.t(key)
+                res = t_fn(key)
                 if res:
                     return str(res)
             except Exception:
                 pass
         return fallback
+
+    def _read_parent_setting(self, key: str, default: str) -> str:
+        settings = getattr(self._parent, "settings", None)
+        if settings is None:
+            return default
+        try:
+            return str(settings.value(key, default))
+        except Exception:
+            return default
 
     def ensure_tray_enabled(
         self,
@@ -625,12 +636,7 @@ class TrayManager(QObject):
 
                     self._apply_menu_stylesheet(menu)
 
-                    try:
-                        current_station = str(
-                            self._parent.settings.value(KEY_STATION, DEFAULT_STATION)
-                        )
-                    except Exception:
-                        current_station = DEFAULT_STATION
+                    current_station = self._read_parent_setting(KEY_STATION, DEFAULT_STATION)
                     display_station = get_station_display_name(current_station, self._i18n)
 
                     # Font per intestazioni di sezione (maiuscole, bold, letter-spaced)
@@ -649,6 +655,14 @@ class TrayManager(QObject):
                     show_card = (not show_native_playback) or force_card
 
                     # 1. Now Playing Cyber-Glass Header Card (shown on Windows / direct Qt menus)
+                    toggle_history = getattr(self._parent, "toggle_history_popover", None)
+                    on_history_cb: Callable[[], None] | None = None
+                    if callable(toggle_history):
+
+                        def _invoke_history() -> None:
+                            toggle_history()
+
+                        on_history_cb = _invoke_history
                     self._card = TrayNowPlayingCard(
                         parent=None,
                         menu=menu,
@@ -657,11 +671,7 @@ class TrayManager(QObject):
                         on_toggle_play_pause=self._on_toggle_play_pause,
                         on_stop_stream=self._on_stop_stream,
                         on_toggle_mute=self._on_toggle_mute,
-                        on_history=(
-                            self._parent.toggle_history_popover
-                            if hasattr(self._parent, "toggle_history_popover")
-                            else None
-                        ),
+                        on_history=on_history_cb,
                     )
                     self._card.set_track_info(station=display_station)
                     self._card_action = QWidgetAction(menu)
@@ -725,8 +735,8 @@ class TrayManager(QObject):
                     self._act_history = QAction(txt_hist, self._parent)
                     self._act_history.setIcon(get_history_icon(16, accent))
                     self._act_history.setVisible(show_native_playback)
-                    if hasattr(self._parent, "toggle_history_popover"):
-                        self._act_history.triggered.connect(self._parent.toggle_history_popover)
+                    if on_history_cb is not None:
+                        self._act_history.triggered.connect(on_history_cb)
                     if show_native_playback:
                         menu.addAction(self._act_history)
 
@@ -970,14 +980,9 @@ class TrayManager(QObject):
         self._act_ch.setEnabled(True)
 
         if current_channel is None:
-            try:
-                current_channel = str(
-                    self._parent.settings.value(
-                        KEY_CHANNEL, cfg.get("default_channel", channels[0])
-                    )
-                )
-            except Exception:
-                current_channel = str(cfg.get("default_channel", channels[0]))
+            current_channel = self._read_parent_setting(
+                KEY_CHANNEL, str(cfg.get("default_channel", channels[0]))
+            )
 
         if current_channel not in channels:
             current_channel = str(cfg.get("default_channel", channels[0]))
@@ -1027,12 +1032,9 @@ class TrayManager(QObject):
             formats = ["Vorbis", "Opus", "MP3"]
 
         if current_format is None:
-            try:
-                current_format = str(
-                    self._parent.settings.value(KEY_FORMAT, cfg.get("default_format", formats[0]))
-                )
-            except Exception:
-                current_format = str(cfg.get("default_format", formats[0]))
+            current_format = self._read_parent_setting(
+                KEY_FORMAT, str(cfg.get("default_format", formats[0]))
+            )
 
         if current_format not in formats:
             current_format = str(cfg.get("default_format", formats[0]))
@@ -1080,10 +1082,7 @@ class TrayManager(QObject):
         """Synchronizes the checked state of stream/channel/format actions."""
         try:
             if station is None:
-                try:
-                    station = str(self._parent.settings.value(KEY_STATION, DEFAULT_STATION))
-                except Exception:
-                    station = DEFAULT_STATION
+                station = self._read_parent_setting(KEY_STATION, DEFAULT_STATION)
             target_station = str(station).strip().lower()
             for st_key, acts in self._station_actions.items():
                 should_check = st_key.strip().lower() == target_station
@@ -1137,11 +1136,8 @@ class TrayManager(QObject):
 
             # Extract station name
             station = getattr(self._parent, "station_name", "")
-            if not station and hasattr(self._parent, "settings"):
-                try:
-                    station = str(self._parent.settings.value(KEY_STATION, DEFAULT_STATION))
-                except Exception:
-                    station = DEFAULT_STATION
+            if not station:
+                station = self._read_parent_setting(KEY_STATION, DEFAULT_STATION)
 
             # Update the header card
             display_station = get_station_display_name(station, self._i18n)

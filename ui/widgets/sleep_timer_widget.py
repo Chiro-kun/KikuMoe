@@ -53,7 +53,7 @@ class _AnimatedSleepBtn(QPushButton):
         self.update()
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+        if e is not None and e.button() == Qt.MouseButton.LeftButton and self.isEnabled():
             self.trigger_bounce()
         super().mousePressEvent(e)
 

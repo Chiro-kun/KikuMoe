@@ -92,7 +92,7 @@ class SegmentedSwitch(QWidget):
         self.update()
 
     def mousePressEvent(self, a0) -> None:
-        if a0.button() == Qt.MouseButton.LeftButton and len(self._items) > 0:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton and len(self._items) > 0:
             item_width = self.width() / len(self._items)
             clicked_idx = int(a0.position().x() // item_width)
             if 0 <= clicked_idx < len(self._items) and clicked_idx != self._current_index:
@@ -105,7 +105,7 @@ class SegmentedSwitch(QWidget):
         super().mousePressEvent(a0)
 
     def mouseMoveEvent(self, a0) -> None:
-        if len(self._items) > 0:
+        if a0 is not None and len(self._items) > 0:
             item_width = self.width() / len(self._items)
             hover_idx = int(a0.position().x() // item_width)
             if hover_idx != self._hover_index:
@@ -218,7 +218,7 @@ class SettingsIconButton(QPushButton):
         self.update()
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
+        if e is not None and e.button() == Qt.MouseButton.LeftButton:
             self.trigger_click_animation()
         super().mousePressEvent(e)
 

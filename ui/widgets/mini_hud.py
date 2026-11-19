@@ -207,35 +207,40 @@ class MiniTrackProgress(QProgressBar):
         w = max(1.0, float(self.width()))
         return max(0.0, min(1.0, x / w))
 
-    def mousePressEvent(self, event) -> None:
-        if self._seekable and event.button() == Qt.MouseButton.LeftButton:
-            ratio = self._ratio_from_x(float(event.position().x()))
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and a0.button() == Qt.MouseButton.LeftButton:
+            ratio = self._ratio_from_x(float(a0.position().x()))
             self._press_ratio = ratio
             self._is_dragging = True
             self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
             self.seek_requested.emit(ratio)
             self.update()
             return
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event) -> None:
-        if self._seekable and self._is_dragging:
-            ratio = self._ratio_from_x(float(event.position().x()))
+    def mouseMoveEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and self._is_dragging:
+            ratio = self._ratio_from_x(float(a0.position().x()))
             self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
             self.update()
             return
-        super().mouseMoveEvent(event)
+        super().mouseMoveEvent(a0)
 
-    def mouseReleaseEvent(self, event) -> None:
-        if self._seekable and self._is_dragging and event.button() == Qt.MouseButton.LeftButton:
+    def mouseReleaseEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and self._seekable
+            and self._is_dragging
+            and a0.button() == Qt.MouseButton.LeftButton
+        ):
             self._is_dragging = False
-            ratio = self._ratio_from_x(float(event.position().x()))
+            ratio = self._ratio_from_x(float(a0.position().x()))
             if abs(ratio - self._press_ratio) > 0.002:
                 self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
                 self.seek_requested.emit(ratio)
             self.update()
             return
-        super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(a0)
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)
@@ -493,7 +498,11 @@ class MiniHud(QWidget):
         super().mousePressEvent(a0)
 
     def mouseMoveEvent(self, a0: Optional[QMouseEvent]) -> None:
-        if a0 is not None and a0.buttons() & Qt.MouseButton.LeftButton and self._drag_offset:
+        if (
+            a0 is not None
+            and bool(a0.buttons() & Qt.MouseButton.LeftButton)
+            and self._drag_offset is not None
+        ):
             window = self.window()
             if window is not None:
                 window.move(a0.globalPosition().toPoint() - self._drag_offset)

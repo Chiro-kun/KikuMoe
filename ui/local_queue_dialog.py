@@ -691,14 +691,18 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
             self.playlist_mgr.remove_track(actual_idx)
 
     # Drag & Drop handling
-    def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
+    def dragEnterEvent(self, a0) -> None:
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is not None and mime is not None and mime.hasUrls():
+            a0.acceptProposedAction()
         else:
-            super().dragEnterEvent(event)
+            super().dragEnterEvent(a0)
 
-    def dropEvent(self, event) -> None:
-        urls = event.mimeData().urls()
+    def dropEvent(self, a0) -> None:
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is None or mime is None:
+            return
+        urls = mime.urls()
         paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
         files_to_add: list[str] = []
         add_folder_async = getattr(self.playlist_mgr, "add_folder_async", None)
@@ -717,22 +721,26 @@ class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
                 add_files_async(files_to_add)
             else:
                 self.playlist_mgr.add_files(files_to_add)
-        event.acceptProposedAction()
+        a0.acceptProposedAction()
 
     # Window Dragging
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-        super().mousePressEvent(event)
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = a0.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(a0)
 
-    def mouseMoveEvent(self, event) -> None:
-        if self._drag_start_pos is not None and event.buttons() == Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_start_pos)
-        super().mouseMoveEvent(event)
+    def mouseMoveEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and self._drag_start_pos is not None
+            and a0.buttons() == Qt.MouseButton.LeftButton
+        ):
+            self.move(a0.globalPosition().toPoint() - self._drag_start_pos)
+        super().mouseMoveEvent(a0)
 
-    def mouseReleaseEvent(self, event) -> None:
+    def mouseReleaseEvent(self, a0) -> None:
         self._drag_start_pos = None
-        super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(a0)
 
     def paintEvent(self, a0) -> None:
         painter = QPainter(self)

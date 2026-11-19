@@ -700,11 +700,13 @@ class AboutWidget(QWidget):
     def retranslate(self, i18n: I18n) -> None:
         self.i18n = i18n
         self.setWindowTitle(self.i18n.t("about_title"))
-        if hasattr(self, "_title_bar"):
-            self._title_bar.retranslate(self.i18n)
-            self._title_bar._ver_badge.setText(self.i18n.t("about_badge"))
-        if hasattr(self, "about_widget"):
-            self.about_widget.set_i18n(self.i18n)
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.retranslate(self.i18n)
+            title_bar._ver_badge.setText(self.i18n.t("about_badge"))
+        about_widget = getattr(self, "about_widget", None)
+        if about_widget is not None:
+            about_widget.set_i18n(self.i18n)
 
     def refresh_theme(self) -> None:
         self._apply_widget_stylesheet()
@@ -907,11 +909,13 @@ class AboutDialog(CyberMoeDialogAnimationMixin, QDialog):
     def retranslate(self, i18n: I18n) -> None:
         self.i18n = i18n
         self.setWindowTitle(self.i18n.t("about_title"))
-        if hasattr(self, "_title_bar"):
-            self._title_bar.retranslate(self.i18n)
-            self._title_bar._ver_badge.setText(self.i18n.t("about_badge"))
-        if hasattr(self, "about_widget"):
-            self.about_widget.set_i18n(self.i18n)
+        title_bar = getattr(self, "_title_bar", None)
+        if title_bar is not None:
+            title_bar.retranslate(self.i18n)
+            title_bar._ver_badge.setText(self.i18n.t("about_badge"))
+        about_widget = getattr(self, "about_widget", None)
+        if about_widget is not None:
+            about_widget.set_i18n(self.i18n)
 
     def refresh_theme(self) -> None:
         self._apply_dialog_stylesheet()

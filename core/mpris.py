@@ -7,10 +7,20 @@ import asyncio
 import os
 import threading
 
-from dbus_next import BusType, NameFlag, RequestNameReply, Variant
-from dbus_next.aio import MessageBus
-from dbus_next.constants import PropertyAccess
-from dbus_next.service import ServiceInterface, dbus_property, method, signal
+from dbus_next import (  # pyright: ignore[reportMissingImports]
+    BusType,
+    NameFlag,
+    RequestNameReply,
+    Variant,
+)
+from dbus_next.aio import MessageBus  # pyright: ignore[reportMissingImports]
+from dbus_next.constants import PropertyAccess  # pyright: ignore[reportMissingImports]
+from dbus_next.service import (  # pyright: ignore[reportMissingImports]
+    ServiceInterface,
+    dbus_property,
+    method,
+    signal,
+)
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from core.media_state import MediaState
@@ -114,7 +124,7 @@ class MprisPlayer(ServiceInterface):
     def LoopStatus(self) -> "s":  # type: ignore[valid-type]
         return "None"
 
-    @LoopStatus.setter
+    @LoopStatus.setter  # pyright: ignore[reportFunctionMemberAccess]
     def LoopStatus(self, value: "s"):  # type: ignore[valid-type,no-redef]
         pass
 
@@ -122,7 +132,7 @@ class MprisPlayer(ServiceInterface):
     def Rate(self) -> "d":  # type: ignore[valid-type]
         return 1.0
 
-    @Rate.setter
+    @Rate.setter  # pyright: ignore[reportFunctionMemberAccess]
     def Rate(self, value: "d"):  # type: ignore[valid-type,no-redef]
         pass
 
@@ -150,7 +160,7 @@ class MprisPlayer(ServiceInterface):
     def Volume(self) -> "d":  # type: ignore[valid-type]
         return self.state.volume
 
-    @Volume.setter
+    @Volume.setter  # pyright: ignore[reportFunctionMemberAccess]
     def Volume(self, value: "d"):  # type: ignore[valid-type,no-redef]
         self.bridge.volume.emit(max(0.0, min(1.0, value)))
 

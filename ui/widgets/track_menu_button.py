@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QPushButton, QWidget
 
@@ -37,24 +37,27 @@ class TrackMenuChevronButton(QPushButton):
 
     def enterEvent(self, event: object) -> None:
         self.set_hovered(True)
-        par = self.parent()
-        if par is not None and hasattr(par, "set_hovered"):
-            par.set_hovered(True)
+        par = self.parentWidget()
+        set_hovered_fn = getattr(par, "set_hovered", None)
+        if callable(set_hovered_fn):
+            set_hovered_fn(True)
         super().enterEvent(event)  # type: ignore[arg-type]
 
     def leaveEvent(self, a0: object) -> None:
         self.set_hovered(False)
-        par = self.parent()
-        if par is not None and hasattr(par, "set_hovered"):
+        par = self.parentWidget()
+        set_hovered_fn = getattr(par, "set_hovered", None)
+        if par is not None and callable(set_hovered_fn):
             # Avoid clearing parent hover if menu is open or mouse is still inside title capsule
             if not getattr(par, "_menu_active", False):
-                if hasattr(par, "get_capsule_rect") and hasattr(par, "mapFromGlobal"):
-                    r = par.get_capsule_rect()
+                get_capsule_rect = getattr(par, "get_capsule_rect", None)
+                if callable(get_capsule_rect):
+                    r = get_capsule_rect()
                     cur_pos = par.mapFromGlobal(self.cursor().pos())
-                    if r is not None and r.contains(QPointF(cur_pos)):
+                    if isinstance(r, QRectF) and r.contains(QPointF(cur_pos)):
                         super().leaveEvent(a0)  # type: ignore[arg-type]
                         return
-                par.set_hovered(False)
+                set_hovered_fn(False)
         super().leaveEvent(a0)  # type: ignore[arg-type]
 
     def paintEvent(self, a0: object) -> None:

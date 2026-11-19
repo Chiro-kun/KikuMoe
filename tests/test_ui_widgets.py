@@ -1125,8 +1125,8 @@ def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatc
     line = panel.labels[panel.active]
     assert (
         abs(
-            line.mapTo(panel.scroll.viewport(), line.rect().center()).y()
-            - panel.scroll.viewport().height() // 2
+            line.mapTo(panel.scroll_area.viewport(), line.rect().center()).y()
+            - panel.scroll_area.viewport().height() // 2
         )
         < 5
     )

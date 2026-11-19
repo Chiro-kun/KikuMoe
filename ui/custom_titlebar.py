@@ -327,8 +327,8 @@ class _BrandTitleLabel(QLabel):
         self.setFixedWidth(int(max(tight.width(), advance)) + 4)
         self.updateGeometry()
 
-    def setText(self, text: str | None) -> None:
-        super().setText(text or "")
+    def setText(self, a0: str | None) -> None:
+        super().setText(a0 or "")
         self._update_geometry()
         self.update()
 
@@ -371,8 +371,8 @@ class _VersionBadgeLabel(QLabel):
         self.setFixedWidth(max(56, pill_w))
         self.updateGeometry()
 
-    def setText(self, text: str | None) -> None:
-        super().setText(text or "")
+    def setText(self, a0: str | None) -> None:
+        super().setText(a0 or "")
         self._update_geometry()
         self.update()
 

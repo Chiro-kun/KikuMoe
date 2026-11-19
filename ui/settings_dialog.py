@@ -2001,19 +2001,19 @@ class SettingsDialog(QDialog):
             return
         self.settings.setValue(KEY_AMBIENT_MODE_ENABLED, "true" if checked else "false")
         host = self._host_window or self.window()
-        if (
-            host
-            and hasattr(host, "_content_widget")
-            and hasattr(host._content_widget, "set_ambient_enabled")
-        ):
-            host._content_widget.set_ambient_enabled(checked)
+        content_widget = getattr(host, "_content_widget", None)
+        set_ambient = getattr(content_widget, "set_ambient_enabled", None)
+        if callable(set_ambient):
+            set_ambient(checked)
         self.settings_changed.emit()
 
     def _on_visualizer_toggled(self, checked: bool) -> None:
         self.settings.setValue(KEY_VISUALIZER_ENABLED, "true" if checked else "false")
         host = self._host_window or self.window()
-        if host and hasattr(host, "ambient_cover"):
-            host.ambient_cover.set_visualizer_enabled(checked)
+        ambient_cover = getattr(host, "ambient_cover", None)
+        set_viz = getattr(ambient_cover, "set_visualizer_enabled", None)
+        if callable(set_viz):
+            set_viz(checked)
         self.settings_changed.emit()
 
     def _on_custom_accent_color_changed(self, _hex_color: str) -> None:

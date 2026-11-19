@@ -25,7 +25,7 @@ from PyQt6.QtCore import (  # type: ignore[attr-defined]
     QRectF,
     QSize,
     Qt,
-    pyqtProperty,
+    pyqtProperty,  # pyright: ignore[reportAttributeAccessIssue]
     pyqtSignal,
 )
 from PyQt6.QtGui import (
@@ -771,7 +771,7 @@ class StationPillButton(QWidget):
         super().leaveEvent(a0)
 
     def mousePressEvent(self, a0) -> None:
-        if a0.button() == Qt.MouseButton.LeftButton:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
             self._pressed = True
             self.update()
             self._show_station_menu()

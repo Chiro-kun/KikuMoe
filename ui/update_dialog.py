@@ -374,7 +374,7 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
         self.btn_action.setEnabled(True)
         self.btn_action.setText(self.i18n.t("updates_download"))
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, a0) -> None:
         if (
             getattr(self, "_is_closing", False)
             or os.environ.get("QT_QPA_PLATFORM") == "offscreen"
@@ -385,10 +385,10 @@ class UpdateDialog(CyberMoeDialogAnimationMixin, QDialog):
                 self._download_worker.cancel()
             if hasattr(self, "cb_ignore") and self.cb_ignore.isChecked():
                 self.settings.setValue(KEY_UPDATE_IGNORED_VERSION, self.release.tag_name)
-            if event:
-                event.accept()
-            super().closeEvent(event)
+            if a0:
+                a0.accept()
+            super().closeEvent(a0)
             return
-        if event:
-            event.ignore()
+        if a0:
+            a0.ignore()
         self._animate_dialog_exit(super().close)
