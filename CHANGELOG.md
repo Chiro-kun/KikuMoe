@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.0.0-beta4] - Unreleased
+## [2.0.0-beta5] - Unreleased
+
+### Focus
+- Performance optimizations, bug fixes, and UI/UX refinements.
+
+---
+
+## [2.0.0-beta4] - 2026-11-19
 
 ### Added
 - **Local Music Playback, Queue Manager & 3-Level Lyrics Cascade**:
