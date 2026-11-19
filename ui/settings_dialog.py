@@ -2832,6 +2832,11 @@ class SettingsDialog(QDialog):
         if not getattr(self, "_accepted_close", False):
             self._restore_persisted_theme()
         self._accepted_close = False
+        if self._embedded:
+            if a0 is not None:
+                a0.accept()
+            self.hide()
+            return
         super().closeEvent(a0)
 
     def _set_dynvol_options_expanded(self, expanded: bool, animate: bool = True) -> None:

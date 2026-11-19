@@ -843,16 +843,22 @@ class PlayerFFmpeg:
                     pass
                 return
 
+            vol = self._volume
+            tap_cb = self._audio_tap
+            tap_data: bytes | None = data if tap_cb is not None else None
+
             if self._eq_processor.is_active():
                 try:
-                    data = self._eq_processor.process_pcm_s16le(data, self._stream_sample_rate)
-                    n_bytes = len(data)
+                    chunk_to_write, tap_data = self._eq_processor.process_pcm_s16le_with_volume(
+                        data,
+                        sample_rate=self._stream_sample_rate,
+                        volume=vol,
+                        need_pre_fader=(tap_cb is not None),
+                    )
                 except Exception:
-                    pass
-
-            vol = self._volume
-            # Ottimizzazione: a volume massimo (o quasi), invia direttamente il chunk raw
-            if vol >= 0.999:
+                    chunk_to_write = data
+            elif vol >= 0.999:
+                # Ottimizzazione: a volume massimo (o quasi), invia direttamente il chunk raw
                 chunk_to_write = data
             elif vol <= 0.001:
                 chunk_to_write = b"\x00" * n_bytes
@@ -860,16 +866,19 @@ class PlayerFFmpeg:
                 try:
                     n_samples = n_bytes // 2
                     samples = struct.unpack(f"<{n_samples}h", data)
-                    vol_samples = [max(-32768, min(32767, int(s * vol))) for s in samples]
+                    vol_samples = [
+                        -32768 if v < -32768 else (32767 if v > 32767 else v)
+                        for v in (int(s * vol) for s in samples)
+                    ]
                     chunk_to_write = struct.pack(f"<{n_samples}h", *vol_samples)
                 except Exception:
                     chunk_to_write = data
 
-            if self._audio_tap is not None:
+            if tap_cb is not None and tap_data is not None:
                 try:
-                    # Pre-fader audio tap: visualizer receives raw unattenuated 100% dynamic
+                    # Pre-fader audio tap: visualizer receives post-EQ, unattenuated 100% dynamic
                     # range PCM stream regardless of user volume slider setting.
-                    self._audio_tap(data)
+                    tap_cb(tap_data)
                 except Exception:
                     pass
 

@@ -291,7 +291,10 @@ def test_settings_audio_no_horizontal_overflow_and_sleep_toggle_restores_drawer(
         assert player.sleep_button.isChecked() is True
         assert settings.value("show_sleep_timer") == "true"
     finally:
+        player._closing = True
+        player.hide()
         player.deleteLater()
+        qapp.processEvents()
 
 
 def test_dynamic_app_picker_uses_windowed_apps_and_scrollable_popup(qapp, tmp_path, monkeypatch):
@@ -454,7 +457,10 @@ def test_responsive_stage_hero_transition_animates_footer(qapp, tmp_path, monkey
         )
         assert player.height() - footer_restored_bottom <= 16
     finally:
+        player._closing = True
+        player.hide()
         player.deleteLater()
+        qapp.processEvents()
 
 
 def test_controller_unducks_promptly_and_gently_on_process_exit(qapp):

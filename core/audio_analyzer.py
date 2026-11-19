@@ -49,6 +49,8 @@ class AudioSpectrumAnalyzer:
         self._bass_smoothed: float = 0.0
         self._proc_phase: float = 0.0
         self._peak_history: float = 0.12
+        # Cache of precomputed (i_start, i_end, tilt) per (num_bars, total_bins)
+        self._bar_map_cache: dict[tuple[int, int], list[tuple[int, int, float]]] = {}
 
     @staticmethod
     def _bit_reverse(n: int, bits: int) -> int:
@@ -87,21 +89,24 @@ class AudioSpectrumAnalyzer:
 
         # Ensure 16-bit alignment (4 bytes per stereo frame)
         valid_bytes = n_bytes - (n_bytes % 4)
-        n_samples = valid_bytes // 2
+        # Fast tail-slice: only the most recent FFT_SIZE stereo frames can fit in the ring buffer.
+        # On 8192-byte chunks (2048 frames), this avoids unpacking and discarding 1792 frames (8x).
+        max_window_bytes = self.FFT_SIZE * 4
+        if valid_bytes > max_window_bytes:
+            tail = data[valid_bytes - max_window_bytes : valid_bytes]
+        else:
+            tail = data[:valid_bytes]
+        n_samples = len(tail) // 2
         try:
-            samples = struct.unpack(f"<{n_samples}h", data[:valid_bytes])
+            samples = struct.unpack(f"<{n_samples}h", tail)
         except Exception:
             return
 
         # Downmix stereo to mono and normalize to [-1.0, 1.0]
-        mono: List[float] = []
-        step = 2  # stereo frames
-        for i in range(0, len(samples), step):
-            if i + 1 < len(samples):
-                avg = (samples[i] + samples[i + 1]) / 65536.0
-            else:
-                avg = samples[i] / 32768.0
-            mono.append(avg)
+        inv_scale = 1.0 / 65536.0
+        mono: List[float] = [
+            (samples[i] + samples[i + 1]) * inv_scale for i in range(0, len(samples) - 1, 2)
+        ]
 
         # Thread-safe ring buffer update
         count = len(mono)
@@ -173,21 +178,25 @@ class AudioSpectrumAnalyzer:
             gain_scale = 1.0 / self._peak_history
 
             total_bins = len(active_mags)
+            map_key = (num_bars, total_bins)
+            bar_map = self._bar_map_cache.get(map_key)
+            if bar_map is None:
+                bar_map = []
+                for b in range(num_bars):
+                    f_start = math.pow(total_bins, b / num_bars) - 1.0
+                    f_end = math.pow(total_bins, (b + 1) / num_bars) - 1.0
+                    i_start = max(0, min(total_bins - 1, int(f_start)))
+                    i_end = max(i_start + 1, min(total_bins, int(math.ceil(f_end))))
+                    tilt = 1.0 + 1.25 * (b / num_bars)
+                    bar_map.append((i_start, i_end, tilt))
+                self._bar_map_cache[map_key] = bar_map
 
             # Logarithmic grouping of bins into num_bars (human ear perception)
-            for b in range(num_bars):
-                f_start = math.pow(total_bins, b / num_bars) - 1.0
-                f_end = math.pow(total_bins, (b + 1) / num_bars) - 1.0
-                i_start = max(0, min(total_bins - 1, int(f_start)))
-                i_end = max(i_start + 1, min(total_bins, int(math.ceil(f_end))))
-
+            for b, (i_start, i_end, tilt) in enumerate(bar_map):
                 band_vals = active_mags[i_start:i_end]
                 if band_vals:
                     val = math.sqrt(sum(v * v for v in band_vals) / len(band_vals))
-                    val = val * gain_scale
-                    # High-frequency tilt compensation for natural pink noise roll-off
-                    tilt = 1.0 + 1.25 * (b / num_bars)
-                    val *= tilt
+                    val = val * gain_scale * tilt
                     norm = min(1.0, math.log10(1.0 + 9.0 * min(1.0, val * 1.35)))
                     raw_magnitudes[b] = norm
 

@@ -598,6 +598,11 @@ def test_song_history_on_now_playing_caches_local_cover_before_add_entry(qapp, t
             cover_uri,
         )
 
+        # Cover must already be cached in network.image_cache before the popover builds rows.
+        from network.image_cache import get_cached_pixmap
+
+        assert get_cached_pixmap(cover_uri) is not None
+        popover._refresh_list()
         rows = popover.findChildren(SongHistoryRowWidget)
         assert len(rows) == 1
         assert rows[0].thumb._pixmap is not None

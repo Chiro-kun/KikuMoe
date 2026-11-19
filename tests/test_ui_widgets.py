@@ -212,18 +212,20 @@ def test_ambient_cover_radial_visualizer(qapp):
     fake_pcm = b"\x00\x10" * 512
     cover.feed_pcm(fake_pcm)
 
-    # Test stop decay while keeping idle breathing wave active
+    # Test stop decay: bars smoothly decay to zero and timer auto-stops to save CPU while idle
     cover.set_playing(False)
     assert cover._is_playing is False
-    for _ in range(50):
+    for _ in range(80):
         cover._tick_visualizer()
-    assert all(m < 0.01 for m in cover._spectrum_bars)
-    # Timer remains active for idle wave animation while visualizer is enabled
-    assert cover._viz_timer.isActive() is True
+    assert all(m == 0.0 for m in cover._spectrum_bars)
+    assert cover._viz_timer.isActive() is False
 
-    # When visualizer is disabled, timer stops
+    # Resuming playback restarts the timer; disabling visualizer stops it immediately
+    cover.set_playing(True)
+    assert cover._viz_timer.isActive() is True
     cover.set_visualizer_enabled(False)
     assert cover._viz_timer.isActive() is False
+    cover.set_playing(False)
     cover.set_visualizer_enabled(True)
 
     # Test horizontal wave path safety boundaries (prevent clipping in lyrics mode)

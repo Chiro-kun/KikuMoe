@@ -64,11 +64,11 @@ from audio.equalizer import (
     parse_eq_bands,
     serialize_eq_bands,
 )
-from audio.player_ffmpeg import PlayerFFmpeg
-from audio.player_mpv import PlayerMPV
-from audio.player_vlc import PlayerVLC
 
 if TYPE_CHECKING:
+    from audio.player_ffmpeg import PlayerFFmpeg
+    from audio.player_mpv import PlayerMPV
+    from audio.player_vlc import PlayerVLC
     from core.mpris import MprisBridge
     from core.windows_media import WindowsMediaBridge
 from core.config import (
@@ -1497,17 +1497,22 @@ class ListenMoePlayer(QWidget):
 
         player: Union[PlayerFFmpeg, PlayerMPV, PlayerVLC]
         if backend == "ffmpeg":
+            from audio.player_ffmpeg import PlayerFFmpeg as _PlayerFFmpeg
+
             self.log.info("[BACKEND] Using FFmpeg (user setting).")
-            player = PlayerFFmpeg(on_event=on_event)
+            player = _PlayerFFmpeg(on_event=on_event)
             if not player.is_ready():
                 self.log.error(
                     "[BACKEND] FFmpeg selected but unavailable: %s",
                     player.get_init_error() or "pyaudio / ffmpeg not ready",
                 )
+            self._sync_audio_tap(player)
             return player
         if backend == "mpv":
+            from audio.player_mpv import PlayerMPV as _PlayerMPV
+
             self.log.info("[BACKEND] Using MPV (user setting).")
-            player = PlayerMPV(on_event=on_event)
+            player = _PlayerMPV(on_event=on_event)
             if player.is_ready():
                 self.log.info("[BACKEND] MPV backend ready.")
             else:
@@ -1515,10 +1520,13 @@ class ListenMoePlayer(QWidget):
                     "[BACKEND] MPV selected but unavailable: %s",
                     player.get_init_error() or "libmpv did not initialize",
                 )
+            self._sync_audio_tap(player)
             return player
         if backend == "vlc":
+            from audio.player_vlc import PlayerVLC as _PlayerVLC
+
             self.log.info("[BACKEND] Using VLC (user setting).")
-            player = PlayerVLC(
+            player = _PlayerVLC(
                 on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching
             )
             if not player.is_ready():
@@ -1526,20 +1534,27 @@ class ListenMoePlayer(QWidget):
                     "[BACKEND] VLC selected but unavailable: %s",
                     player.get_init_error() or "libvlc not ready",
                 )
+            self._sync_audio_tap(player)
             return player
 
-        # 'auto': FFmpeg → MPV → VLC
-        player = PlayerFFmpeg(on_event=on_event)
+        # 'auto': lazy-load FFmpeg → MPV → VLC so unused native libs (libmpv/libvlc) stay unloaded
+        from audio.player_ffmpeg import PlayerFFmpeg as _PlayerFFmpeg
+
+        player = _PlayerFFmpeg(on_event=on_event)
         ffmpeg_err = None
         if not player.is_ready():
             ffmpeg_err = getattr(player, "get_init_error", lambda: None)()
             self.log.info(f"[BACKEND] FFmpeg not available ({ffmpeg_err}), trying MPV.")
-            player = PlayerMPV(on_event=on_event)
+            from audio.player_mpv import PlayerMPV as _PlayerMPV
+
+            player = _PlayerMPV(on_event=on_event)
         mpv_err = None
         if not player.is_ready():
             mpv_err = getattr(player, "get_init_error", lambda: None)()
             self.log.info(f"[BACKEND] MPV not available ({mpv_err}), using VLC fallback.")
-            player = PlayerVLC(
+            from audio.player_vlc import PlayerVLC as _PlayerVLC
+
+            player = _PlayerVLC(
                 on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching
             )
         if not player.is_ready():
@@ -1550,8 +1565,7 @@ class ListenMoePlayer(QWidget):
                 mpv_err or "unavailable",
                 vlc_err or "unavailable",
             )
-        if hasattr(player, "set_audio_tap") and hasattr(self, "ambient_cover"):
-            player.set_audio_tap(self.ambient_cover.feed_pcm)
+        self._sync_audio_tap(player)
         return player
 
     def _init_audio_backend(self):
@@ -1894,6 +1908,7 @@ class ListenMoePlayer(QWidget):
             self._set_window_on_top(self.mini_hud.pin_button.isChecked())
             self._sync_mini_hud()
             self._mini_timer.start()
+            self._sync_ui_timers_for_visibility()
         else:
             self.settings.setValue(KEY_MINI_GEOMETRY, self.saveGeometry())
             self._mini_timer.stop()
@@ -1908,6 +1923,7 @@ class ListenMoePlayer(QWidget):
             self._set_window_on_top(self._normal_always_on_top)
             if self._normal_geometry:
                 self.restoreGeometry(self._normal_geometry)
+            self._sync_ui_timers_for_visibility()
 
     def _shortcut_settings(self) -> None:
         if self._mini_mode:
@@ -2361,21 +2377,94 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _is_any_ui_visible(self) -> bool:
+        """Return True when the main window or Mini-HUD is visible and not minimized."""
+        try:
+            return bool(self.isVisible() and not self.isMinimized())
+        except Exception:
+            return True
+
+    def _is_main_stage_visible(self) -> bool:
+        """Return True when the full player stage (cover, visualizer, LIVE badge) is visible."""
+        return self._is_any_ui_visible() and not bool(getattr(self, "_mini_mode", False))
+
+    def _sync_audio_tap(self, player: Any = None) -> None:
+        """Attach the PCM visualizer tap only when the visualizer is enabled and visible."""
+        target = player if player is not None else getattr(self, "player", None)
+        if target is None or not hasattr(target, "set_audio_tap"):
+            return
+        ambient = getattr(self, "ambient_cover", None)
+        viz_on = bool(
+            ambient is not None
+            and getattr(ambient, "is_visualizer_enabled", lambda: False)()
+            and self._is_main_stage_visible()
+        )
+        try:
+            target.set_audio_tap(ambient.feed_pcm if (viz_on and ambient is not None) else None)
+        except Exception:
+            pass
+
+    def _sync_ui_timers_for_visibility(self) -> None:
+        """Pause high-frequency visual timers while hidden in tray or minimized, resume on show."""
+        any_visible = self._is_any_ui_visible()
+        main_visible = self._is_main_stage_visible()
+
+        ambient = getattr(self, "ambient_cover", None)
+        if ambient is not None and hasattr(ambient, "set_ui_suspended"):
+            ambient.set_ui_suspended(not main_visible)
+        live_badge = getattr(self, "live_badge", None)
+        if live_badge is not None and hasattr(live_badge, "set_ui_suspended"):
+            live_badge.set_ui_suspended(not main_visible)
+
+        self._sync_audio_tap()
+
+        song_timer = getattr(self, "song_tick_timer", None)
+        prog_timer = getattr(self, "_progress_timer", None)
+        mini_timer = getattr(self, "_mini_timer", None)
+        mini_mode = bool(getattr(self, "_mini_mode", False))
+
+        if not any_visible:
+            if song_timer is not None and song_timer.isActive():
+                song_timer.stop()
+            if prog_timer is not None and prog_timer.isActive():
+                prog_timer.stop()
+            if mini_timer is not None and mini_timer.isActive():
+                mini_timer.stop()
+            return
+
+        if main_visible:
+            if song_timer is not None and not song_timer.isActive():
+                song_timer.start()
+            if prog_timer is not None and not prog_timer.isActive():
+                prog_timer.start()
+        else:
+            # Mini-HUD uses its own 500ms _mini_timer; pause main-stage 50ms/1s timers
+            if song_timer is not None and song_timer.isActive():
+                song_timer.stop()
+            if prog_timer is not None and prog_timer.isActive():
+                prog_timer.stop()
+            if mini_mode and mini_timer is not None and not mini_timer.isActive():
+                mini_timer.start()
+
     def showEvent(self, a0) -> None:
         event = a0
         try:
             super().showEvent(event)
             self._apply_windows_titlebar_dark_mode(True)
             self._apply_window_title(getattr(self, "_current_title", "") or "")
-            try:
-                current_pm = (
-                    self.album_cover_label.pixmap() if hasattr(self, "album_cover_label") else None
-                )
-                self._update_media_ambient_background(
-                    current_pm if isinstance(current_pm, QPixmap) else None
-                )
-            except Exception:
-                pass
+            self._sync_ui_timers_for_visibility()
+            if self._is_main_stage_visible():
+                self.update_now_playing_label()
+                self._on_song_tick()
+            elif getattr(self, "_mini_mode", False):
+                self._sync_mini_hud()
+        except Exception:
+            pass
+
+    def hideEvent(self, a0) -> None:
+        try:
+            super().hideEvent(a0)
+            self._sync_ui_timers_for_visibility()
         except Exception:
             pass
 
@@ -2405,6 +2494,7 @@ class ListenMoePlayer(QWidget):
             super().changeEvent(event)
             if event.type() == QEvent.Type.WindowStateChange:
                 self._update_responsive_stage()
+                self._sync_ui_timers_for_visibility()
         except Exception:
             pass
 
@@ -3162,6 +3252,13 @@ class ListenMoePlayer(QWidget):
                 self._content_widget.set_ambient_enabled(
                     self._get_bool(KEY_AMBIENT_MODE_ENABLED, DEFAULT_AMBIENT_MODE_ENABLED)
                 )
+            if hasattr(self, "ambient_cover") and hasattr(
+                self.ambient_cover, "set_visualizer_enabled"
+            ):
+                self.ambient_cover.set_visualizer_enabled(
+                    self._get_bool(KEY_VISUALIZER_ENABLED, DEFAULT_VISUALIZER_ENABLED)
+                )
+            self._sync_audio_tap()
         except Exception:
             pass
 
@@ -3916,9 +4013,8 @@ class ListenMoePlayer(QWidget):
                 self._set_album_cover_pixmap(None)
                 return
 
-            cached = self._cover_cache.get(cover_url) or get_cached_pixmap(cover_url)
+            cached = get_cached_pixmap(cover_url) or self._cover_cache.get(cover_url)
             if cached is not None and not cached.isNull():
-                self._cover_cache[cover_url] = cached
                 self._set_album_cover_pixmap(cached)
                 return
 
@@ -3981,12 +4077,7 @@ class ListenMoePlayer(QWidget):
                     self._set_album_cover_pixmap(None)
                 return
 
-            self._cover_cache[cover_url] = pixmap
             store_cached_pixmap(cover_url, pixmap)
-            if len(self._cover_cache) > 64:
-                oldest_key = next(iter(self._cover_cache))
-                if oldest_key != cover_url:
-                    self._cover_cache.pop(oldest_key, None)
 
             if cover_url and cover_url == self._current_cover_url:
                 self._set_album_cover_pixmap(pixmap)
@@ -3997,7 +4088,7 @@ class ListenMoePlayer(QWidget):
     def _update_media_ambient_background(self, pixmap: Optional[QPixmap]) -> None:
         """Build a subtle blurred background behind cover/title based on current album art."""
         try:
-            if not hasattr(self, "media_ambient_bg"):
+            if not hasattr(self, "media_ambient_bg") or not self.media_ambient_bg.isVisible():
                 return
 
             block = getattr(self, "media_ambient_block", None)
@@ -4074,7 +4165,7 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
 
-            if not hasattr(self, "album_cover_label"):
+            if not hasattr(self, "album_cover_label") or not self.album_cover_label.isVisible():
                 return
 
             side = max(96, int(getattr(self, "_album_cover_size", 190)))
@@ -4812,7 +4903,9 @@ class ListenMoePlayer(QWidget):
                     try:
                         self.player = self._create_player(on_event=self._on_player_event)
                     except Exception:
-                        self.player = PlayerVLC(
+                        from audio.player_vlc import PlayerVLC as _PlayerVLC
+
+                        self.player = _PlayerVLC(
                             on_event=self._on_player_event,
                             libvlc_path=new_path,
                             network_caching_ms=new_nc,
@@ -6319,25 +6412,38 @@ class ListenMoePlayer(QWidget):
         super().dragEnterEvent(event)
 
     def dropEvent(self, event) -> None:
-        """Appends dropped audio files/folders, switches to Local station, and starts playback."""
+        """Appends dropped audio files/folders asynchronously, switches to Local, and plays."""
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
-            if paths:
-                files_to_add: List[str] = []
-                for p in paths:
-                    if os.path.isdir(p):
-                        for root, _, files in os.walk(p):
-                            for f in files:
-                                if os.path.splitext(f)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS:
-                                    files_to_add.append(os.path.join(root, f))
-                    elif os.path.isfile(p):
-                        if os.path.splitext(p)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS:
+            valid_paths = [
+                p
+                for p in paths
+                if os.path.isdir(p)
+                or (
+                    os.path.isfile(p)
+                    and os.path.splitext(p)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS
+                )
+            ]
+            if valid_paths:
+                event.acceptProposedAction()
+                was_empty = len(self.local_playlist.tracks) == 0
+
+                def _collect_and_enqueue() -> None:
+                    files_to_add: List[str] = []
+                    for p in valid_paths:
+                        if os.path.isdir(p):
+                            for root, _, files in os.walk(p):
+                                for f in files:
+                                    if os.path.splitext(f)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                                        files_to_add.append(os.path.join(root, f))
+                        elif os.path.isfile(p):
                             files_to_add.append(p)
-                if files_to_add:
-                    was_empty = len(self.local_playlist.tracks) == 0
-                    added = self.local_playlist.add_files(files_to_add)
-                    if added > 0:
-                        event.acceptProposedAction()
+                    if not files_to_add:
+                        return
+
+                    def _on_added(added: int) -> None:
+                        if added <= 0:
+                            return
                         if (
                             hasattr(self, "station_mgr")
                             and self.station_mgr.current_station_id != STATION_LOCAL
@@ -6345,5 +6451,9 @@ class ListenMoePlayer(QWidget):
                             self.set_radio_provider(STATION_LOCAL)
                         if was_empty or not (hasattr(self, "player") and self.player.is_playing()):
                             self.play_stream(is_retry=False)
-                        return
+
+                    self.local_playlist.add_files_async(files_to_add, on_done=_on_added)
+
+                threading.Thread(target=_collect_and_enqueue, daemon=True).start()
+                return
         super().dropEvent(event)

@@ -269,11 +269,28 @@ class BiquadEqualizerProcessor:
 
     def process_pcm_s16le(self, data: bytes, sample_rate: int = 48000) -> bytes:
         """Apply active preamp and 10-band biquad filter cascade to stereo 16-bit PCM bytes."""
+        out, _ = self.process_pcm_s16le_with_volume(
+            data, sample_rate=sample_rate, volume=1.0, need_pre_fader=False
+        )
+        return out
+
+    def process_pcm_s16le_with_volume(
+        self,
+        data: bytes,
+        sample_rate: int = 48000,
+        volume: float = 1.0,
+        need_pre_fader: bool = False,
+    ) -> tuple[bytes, bytes | None]:
+        """Single-pass preamp + 10-band biquad EQ + output volume scaling.
+
+        Returns ``(output_pcm, pre_fader_pcm)`` where ``pre_fader_pcm`` is only
+        materialized when ``need_pre_fader`` is True (for an active visualizer tap).
+        """
         if not data:
-            return data
+            return data, (data if need_pre_fader else None)
         with self._lock:
             if not self._enabled:
-                return data
+                return data, (data if need_pre_fader else None)
             if sample_rate > 0 and sample_rate != self._sample_rate:
                 self._sample_rate = int(sample_rate)
                 self._band_states.clear()
@@ -281,21 +298,38 @@ class BiquadEqualizerProcessor:
             stages = self._stages
             preamp_lin = self._preamp_lin
             if not stages and abs(self._preamp_db) < 0.05:
-                return data
+                return data, (data if need_pre_fader else None)
 
             n_bytes = (len(data) // 4) * 4
             if n_bytes <= 0:
-                return data
+                return data, (data if need_pre_fader else None)
             n_samples = n_bytes // 2
+            vol = float(volume)
+            apply_vol = 0.001 < vol < 0.999
+            mute_out = vol <= 0.001
+
             samples = struct.unpack(f"<{n_samples}h", data[:n_bytes])
 
             # Fast path: preamp only (no active EQ bands)
             if not stages:
+                pre_bytes: bytes | None = None
+                if need_pre_fader or (not apply_vol and not mute_out):
+                    pre_samples = [
+                        -32768 if v < -32768 else (32767 if v > 32767 else v)
+                        for v in (int(s * preamp_lin) for s in samples)
+                    ]
+                    pre_bytes = struct.pack(f"<{n_samples}h", *pre_samples)
+                if mute_out:
+                    return b"\x00" * n_bytes, (pre_bytes if need_pre_fader else None)
+                if not apply_vol:
+                    assert pre_bytes is not None
+                    return pre_bytes, (pre_bytes if need_pre_fader else None)
+                combined = preamp_lin * vol
                 out_pre = [
                     -32768 if v < -32768 else (32767 if v > 32767 else v)
-                    for v in (int(s * preamp_lin) for s in samples)
+                    for v in (int(s * combined) for s in samples)
                 ]
-                return struct.pack(f"<{n_samples}h", *out_pre)
+                return struct.pack(f"<{n_samples}h", *out_pre), pre_bytes
 
             # De-interleave L/R into float buffers once, applying preamp if needed
             if abs(self._preamp_db) >= 0.05:
@@ -337,14 +371,34 @@ class BiquadEqualizerProcessor:
                     st[2] = stage[7]
                     st[3] = stage[8]
 
-            # Re-interleave with fast 16-bit saturation clamping
+            # Build pre-fader PCM only when needed (visualizer tap or unity volume)
+            pre_fader_bytes: bytes | None = None
+            if need_pre_fader or (not apply_vol and not mute_out):
+                pre_out = [0] * n_samples
+                pre_out[0::2] = [
+                    -32768 if v < -32768 else (32767 if v > 32767 else v)
+                    for v in (int(x) for x in left)
+                ]
+                pre_out[1::2] = [
+                    -32768 if v < -32768 else (32767 if v > 32767 else v)
+                    for v in (int(x) for x in right)
+                ]
+                pre_fader_bytes = struct.pack(f"<{n_samples}h", *pre_out)
+
+            if mute_out:
+                return b"\x00" * n_bytes, (pre_fader_bytes if need_pre_fader else None)
+            if not apply_vol:
+                assert pre_fader_bytes is not None
+                return pre_fader_bytes, (pre_fader_bytes if need_pre_fader else None)
+
+            # Single-pass volume scaling directly from float filter output
             out = [0] * n_samples
             out[0::2] = [
                 -32768 if v < -32768 else (32767 if v > 32767 else v)
-                for v in (int(x) for x in left)
+                for v in (int(x * vol) for x in left)
             ]
             out[1::2] = [
                 -32768 if v < -32768 else (32767 if v > 32767 else v)
-                for v in (int(x) for x in right)
+                for v in (int(x * vol) for x in right)
             ]
-            return struct.pack(f"<{n_samples}h", *out)
+            return struct.pack(f"<{n_samples}h", *out), pre_fader_bytes

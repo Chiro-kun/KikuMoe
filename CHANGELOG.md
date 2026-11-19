@@ -9,8 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0-beta5] - Unreleased
 
-### Focus
-- Performance optimizations, bug fixes, and UI/UX refinements.
+### Performance
+- **Background / Tray Power-Saving & Visualizer Bypass (`ui/main_window.py`, `ui/widgets/ambient_cover.py`)**:
+  - Added visibility-aware suspension (`_sync_ui_timers_for_visibility`, `set_ui_suspended`) that automatically pauses high-frequency visual timers (`song_tick_timer`, `_progress_timer`, 60 FPS visualizer, and `LiveEqualizerBadge`) when the window is hidden in tray, minimized, or switched to Mini-HUD.
+  - Detached the PCM visualizer audio tap whenever the visualizer is disabled or the main stage is not visible, eliminating unnecessary DSP/FFT work in background playback.
+  - Auto-stopped the 60 FPS `AmbientCoverCard` visualizer timer once bars decay to zero while playback is stopped.
+- **Zero-Dependency Audio Pipeline Optimization (`audio/equalizer.py`, `audio/player_ffmpeg.py`, `core/audio_analyzer.py`)**:
+  - Combined preamp, 10-band biquad EQ cascade, and output volume scaling into a single-pass `process_pcm_s16le_with_volume()` helper, materializing the pre-fader PCM buffer only when an active visualizer tap is attached.
+  - Optimized `AudioSpectrumAnalyzer.feed_pcm()` to slice only the trailing `FFT_SIZE * 4` bytes before `struct.unpack` (8× less work on 8192-byte chunks) and cached logarithmic frequency bin boundaries/tilt factors in `_bar_map_cache`.
+- **RAM & Local Music Optimizations (`core/local_metadata.py`, `ui/main_window.py`)**:
+  - Added a thread-safe bounded LRU cover-art byte pool (`intern_cover_bytes`, keyed by 16-byte `blake2b` digest, max 128 entries) so tracks from the same album share a single `bytes` object in memory.
+  - Unified cover art `QPixmap` caching through `network/image_cache.py`, removing duplicate pixmap storage in `ListenMoePlayer._cover_cache`.
+  - Made file/folder drag-and-drop (`dropEvent`) non-blocking by scanning paths off the UI thread and delegating metadata loading to `local_playlist.add_files_async()`.
+- **Startup Speed & UI Fluidity (`KikuMoe.py`, `ui/main_window.py`, `ui/history_popover.py`)**:
+  - Deferred `PyQt6` and `ListenMoePlayer` imports in `KikuMoe.py` until after CLI flags (`--help`, `--version`, `--check-audio`) are handled.
+  - Lazy-imported audio backends (`PlayerFFmpeg`, `PlayerMPV`, `PlayerVLC`) inside `_create_player()` so unused backend libraries and probes do not load at startup.
+  - Made `SongHistoryPopover` lazily rebuild row widgets on `open_at()` while keeping header badge counts and button states updated in O(1) when hidden; skipped scaling/blurring hidden legacy cover widgets.
+
+### Fixed
+- **Embedded SettingsDialog close handling (`ui/settings_dialog.py`)**: accepted `closeEvent` and hid the dialog when `embedded=True`, preventing hidden/closed embedded settings dialogs from canceling `QApplication.quit()`.
+
+### Testing
+- Added a global per-test hang watchdog in `tests/conftest.py` (`KIKUMOE_TEST_TIMEOUT`, default 30s) that dumps all thread tracebacks and exits immediately if any test stalls.
+- Added comprehensive performance and power-saving regression tests in `tests/test_performance_optimizations.py`.
 
 ---
 

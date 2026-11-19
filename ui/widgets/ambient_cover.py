@@ -313,6 +313,7 @@ class LiveEqualizerBadge(QWidget):
         super().__init__(parent)
         self.setFixedSize(72, 24)
         self._playing = False
+        self._ui_suspended = False
         self._phase = 0.0
         self._accent = QColor(PALETTE["accent"])
 
@@ -320,10 +321,21 @@ class LiveEqualizerBadge(QWidget):
         self._timer.setInterval(65)
         self._timer.timeout.connect(self._tick)
 
+    def set_ui_suspended(self, suspended: bool) -> None:
+        """Pause badge animation timer when window is hidden or minimized."""
+        val = bool(suspended)
+        if self._ui_suspended == val:
+            return
+        self._ui_suspended = val
+        if val:
+            self._timer.stop()
+        elif self._playing and not self._timer.isActive():
+            self._timer.start()
+
     def set_playing(self, playing: bool) -> None:
         if self._playing != playing:
             self._playing = playing
-            if playing:
+            if playing and not self._ui_suspended:
                 self._timer.start()
             else:
                 self._timer.stop()
@@ -906,6 +918,7 @@ class AmbientCoverCard(QWidget):
         self._viz_timer = QTimer(self)
         self._viz_timer.setInterval(16)
         self._viz_timer.timeout.connect(self._tick_visualizer)
+        self._ui_suspended = False
 
     def _recompute_base_contour(self) -> None:
         """Precalcola la distanza dal centro al bordo della cornice per ogni punto angolare."""
@@ -930,8 +943,19 @@ class AmbientCoverCard(QWidget):
 
     def feed_pcm(self, data: bytes) -> None:
         """Invia i chunk PCM audio decodificati all'analizzatore di spettro."""
-        if self._visualizer_enabled:
+        if self._visualizer_enabled and not self._ui_suspended:
             self._analyzer.feed_pcm(data)
+
+    def set_ui_suspended(self, suspended: bool) -> None:
+        """Suspend 60 FPS visualizer rendering and PCM ingestion when window is hidden."""
+        val = bool(suspended)
+        if self._ui_suspended == val:
+            return
+        self._ui_suspended = val
+        if val:
+            self._viz_timer.stop()
+        elif self._visualizer_enabled and self._is_playing and not self._viz_timer.isActive():
+            self._viz_timer.start()
 
     def set_visualizer_enabled(self, enabled: bool) -> None:
         """Abilita o disabilita il visualizzatore a onda fluida attorno alla cover."""
@@ -941,7 +965,7 @@ class AmbientCoverCard(QWidget):
             self._bass_energy = 0.0
             if not self._fade_timer.isActive():
                 self._viz_timer.stop()
-        elif not self._viz_timer.isActive():
+        elif self._is_playing and not self._ui_suspended and not self._viz_timer.isActive():
             self._viz_timer.start()
         self.update()
 
@@ -952,10 +976,13 @@ class AmbientCoverCard(QWidget):
         """Notifica lo stato di riproduzione per sincronizzare l'animazione o il decadimento."""
         self._is_playing = bool(playing)
         self._analyzer.set_playing(playing)
-        if self._visualizer_enabled and not self._viz_timer.isActive():
+        if self._visualizer_enabled and not self._ui_suspended and not self._viz_timer.isActive():
             self._viz_timer.start()
 
     def _tick_visualizer(self) -> None:
+        if self._ui_suspended:
+            self._viz_timer.stop()
+            return
         if self._is_playing:
             self._phase += 0.06
             mags, bass = self._analyzer.get_spectrum(32)
@@ -969,19 +996,20 @@ class AmbientCoverCard(QWidget):
             self._spectrum_bars = bars
             self._bass_energy = bass
         else:
-            # Stato inattivo/riposo: respiro calmo a bassa velocità, decadimento morbido delle barre
+            # Decadimento morbido delle barre fino a zero, poi arresta il timer 60 FPS
             self._phase += 0.02
             self._bass_energy *= 0.88
             if self._bass_energy < 0.001:
                 self._bass_energy = 0.0
+            any_active = self._bass_energy > 0.0
             for i in range(self._num_wave_points):
                 if self._spectrum_bars[i] > 0.001:
                     self._spectrum_bars[i] *= 0.88
+                    any_active = True
                 else:
                     self._spectrum_bars[i] = 0.0
-            if not self._visualizer_enabled:
-                if not self._fade_timer.isActive():
-                    self._viz_timer.stop()
+            if not any_active or not self._visualizer_enabled:
+                self._viz_timer.stop()
         self.update()
 
     def _get_wave_gradient_colors(self, cur_amb: QColor) -> Tuple[QColor, QColor, QColor, QColor]:

@@ -7,15 +7,43 @@ for MP3 (ID3v1/ID3v2), FLAC, OGG/Opus, M4A/AAC, and WAV files using standard lib
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import re
 import struct
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
 _LRC_TIMESTAMP_RE = re.compile(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]")
 _MAX_ID3_TAG_BYTES = 16 * 1024 * 1024
 _MAX_OGG_COMMENT_BYTES = 8 * 1024 * 1024
+_MAX_COVER_POOL_ENTRIES = 128
+_COVER_POOL_LOCK = threading.Lock()
+_COVER_BYTES_POOL: OrderedDict[bytes, bytes] = OrderedDict()
+
+
+def intern_cover_bytes(data: bytes | None) -> bytes | None:
+    """Deduplicate identical cover art payloads in RAM across tracks sharing an album."""
+    if not data:
+        return data
+    digest = hashlib.blake2b(data, digest_size=16).digest()
+    with _COVER_POOL_LOCK:
+        existing = _COVER_BYTES_POOL.get(digest)
+        if existing is not None:
+            _COVER_BYTES_POOL.move_to_end(digest)
+            return existing
+        _COVER_BYTES_POOL[digest] = data
+        while len(_COVER_BYTES_POOL) > _MAX_COVER_POOL_ENTRIES:
+            _COVER_BYTES_POOL.popitem(last=False)
+        return data
+
+
+def clear_cover_bytes_pool() -> None:
+    """Clear the deduplicated cover art byte pool."""
+    with _COVER_POOL_LOCK:
+        _COVER_BYTES_POOL.clear()
 
 
 @dataclass
@@ -696,6 +724,9 @@ def extract_track_metadata(file_path: str) -> LocalTrackInfo:
         sidecar_cover = _find_sidecar_cover(file_path)
         if sidecar_cover is not None:
             info.cover_bytes, info.cover_mime = sidecar_cover
+
+    if info.cover_bytes:
+        info.cover_bytes = intern_cover_bytes(info.cover_bytes)
 
     # Sidecar .lrc has highest precedence for lyrics
     sidecar_lrc = _find_sidecar_lrc(file_path)

@@ -384,14 +384,28 @@ class SongHistoryPopover(QWidget):
         self.scroll_area.setWidget(self.list_container)
         outer_layout.addWidget(self.scroll_area, 1)
 
-        # Connect history updates
-        self.history_manager.entry_added.connect(self._refresh_list)
-        self.history_manager.history_cleared.connect(self._refresh_list)
+        # Connect history updates (defer expensive widget rebuilds while popover is hidden)
+        self._list_dirty = True
+        self.history_manager.entry_added.connect(self._on_history_changed)
+        self.history_manager.history_cleared.connect(self._on_history_changed)
 
-        self._refresh_list()
+        self._update_header_counts()
+
+    def _update_header_counts(self) -> None:
+        count = self.history_manager.count()
+        self.badge_count.setText(f"{count}")
+        self.btn_clear.setEnabled(count > 0)
+
+    def _on_history_changed(self, *_args: object) -> None:
+        self._update_header_counts()
+        if self.isVisible():
+            self._refresh_list()
+        else:
+            self._list_dirty = True
 
     def _refresh_list(self) -> None:
         """Repopulate the scrollable list from the history manager."""
+        self._list_dirty = False
         # Clear existing items
         while self.list_layout.count() > 0:
             item = self.list_layout.takeAt(0)
@@ -433,7 +447,8 @@ class SongHistoryPopover(QWidget):
         self._is_closing = False
         self._closed_emitted = False
 
-        self._refresh_list()
+        if self._list_dirty:
+            self._refresh_list()
 
         start_pos = QPoint(target_pos.x(), target_pos.y() - 10)
         self.move(start_pos)

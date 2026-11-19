@@ -2,12 +2,8 @@ import os
 import signal
 import sys
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication
-
 from core.crash_handler import install_crash_handlers, write_crash_log
 from core.ssl_compat import setup_ssl_environment
-from ui.main_window import ListenMoePlayer
 
 # Configure process-wide SSL/TLS CA certificate resolution as early as possible
 setup_ssl_environment()
@@ -67,6 +63,11 @@ def main() -> int:
     )
 
     try:
+        from PyQt6.QtCore import QTimer
+        from PyQt6.QtWidgets import QApplication
+
+        from ui.main_window import ListenMoePlayer
+
         app = QApplication(sys.argv)
         app.setApplicationName("KikuMoe")
         app.setDesktopFileName("me.chiro.kikumoe")
