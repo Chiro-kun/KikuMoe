@@ -2483,6 +2483,10 @@ class ListenMoePlayer(QWidget):
         """Operazioni di pulizia prima dell'uscita definitiva."""
         self._closing = True
         try:
+            eq_pop = getattr(self, "_eq_popover", None)
+            if eq_pop is not None:
+                eq_pop.hide()
+                eq_pop.close()
             mini_win = getattr(self, "_mini_window", None)
             if mini_win is not None:
                 mini_win.force_close()

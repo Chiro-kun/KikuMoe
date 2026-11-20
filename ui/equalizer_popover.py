@@ -9,7 +9,6 @@ from PyQt6.QtCore import (
     QEasingCurve,
     QElapsedTimer,
     QEvent,
-    QObject,
     QParallelAnimationGroup,
     QPoint,
     QPointF,
@@ -147,6 +146,68 @@ class _CompactPillSwitch(QPushButton):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(knob_col)
         painter.drawEllipse(QRectF(knob_x, knob_y, knob_d, knob_d))
+        painter.end()
+
+
+class _EqCloseButton(QPushButton):
+    """Vector-drawn 30x30 close button with pixel-centered X icon."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(30, 30)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._hover = False
+        self._pressed = False
+
+    def enterEvent(self, event: object) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(event)  # type: ignore[arg-type]
+
+    def leaveEvent(self, a0: QEvent | None) -> None:
+        self._hover = False
+        self._pressed = False
+        self.update()
+        super().leaveEvent(a0)
+
+    def mousePressEvent(self, e: QMouseEvent | None) -> None:
+        self._pressed = True
+        self.update()
+        super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e: QMouseEvent | None) -> None:
+        self._pressed = False
+        self.update()
+        super().mouseReleaseEvent(e)
+
+    def paintEvent(self, a0: QPaintEvent | None) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w, h = float(self.width()), float(self.height())
+        if self._pressed:
+            bg = QColor(239, 68, 68, 95)
+            border = QColor(248, 113, 113, 175)
+            fg = QColor("#ffffff")
+        elif self._hover:
+            bg = QColor(239, 68, 68, 72)
+            border = QColor(248, 113, 113, 140)
+            fg = QColor("#ffffff")
+        else:
+            bg = QColor(255, 255, 255, 15)
+            border = QColor(255, 255, 255, 36)
+            fg = QColor("#cbd5e1")
+
+        painter.setBrush(bg)
+        painter.setPen(QPen(border, 1.0))
+        painter.drawRoundedRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0), 7.0, 7.0)
+
+        cx, cy = w / 2.0, h / 2.0
+        d = 4.5
+        pen = QPen(fg, 1.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(cx - d, cy - d), QPointF(cx + d, cy + d))
+        painter.drawLine(QPointF(cx + d, cy - d), QPointF(cx - d, cy + d))
         painter.end()
 
 
@@ -570,6 +631,7 @@ class EqualizerPopover(QWidget):
         super().__init__(parent, flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setWindowTitle("KikuMoe Equalizer")
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
 
@@ -585,7 +647,8 @@ class EqualizerPopover(QWidget):
         self._blurred_backdrop: QPixmap | None = None
         self._slide_from_bottom: bool = True
         self._anchor_widget: QWidget | None = None
-        self._app_filter_installed: bool = False
+        self._drag_offset: QPoint | None = None
+        self._user_moved: bool = False
         self._is_closing = False
         self._closed_emitted = False
 
@@ -633,6 +696,11 @@ class EqualizerPopover(QWidget):
         )
         self.btn_reset.clicked.connect(self.reset_flat)
         header_row.addWidget(self.btn_reset)
+
+        self.btn_close = _EqCloseButton(self)
+        self.btn_close.setToolTip(self.i18n.t("window_close"))
+        self.btn_close.clicked.connect(self._animate_exit)
+        header_row.addWidget(self.btn_close)
 
         outer.addLayout(header_row)
 
@@ -798,6 +866,7 @@ class EqualizerPopover(QWidget):
         self.toggle_enabled.setToolTip(self.i18n.t("eq_enable"))
         self.btn_reset.setText(self.i18n.t("eq_reset"))
         self.btn_reset.setToolTip(self.i18n.t("eq_reset_tip"))
+        self.btn_close.setToolTip(self.i18n.t("window_close"))
         self._populate_presets()
         self.fader_deck.set_i18n(self.i18n)
 
@@ -806,20 +875,6 @@ class EqualizerPopover(QWidget):
         self.toggle_enabled.update()
         self.fader_deck.update()
         self.update()
-
-    def _install_app_filter(self) -> None:
-        if not self._app_filter_installed:
-            app = QApplication.instance()
-            if app is not None:
-                app.installEventFilter(self)
-                self._app_filter_installed = True
-
-    def _remove_app_filter(self) -> None:
-        if self._app_filter_installed:
-            app = QApplication.instance()
-            if app is not None:
-                app.removeEventFilter(self)
-            self._app_filter_installed = False
 
     def _capture_backdrop(self, global_x: int, global_y: int) -> None:
         """Capture and softly blur the underlying app window for Cyber-Glass depth."""
@@ -857,38 +912,35 @@ class EqualizerPopover(QWidget):
         blurred.setDevicePixelRatio(ratio)
         self._blurred_backdrop = blurred
 
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
-        if a1 is None or not self.isVisible() or self._is_closing:
-            return super().eventFilter(a0, a1)
+    def mousePressEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self._blurred_backdrop = None
+            handle = self.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                self._user_moved = True
+                return
+            self._drag_offset = a0.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            return
+        super().mousePressEvent(a0)
 
-        etype = a1.type()
-        if etype == QEvent.Type.MouseButtonPress and isinstance(a1, QMouseEvent):
-            gpos = a1.globalPosition().toPoint()
-            if self.frameGeometry().contains(gpos):
-                return super().eventFilter(a0, a1)
-            # Keep popover open when interacting with the preset dropdown list
-            combo_view = self.cmb_preset.view()
-            if combo_view is not None:
-                combo_popup = combo_view.window()
-                if (
-                    combo_popup is not None
-                    and combo_popup is not self
-                    and combo_popup.isVisible()
-                    and combo_popup.frameGeometry().contains(gpos)
-                ):
-                    return super().eventFilter(a0, a1)
-            # Let the anchor EQ button toggle cleanly via its own clicked signal
-            if self._anchor_widget is not None and self._anchor_widget.isVisible():
-                anchor_tl = self._anchor_widget.mapToGlobal(QPoint(0, 0))
-                anchor_rect = QRect(anchor_tl, self._anchor_widget.size())
-                if anchor_rect.contains(gpos):
-                    return super().eventFilter(a0, a1)
-            self._animate_exit()
-        elif etype == QEvent.Type.ApplicationDeactivate:
-            if not getattr(self.cmb_preset, "_popup_open", False):
-                self._animate_exit()
+    def mouseMoveEvent(self, a0: QMouseEvent | None) -> None:
+        if (
+            a0 is not None
+            and bool(a0.buttons() & Qt.MouseButton.LeftButton)
+            and self._drag_offset is not None
+        ):
+            self.move(a0.globalPosition().toPoint() - self._drag_offset)
+            self._user_moved = True
+            if self._blurred_backdrop is not None:
+                self._blurred_backdrop = None
+                self.update()
+            return
+        super().mouseMoveEvent(a0)
 
-        return super().eventFilter(a0, a1)
+    def mouseReleaseEvent(self, a0: QMouseEvent | None) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+        super().mouseReleaseEvent(a0)
 
     def open_at(
         self,
@@ -896,43 +948,57 @@ class EqualizerPopover(QWidget):
         slide_from_bottom: bool = True,
         anchor_widget: QWidget | None = None,
     ) -> None:
-        """Position and smoothly animate popover entrance (slide + fade + curve glide)."""
+        """Position and smoothly animate entrance (stays open until explicitly closed)."""
         self._is_closing = False
         self._closed_emitted = False
         self._slide_from_bottom = bool(slide_from_bottom)
         self._anchor_widget = anchor_widget
 
-        self._capture_backdrop(target_pos.x(), target_pos.y())
+        final_pos = target_pos
+        if self._user_moved:
+            saved_pos = self.pos()
+            screen = QApplication.screenAt(saved_pos) or QApplication.primaryScreen()
+            if screen is not None:
+                avail = screen.availableGeometry()
+                final_pos = QPoint(
+                    max(avail.left() + 8, min(saved_pos.x(), avail.right() - self.width() - 8)),
+                    max(avail.top() + 8, min(saved_pos.y(), avail.bottom() - self.height() - 8)),
+                )
+            else:
+                final_pos = saved_pos
+
+        if not self._user_moved:
+            self._capture_backdrop(final_pos.x(), final_pos.y())
+        else:
+            self._blurred_backdrop = None
 
         if self._anim_group and self._anim_group.state() == QParallelAnimationGroup.State.Running:
             self._anim_group.stop()
 
         if _IS_LINUX:
-            self.move(target_pos)
+            self.move(final_pos)
             self.setWindowOpacity(1.0)
             self.show()
             self.raise_()
             self.activateWindow()
             self.fader_deck.animate_entrance_from_flat()
-            self._install_app_filter()
             return
 
         offset_y = 14 if self._slide_from_bottom else -14
-        start_pos = QPoint(target_pos.x(), target_pos.y() + offset_y)
+        start_pos = QPoint(final_pos.x(), final_pos.y() + offset_y)
         self.move(start_pos)
         self.setWindowOpacity(0.0)
         self.show()
         self.raise_()
         self.activateWindow()
         self.fader_deck.animate_entrance_from_flat()
-        self._install_app_filter()
 
         group = QParallelAnimationGroup(self)
 
         anim_pos = QPropertyAnimation(self, b"pos", group)
         anim_pos.setDuration(210)
         anim_pos.setStartValue(start_pos)
-        anim_pos.setEndValue(target_pos)
+        anim_pos.setEndValue(final_pos)
         anim_pos.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         anim_op = QPropertyAnimation(self, b"windowOpacity", group)
@@ -949,11 +1015,11 @@ class EqualizerPopover(QWidget):
         if self._is_closing:
             return
         self._is_closing = True
-        self._remove_app_filter()
         if getattr(self.cmb_preset, "_popup_open", False):
             self.cmb_preset.hidePopup()
 
         if not self.isVisible():
+            self._is_closing = False
             if not self._closed_emitted:
                 self._closed_emitted = True
                 self.closed.emit()
@@ -963,6 +1029,7 @@ class EqualizerPopover(QWidget):
 
         if _IS_LINUX:
             self.hide()
+            self._is_closing = False
             if not self._closed_emitted:
                 self._closed_emitted = True
                 self.closed.emit()
@@ -1002,14 +1069,12 @@ class EqualizerPopover(QWidget):
         group.start()
 
     def hideEvent(self, a0: QHideEvent | None) -> None:
-        self._remove_app_filter()
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit()
         super().hideEvent(a0)
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
-        self._remove_app_filter()
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit()

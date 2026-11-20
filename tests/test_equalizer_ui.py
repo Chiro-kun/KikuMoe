@@ -306,8 +306,10 @@ def test_equalizer_preset_combo_no_qfont_pointsize_warning() -> None:
 
 
 def test_equalizer_popover_open_and_close_animations(monkeypatch) -> None:
-    """Verify directional slide+fade open/close animations and outside-click dismissal."""
+    """Verify persistent EQ window stays open on outside click, is draggable, and closes via X."""
     app = _get_qapp()
+    from PyQt6.QtCore import QEvent
+
     import ui.equalizer_popover as eq_mod
 
     monkeypatch.setattr(eq_mod, "_IS_LINUX", False)
@@ -319,9 +321,8 @@ def test_equalizer_popover_open_and_close_animations(monkeypatch) -> None:
         assert pop._anim_group is not None
         assert pop._anim_group.state() == QParallelAnimationGroup.State.Running
         assert pop.fader_deck._anim_timer.isActive()
-        assert pop._app_filter_installed is True
 
-        # Clicking outside triggers animated exit rather than instant hide
+        # Outside clicks and app deactivation must NOT auto-close the persistent EQ window
         outside_ev = QMouseEvent(
             QMouseEvent.Type.MouseButtonPress,
             QPointF(5.0, 5.0),
@@ -331,8 +332,49 @@ def test_equalizer_popover_open_and_close_animations(monkeypatch) -> None:
             Qt.KeyboardModifier.NoModifier,
         )
         pop.eventFilter(app, outside_ev)
+        pop.eventFilter(app, QEvent(QEvent.Type.ApplicationDeactivate))
+        assert pop._is_closing is False
+        assert pop.isVisible()
+
+        # Dragging the header moves the window and remembers user position
+        if pop._anim_group is not None:
+            pop._anim_group.stop()
+        pop.move(120, 200)
+        start_tl = pop.frameGeometry().topLeft()
+        press = QMouseEvent(
+            QMouseEvent.Type.MouseButtonPress,
+            QPointF(40.0, 14.0),
+            QPointF(float(start_tl.x() + 40), float(start_tl.y() + 14)),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        move = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(90.0, 44.0),
+            QPointF(float(start_tl.x() + 90), float(start_tl.y() + 44)),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        release = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(90.0, 44.0),
+            QPointF(float(start_tl.x() + 90), float(start_tl.y() + 44)),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        pop.mousePressEvent(press)
+        pop.mouseMoveEvent(move)
+        pop.mouseReleaseEvent(release)
+        assert pop._user_moved is True
+        assert pop.pos().x() == start_tl.x() + 50
+        assert pop.pos().y() == start_tl.y() + 30
+
+        # Clicking the explicit close (×) button triggers animated exit
+        pop.btn_close.click()
         assert pop._is_closing is True
-        assert pop._app_filter_installed is False
         assert pop._anim_group is not None
         assert pop._anim_group.state() == QParallelAnimationGroup.State.Running
     finally:
