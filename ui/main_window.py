@@ -167,6 +167,12 @@ from core.quick_search import (
 from core.song_history import SongHistoryManager
 from core.ssl_compat import get_ssl_context
 from core.updater import UpdateCheckWorker
+from core.wayland_window import (
+    apply_wayland_pin,
+    detect_wayland_compositor,
+    is_wayland_session,
+    supports_wayland_pin,
+)
 from network.image_cache import (
     ALLOWED_COVER_HOSTS,
     get_cached_pixmap,
@@ -208,7 +214,7 @@ from ui.widgets.ambient_cover import (
 )
 from ui.widgets.history_button import HistoryIconButton, LyricsButton, SleepIconButton
 from ui.widgets.lyrics_panel import LyricsPanel
-from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniIconButton
+from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniHudWindow, MiniIconButton
 from ui.widgets.playback_controls import PlaybackControls
 from ui.widgets.segmented_switch import SettingsIconButton
 from ui.widgets.sleep_timer_widget import SleepTimerWidget
@@ -1773,12 +1779,16 @@ class ListenMoePlayer(QWidget):
         rpc.set_activity(activity)
 
     def _show_window_from_tray(self) -> None:
-        """Restores, raises, and activates the main window when summoned from the tray."""
+        """Restores, raises, and activates the active window (main or detached Mini-HUD)."""
         try:
-            if not self.isVisible() or self.isMinimized():
-                self.showNormal()
-            self.raise_()
-            self.activateWindow()
+            mini_win = getattr(self, "_mini_window", None)
+            target = (
+                mini_win if (getattr(self, "_mini_mode", False) and mini_win is not None) else self
+            )
+            if not target.isVisible() or target.isMinimized():
+                target.showNormal()
+            target.raise_()
+            target.activateWindow()
         except Exception:
             pass
 
@@ -1813,6 +1823,8 @@ class ListenMoePlayer(QWidget):
 
     def _init_mini_hud(self):
         self._mini_mode = False
+        self._mini_window: Optional[MiniHudWindow] = None
+        self._mini_window_shortcut: Optional[QShortcut] = None
         self._normal_geometry = None
         self._normal_always_on_top = False
         self._mini_cover_key = object()
@@ -1827,10 +1839,13 @@ class ListenMoePlayer(QWidget):
         self.mini_hud.volume.valueChanged.connect(self.volume_slider.setValue)
         self.volume_slider.valueChanged.connect(self.mini_hud.volume.setValue)
         self.mini_hud.pin_button.blockSignals(True)
-        self.mini_hud.pin_button.setChecked(self._get_bool(KEY_MINI_ALWAYS_ON_TOP, False))
+        default_pin = bool(
+            _IS_LINUX and is_wayland_session() and detect_wayland_compositor() == "niri"
+        )
+        self.mini_hud.pin_button.setChecked(self._get_bool(KEY_MINI_ALWAYS_ON_TOP, default_pin))
         self.mini_hud.pin_button.blockSignals(False)
         self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
-        self.mini_hud.pin_button.setToolTip(self.t("mini_pin"))
+        self._update_mini_pin_ui()
         self.mini_hud.volume.setToolTip(self.t("mini_volume"))
         self.mini_hud.close_button.setToolTip(self.t("tray_quit"))
         self._mini_timer = QTimer(self)
@@ -1852,6 +1867,53 @@ class ListenMoePlayer(QWidget):
             title_layout.insertWidget(title_layout.count() - 3, self.mini_button)
         self.mini_button.clicked.connect(self.toggle_mini_hud)
 
+    def _use_detached_mini_window(self) -> bool:
+        """On Linux Wayland, host Mini-HUD in a dedicated fixed-size top-level window
+        so tiling compositors (niri, Sway, Hyprland) open it as floating automatically."""
+        return bool(_IS_LINUX and is_wayland_session())
+
+    def _update_mini_pin_ui(self) -> None:
+        if not hasattr(self, "mini_hud"):
+            return
+        if not (_IS_LINUX and is_wayland_session()):
+            self.mini_hud.pin_button.setEnabled(True)
+            self.mini_hud.pin_button.setToolTip(self.t("mini_pin"))
+            return
+        compositor = detect_wayland_compositor()
+        if supports_wayland_pin(compositor):
+            self.mini_hud.pin_button.setEnabled(True)
+            tip_key = "mini_pin_niri" if compositor == "niri" else "mini_pin"
+            self.mini_hud.pin_button.setToolTip(self.t(tip_key))
+        else:
+            self.mini_hud.pin_button.setEnabled(False)
+            self.mini_hud.pin_button.setToolTip(self.t("mini_pin_wayland_unsupported"))
+
+    def _ensure_mini_window(self) -> MiniHudWindow:
+        if self._mini_window is None:
+            win = MiniHudWindow(
+                on_close_requested=lambda: self.close(),
+                on_visibility_changed=self._sync_ui_timers_for_visibility,
+            )
+            if not self.windowIcon().isNull():
+                win.setWindowIcon(self.windowIcon())
+            sc = QShortcut(QKeySequence("F9"), win)
+            sc.activated.connect(self.toggle_mini_hud)
+            self._mini_window_shortcut = sc
+            self._mini_window = win
+        return self._mini_window
+
+    def _apply_wayland_pin_async(self, enabled: bool) -> None:
+        if not (_IS_LINUX and is_wayland_session()):
+            return
+        compositor = detect_wayland_compositor()
+        if not supports_wayland_pin(compositor):
+            return
+        threading.Thread(
+            target=apply_wayland_pin,
+            args=(bool(enabled), "KikuMoe Mini-HUD", compositor),
+            daemon=True,
+        ).start()
+
     def _set_window_on_top(self, enabled: bool) -> None:
         visible = self.isVisible()
         geometry = self.geometry()
@@ -1863,7 +1925,10 @@ class ListenMoePlayer(QWidget):
     def _set_mini_always_on_top(self, enabled: bool) -> None:
         self.settings.setValue(KEY_MINI_ALWAYS_ON_TOP, "true" if enabled else "false")
         if self._mini_mode:
-            self._set_window_on_top(enabled)
+            if _IS_LINUX and is_wayland_session():
+                self._apply_wayland_pin_async(enabled)
+            else:
+                self._set_window_on_top(enabled)
 
     def _sync_mini_hud(self) -> None:
         try:
@@ -1922,6 +1987,25 @@ class ListenMoePlayer(QWidget):
                 self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
             )
             self._mini_mode = True
+            self._update_mini_pin_ui()
+            if self._use_detached_mini_window():
+                mini_win = self._ensure_mini_window()
+                self._root_layout.removeWidget(self.mini_hud)
+                mini_win.attach_hud(self.mini_hud)
+                geometry = self.settings.value(KEY_MINI_GEOMETRY)
+                if geometry:
+                    mini_win.restoreGeometry(geometry)
+                mini_win.setFixedSize(MiniHudWindow.MINI_WIDTH, MiniHudWindow.MINI_HEIGHT)
+                self.hide()
+                mini_win.show()
+                mini_win.raise_()
+                mini_win.activateWindow()
+                self._sync_mini_hud()
+                self._mini_timer.start()
+                self._sync_ui_timers_for_visibility()
+                if self.mini_hud.pin_button.isEnabled() and self.mini_hud.pin_button.isChecked():
+                    QTimer.singleShot(80, lambda: self._apply_wayland_pin_async(True))
+                return
             if self.isMaximized() or self.isFullScreen():
                 self.showNormal()
             self._content_widget.hide()
@@ -1943,6 +2027,21 @@ class ListenMoePlayer(QWidget):
             self._mini_timer.start()
             self._sync_ui_timers_for_visibility()
         else:
+            if self._mini_window is not None and self.mini_hud.parent() is self._mini_window:
+                self.settings.setValue(KEY_MINI_GEOMETRY, self._mini_window.saveGeometry())
+                self._mini_timer.stop()
+                self._mini_mode = False
+                self._mini_window.hide()
+                self.mini_hud.hide()
+                self.mini_hud.setParent(self)
+                self._root_layout.addWidget(self.mini_hud)
+                self.show()
+                if self._normal_geometry:
+                    self.restoreGeometry(self._normal_geometry)
+                self.raise_()
+                self.activateWindow()
+                self._sync_ui_timers_for_visibility()
+                return
             self.settings.setValue(KEY_MINI_GEOMETRY, self.saveGeometry())
             self._mini_timer.stop()
             self._mini_mode = False
@@ -2066,10 +2165,7 @@ class ListenMoePlayer(QWidget):
 
     def _on_system_media_command(self, command: str) -> None:
         if command == "raise":
-            if not self.isVisible() or self.isMinimized():
-                self.showNormal()
-            self.raise_()
-            self.activateWindow()
+            self._show_window_from_tray()
             return
         if command == "toggle":
             self._tray_toggle_play_pause()
@@ -2298,8 +2394,12 @@ class ListenMoePlayer(QWidget):
             return
         event = a0
         try:
-            geometry_key = KEY_MINI_GEOMETRY if self._mini_mode else KEY_WINDOW_GEOMETRY
-            self.settings.setValue(geometry_key, self.saveGeometry())
+            mini_win = getattr(self, "_mini_window", None)
+            if self._mini_mode and mini_win is not None and mini_win.isVisible():
+                self.settings.setValue(KEY_MINI_GEOMETRY, mini_win.saveGeometry())
+            else:
+                geometry_key = KEY_MINI_GEOMETRY if self._mini_mode else KEY_WINDOW_GEOMETRY
+                self.settings.setValue(geometry_key, self.saveGeometry())
         except Exception:
             pass
 
@@ -2312,23 +2412,34 @@ class ListenMoePlayer(QWidget):
         close_to_tray = self._get_bool(KEY_CLOSE_TO_TRAY, False)
         from_tray = getattr(self, "_from_tray_quit", False)
 
+        def _hide_active_windows() -> None:
+            mini_w = getattr(self, "_mini_window", None)
+            if mini_w is not None and mini_w.isVisible():
+                mini_w.hide()
+            self.hide()
+
         if dont_ask:
             if close_to_tray and not from_tray:
-                self.hide()
+                _hide_active_windows()
                 event.ignore()
             else:
                 self._finalize_quit_close(event)
             return
 
         try:
-            parent_widget = self if self.isVisible() else None
+            mini_win = getattr(self, "_mini_window", None)
+            active_win: Optional[QWidget] = (
+                mini_win
+                if (self._mini_mode and mini_win is not None and mini_win.isVisible())
+                else (self if self.isVisible() else None)
+            )
             dlg = CloseConfirmDialog(
-                parent=parent_widget,
+                parent=active_win,
                 i18n=self.i18n,
                 icon=getattr(self, "_icon_app", None),
             )
-            if self.isVisible():
-                geo = self.geometry()
+            if active_win is not None:
+                geo = active_win.geometry()
                 dlg.move(
                     geo.x() + max(0, (geo.width() - dlg.width()) // 2),
                     geo.y() + max(0, (geo.height() - dlg.height()) // 2),
@@ -2353,7 +2464,7 @@ class ListenMoePlayer(QWidget):
                 self.settings.setValue(KEY_CLOSE_TO_TRAY, choice_tray)
 
             if choice_tray:
-                self.hide()
+                _hide_active_windows()
                 event.ignore()
             else:
                 self._finalize_quit_close(event)
@@ -2372,6 +2483,11 @@ class ListenMoePlayer(QWidget):
         """Operazioni di pulizia prima dell'uscita definitiva."""
         self._closing = True
         try:
+            mini_win = getattr(self, "_mini_window", None)
+            if mini_win is not None:
+                mini_win.force_close()
+                mini_win.deleteLater()
+                self._mini_window = None
             if hasattr(self, "_retry_timer") and self._retry_timer is not None:
                 self._retry_timer.stop()
             if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
@@ -2414,6 +2530,9 @@ class ListenMoePlayer(QWidget):
     def _is_any_ui_visible(self) -> bool:
         """Return True when the main window or Mini-HUD is visible and not minimized."""
         try:
+            mini_win = getattr(self, "_mini_window", None)
+            if getattr(self, "_mini_mode", False) and mini_win is not None:
+                return bool(mini_win.isVisible() and not mini_win.isMinimized())
             return bool(self.isVisible() and not self.isMinimized())
         except Exception:
             return True
@@ -3555,7 +3674,7 @@ class ListenMoePlayer(QWidget):
         if hasattr(self, "mini_hud"):
             self.mini_button.setToolTip(self.t("mini_mode"))
             self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
-            self.mini_hud.pin_button.setToolTip(self.t("mini_pin"))
+            self._update_mini_pin_ui()
             self.mini_hud.volume.setToolTip(self.t("mini_volume"))
             self.mini_hud.close_button.setToolTip(self.t("tray_quit"))
         # Mantieni o aggiorna titolo finestra in base al Now Playing

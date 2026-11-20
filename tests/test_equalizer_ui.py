@@ -137,8 +137,10 @@ def test_fader_deck_mouse_drag_wheel_double_click_and_escape() -> None:
     _get_qapp()
     pop = EqualizerPopover(i18n=I18n("en"))
     try:
-        pop.resize(454, 304)
-        pop.fader_deck.resize(430, 220)
+        assert pop.width() >= 560 and pop.height() >= 360
+        assert pop.cmb_preset.itemData(1) == "recommended"
+        pop.resize(580, 380)
+        pop.fader_deck.resize(548, 290)
         pop.set_eq_enabled(True)
 
         emitted: list[tuple[bool, str, float, list[float]]] = []

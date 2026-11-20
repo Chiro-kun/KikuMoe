@@ -46,6 +46,7 @@ EQ_PRESET_CUSTOM = "custom"
 # Format: preset_id -> (preamp_db, (31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k))
 EQ_PRESETS: dict[str, tuple[float, tuple[float, ...]]] = {
     "flat": (0.0, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+    "recommended": (-4.5, (4.0, 2.0, 1.0, 0.0, -1.0, -2.0, 0.0, 2.0, 3.0, 3.0)),
     "bass_boost": (-6.5, (5.5, 4.5, 3.5, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
     "treble_boost": (-6.0, (0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 2.0, 3.5, 5.0, 5.5)),
     "pop": (-5.5, (-1.5, 2.0, 3.5, 4.0, 2.5, 0.0, -1.5, -1.5, 1.0, 1.5)),
@@ -79,6 +80,7 @@ def _soft_clip_s16(val: float) -> int:
 
 EQ_PRESET_ORDER: tuple[str, ...] = (
     "flat",
+    "recommended",
     "bass_boost",
     "treble_boost",
     "pop",

@@ -5,6 +5,7 @@ from typing import Optional
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QEvent,
     QPoint,
     QPointF,
     QPropertyAnimation,
@@ -507,3 +508,76 @@ class MiniHud(QWidget):
             if window is not None:
                 window.move(a0.globalPosition().toPoint() - self._drag_offset)
         super().mouseMoveEvent(a0)
+
+
+class MiniHudWindow(QWidget):
+    """Dedicated fixed-size top-level window for Mini-HUD on Wayland tiling compositors.
+
+    Creating a fresh xdg_toplevel with fixed size (min == max) before show() ensures
+    tiling compositors such as niri, Sway, and Hyprland automatically place Mini-HUD
+    in the floating layer above tiled windows without disturbing the tiled main window.
+    """
+
+    MINI_WIDTH = 420
+    MINI_HEIGHT = 112
+
+    def __init__(
+        self,
+        *,
+        on_close_requested=None,
+        on_visibility_changed=None,
+        window_title: str = "KikuMoe Mini-HUD",
+    ) -> None:
+        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
+        super().__init__(None, flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setWindowTitle(window_title)
+        self.setFixedSize(self.MINI_WIDTH, self.MINI_HEIGHT)
+        self._on_close_requested = on_close_requested
+        self._on_visibility_changed = on_visibility_changed
+        self._force_closing = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._host_layout = layout
+
+    def attach_hud(self, hud: MiniHud) -> None:
+        if hud.parent() is not self:
+            hud.setParent(self)
+        if self._host_layout.indexOf(hud) < 0:
+            self._host_layout.addWidget(hud)
+        hud.show()
+
+    def force_close(self) -> None:
+        self._force_closing = True
+        self.hide()
+        self.close()
+
+    def closeEvent(self, a0) -> None:
+        if self._force_closing:
+            super().closeEvent(a0)
+            return
+        if a0 is not None:
+            a0.ignore()
+        if callable(self._on_close_requested):
+            self._on_close_requested()
+
+    def showEvent(self, a0) -> None:
+        super().showEvent(a0)
+        if callable(self._on_visibility_changed):
+            self._on_visibility_changed()
+
+    def hideEvent(self, a0) -> None:
+        super().hideEvent(a0)
+        if callable(self._on_visibility_changed):
+            self._on_visibility_changed()
+
+    def changeEvent(self, a0) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.WindowStateChange:
+            if self.isMaximized() or self.isFullScreen():
+                QTimer.singleShot(0, self.showNormal)
+            if callable(self._on_visibility_changed):
+                self._on_visibility_changed()

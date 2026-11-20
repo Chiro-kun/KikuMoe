@@ -180,7 +180,7 @@ class _EqFaderDeck(QWidget):
 
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumHeight(216)
+        self.setMinimumHeight(290)
 
     def set_i18n(self, i18n: I18n) -> None:
         self.i18n = i18n
@@ -233,12 +233,12 @@ class _EqFaderDeck(QWidget):
         """Compute (track_top, track_bottom, preamp_x, band_xs, divider_x)."""
         w = float(self.width())
         h = float(self.height())
-        track_top = 24.0
-        track_bottom = max(track_top + 60.0, h - 26.0)
+        track_top = 28.0
+        track_bottom = max(track_top + 80.0, h - 28.0)
 
-        left_pad = 30.0  # room for +12 / 0 / -12 scale labels
-        right_pad = 12.0
-        usable_w = max(120.0, w - left_pad - right_pad)
+        left_pad = 36.0  # room for +12 / 0 / -12 scale labels
+        right_pad = 16.0
+        usable_w = max(140.0, w - left_pad - right_pad)
 
         # Preamp takes 1 slot, gap takes 0.45 slot, 10 bands take 10 slots
         slot_w = usable_w / 11.45
@@ -589,20 +589,20 @@ class EqualizerPopover(QWidget):
         self._is_closing = False
         self._closed_emitted = False
 
-        self.setFixedSize(454, 304)
+        self.setFixedSize(580, 380)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 10, 12, 12)
-        outer.setSpacing(8)
+        outer.setContentsMargins(16, 12, 16, 14)
+        outer.setSpacing(10)
 
         # 1. Header Row: Title + Enable Switch + Preset Combo + Reset Button
         header_row = QHBoxLayout()
         header_row.setContentsMargins(4, 2, 4, 2)
-        header_row.setSpacing(8)
+        header_row.setSpacing(10)
 
         self.lbl_title = QLabel(self.i18n.t("eq_title"))
         self.lbl_title.setStyleSheet(
-            "color: #ffffff; font-size: 13px; font-weight: 700; "
+            "color: #ffffff; font-size: 14px; font-weight: 700; "
             "background: transparent; border: none;"
         )
         header_row.addWidget(self.lbl_title)
@@ -615,7 +615,7 @@ class EqualizerPopover(QWidget):
         header_row.addStretch(1)
 
         self.cmb_preset = GlassComboBox(self)
-        self.cmb_preset.setFixedSize(148, 28)
+        self.cmb_preset.setFixedSize(176, 30)
         self._populate_presets()
         self.cmb_preset.currentIndexChanged.connect(self._on_preset_index_changed)
         header_row.addWidget(self.cmb_preset)
@@ -623,7 +623,7 @@ class EqualizerPopover(QWidget):
         self.btn_reset = QPushButton(self.i18n.t("eq_reset"))
         self.btn_reset.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_reset.setToolTip(self.i18n.t("eq_reset_tip"))
-        self.btn_reset.setFixedHeight(28)
+        self.btn_reset.setFixedHeight(30)
         self.btn_reset.setStyleSheet(
             "QPushButton { background: rgba(255, 255, 255, 0.06); color: #cbd5e1; "
             "border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 7px; "
