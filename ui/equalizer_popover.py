@@ -631,9 +631,9 @@ class EqualizerPopover(QWidget):
         super().__init__(parent, flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
-        self.setWindowTitle("KikuMoe Equalizer")
 
         self.i18n = i18n or (getattr(parent, "i18n", None) if parent else None) or I18n("it")
+        self.setWindowTitle(f"KikuMoe — {self.i18n.t('eq_title')}")
 
         self._eq_enabled: bool = False
         self._preset_id: str = "flat"
@@ -862,6 +862,7 @@ class EqualizerPopover(QWidget):
 
     def retranslate(self, i18n: I18n) -> None:
         self.i18n = i18n
+        self.setWindowTitle(f"KikuMoe — {self.i18n.t('eq_title')}")
         self.lbl_title.setText(self.i18n.t("eq_title"))
         self.toggle_enabled.setToolTip(self.i18n.t("eq_enable"))
         self.btn_reset.setText(self.i18n.t("eq_reset"))

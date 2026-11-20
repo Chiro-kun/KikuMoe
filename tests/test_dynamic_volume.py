@@ -218,10 +218,10 @@ def test_settings_audio_no_horizontal_overflow_and_sleep_toggle_restores_drawer(
 
         scroll = dlg.pages.currentWidget()
         assert scroll.horizontalScrollBar().isVisible() is False
-        assert dlg.txt_vlc_path.height() == 32
-        assert dlg.txt_vlc_path.maximumHeight() == 32
-        assert dlg.txt_dynamic_volume_apps.height() == 32
-        assert dlg.txt_dynamic_volume_apps.maximumHeight() == 32
+        assert dlg.txt_vlc_path.height() == 34
+        assert dlg.txt_vlc_path.maximumHeight() == 34
+        assert dlg.txt_dynamic_volume_apps.height() == 34
+        assert dlg.txt_dynamic_volume_apps.maximumHeight() == 34
         apps_rect = dlg.txt_dynamic_volume_apps.geometry()
         assert apps_rect.y() + apps_rect.height() <= dlg.dynvol_options_box.height()
     finally:
