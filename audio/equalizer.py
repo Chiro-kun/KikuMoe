@@ -40,22 +40,42 @@ EQ_MIN_DB = -12.0
 EQ_MAX_DB = 12.0
 EQ_PRESET_CUSTOM = "custom"
 
-# Standard ISO 10-band reference curves (Winamp / libVLC / Rockbox standard curves
-# scaled to ±12 dB with anti-clipping preamp headroom):
+# Standard ISO 10-band reference curves (Winamp / libVLC / Rockbox inspired curves
+# balanced around 0 dB with true anti-clipping preamp headroom accounting for
+# adjacent Q=1.414 octave-band overlap so summed peak gain stays <= 0.0 dB):
 # Format: preset_id -> (preamp_db, (31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k))
 EQ_PRESETS: dict[str, tuple[float, tuple[float, ...]]] = {
     "flat": (0.0, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
-    "bass_boost": (-3.0, (6.5, 5.5, 4.5, 2.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
-    "treble_boost": (-3.0, (0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.5, 4.5, 6.0, 7.0)),
-    "pop": (-2.0, (-1.0, 3.0, 4.5, 5.0, 3.5, 0.0, -1.5, -1.5, 1.0, 1.5)),
-    "anime_jpop": (-3.5, (4.5, 3.5, 0.0, -4.5, -3.0, 1.0, 5.0, 7.0, 7.5, 7.5)),
-    "rock": (-3.5, (5.0, 3.0, -3.5, -5.0, -2.0, 2.5, 5.5, 7.0, 7.0, 7.0)),
-    "electronic": (-3.0, (5.0, 3.5, 0.0, -3.5, -3.0, 0.0, 5.0, 6.0, 6.0, 5.5)),
-    "vocal": (-2.0, (-2.5, -3.0, -1.5, 1.5, 4.0, 4.5, 3.5, 1.5, 0.0, -1.5)),
-    "headphones": (-3.0, (3.0, 7.0, 3.5, -2.0, -1.5, 1.0, 3.0, 6.0, 8.0, 9.0)),
+    "bass_boost": (-6.5, (5.5, 4.5, 3.5, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)),
+    "treble_boost": (-6.0, (0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 2.0, 3.5, 5.0, 5.5)),
+    "pop": (-5.5, (-1.5, 2.0, 3.5, 4.0, 2.5, 0.0, -1.5, -1.5, 1.0, 1.5)),
+    "anime_jpop": (-7.0, (3.0, 2.0, -0.5, -4.5, -3.5, 0.5, 3.5, 5.0, 5.5, 5.5)),
+    "rock": (-7.0, (3.5, 2.0, -3.5, -5.0, -2.5, 1.5, 4.0, 5.0, 5.0, 5.0)),
+    "electronic": (-6.0, (4.0, 2.5, -0.5, -3.5, -3.0, 0.0, 3.5, 4.5, 4.5, 4.0)),
+    "vocal": (-5.5, (-2.5, -3.0, -1.5, 1.0, 3.5, 4.0, 3.0, 1.0, 0.0, -1.5)),
+    "headphones": (-5.5, (1.5, 4.5, 1.5, -2.5, -2.0, -0.5, 1.5, 3.5, 4.5, 5.0)),
     "classical": (0.0, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -4.5, -4.5, -4.5, -6.0)),
-    "night_soft": (-2.5, (3.0, 1.0, 0.0, -1.5, 0.0, 2.5, 5.0, 6.0, 7.0, 7.5)),
+    "night_soft": (-6.5, (2.0, 0.5, 0.0, -1.5, 0.0, 1.5, 3.5, 4.5, 5.0, 5.0)),
 }
+
+# Soft-clipping safety limiter constants for s16le output:
+# 100% bit-exact linear below ±29491 (~90% full scale, -0.92 dBFS), then C1-smooth
+# asymptotic saturation approaching ±32767 to prevent harsh digital crackling even
+# under extreme custom EQ boosts.
+_SOFT_CLIP_KNEE = 29491.0
+_SOFT_CLIP_HEAD = 3276.0
+
+
+def _soft_clip_s16(val: float) -> int:
+    """Linear below ±0.9 FS; smooth C1 soft-limiter knee approaching ±32767."""
+    if val > _SOFT_CLIP_KNEE:
+        d = val - _SOFT_CLIP_KNEE
+        return int(_SOFT_CLIP_KNEE + _SOFT_CLIP_HEAD * d / (_SOFT_CLIP_HEAD + d))
+    if val < -_SOFT_CLIP_KNEE:
+        d = -_SOFT_CLIP_KNEE - val
+        return int(-_SOFT_CLIP_KNEE - _SOFT_CLIP_HEAD * d / (_SOFT_CLIP_HEAD + d))
+    return int(val)
+
 
 EQ_PRESET_ORDER: tuple[str, ...] = (
     "flat",
@@ -312,12 +332,10 @@ class BiquadEqualizerProcessor:
 
             # Fast path: preamp only (no active EQ bands)
             if not stages:
+                soft_clip = _soft_clip_s16
                 pre_bytes: bytes | None = None
                 if need_pre_fader or (not apply_vol and not mute_out):
-                    pre_samples = [
-                        -32768 if v < -32768 else (32767 if v > 32767 else v)
-                        for v in (int(s * preamp_lin) for s in samples)
-                    ]
+                    pre_samples = [soft_clip(s * preamp_lin) for s in samples]
                     pre_bytes = struct.pack(f"<{n_samples}h", *pre_samples)
                 if mute_out:
                     return b"\x00" * n_bytes, (pre_bytes if need_pre_fader else None)
@@ -325,10 +343,7 @@ class BiquadEqualizerProcessor:
                     assert pre_bytes is not None
                     return pre_bytes, (pre_bytes if need_pre_fader else None)
                 combined = preamp_lin * vol
-                out_pre = [
-                    -32768 if v < -32768 else (32767 if v > 32767 else v)
-                    for v in (int(s * combined) for s in samples)
-                ]
+                out_pre = [soft_clip(s * combined) for s in samples]
                 return struct.pack(f"<{n_samples}h", *out_pre), pre_bytes
 
             # De-interleave L/R into float buffers once, applying preamp if needed
@@ -372,17 +387,12 @@ class BiquadEqualizerProcessor:
                     st[3] = stage[8]
 
             # Build pre-fader PCM only when needed (visualizer tap or unity volume)
+            soft_clip = _soft_clip_s16
             pre_fader_bytes: bytes | None = None
             if need_pre_fader or (not apply_vol and not mute_out):
                 pre_out = [0] * n_samples
-                pre_out[0::2] = [
-                    -32768 if v < -32768 else (32767 if v > 32767 else v)
-                    for v in (int(x) for x in left)
-                ]
-                pre_out[1::2] = [
-                    -32768 if v < -32768 else (32767 if v > 32767 else v)
-                    for v in (int(x) for x in right)
-                ]
+                pre_out[0::2] = [soft_clip(x) for x in left]
+                pre_out[1::2] = [soft_clip(x) for x in right]
                 pre_fader_bytes = struct.pack(f"<{n_samples}h", *pre_out)
 
             if mute_out:
@@ -391,14 +401,8 @@ class BiquadEqualizerProcessor:
                 assert pre_fader_bytes is not None
                 return pre_fader_bytes, (pre_fader_bytes if need_pre_fader else None)
 
-            # Single-pass volume scaling directly from float filter output
+            # Single-pass volume scaling + soft-limiter directly from float filter output
             out = [0] * n_samples
-            out[0::2] = [
-                -32768 if v < -32768 else (32767 if v > 32767 else v)
-                for v in (int(x * vol) for x in left)
-            ]
-            out[1::2] = [
-                -32768 if v < -32768 else (32767 if v > 32767 else v)
-                for v in (int(x * vol) for x in right)
-            ]
+            out[0::2] = [soft_clip(x * vol) for x in left]
+            out[1::2] = [soft_clip(x * vol) for x in right]
             return struct.pack(f"<{n_samples}h", *out), pre_fader_bytes

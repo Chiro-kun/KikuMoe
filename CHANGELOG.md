@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optimized Mini-HUD `MarqueeLabel` to cache text widths, handle `hideEvent()`, and only run its 35 ms scroll timer when visible and overflowing.
 
 ### Fixed
+- **Equalizer anti-clipping headroom & soft-limiter (`audio/equalizer.py`, `ui/main_window.py`)**: recalibrated `headphones` and all built-in 10-band EQ presets so summed `Q=1.414` peak response stays at or below `0.0 dB` across 20 Hz–20 kHz, added a transparent C1 soft-clipping safety knee above `-0.92 dBFS` in `BiquadEqualizerProcessor` to prevent harsh digital crackling even on extreme custom boosts, and ensured built-in presets always reload their canonical curve on startup.
 - **Embedded SettingsDialog close handling (`ui/settings_dialog.py`)**: accepted `closeEvent` and hid the dialog when `embedded=True`, preventing hidden/closed embedded settings dialogs from canceling `QApplication.quit()`.
 
 ### Testing

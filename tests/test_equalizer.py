@@ -236,3 +236,66 @@ def test_biquad_thread_safety_under_live_updates() -> None:
     t1.join(timeout=5.0)
     t2.join(timeout=5.0)
     assert not errors
+
+
+def test_all_presets_have_non_clipping_peak_headroom() -> None:
+    """Every built-in preset must keep summed Q=1.414 response <= 0.1 dB across 20Hz-20kHz."""
+    import cmath
+
+    sr = 48000
+    freqs = [20.0 * (1000.0 ** (i / 300.0)) for i in range(301)]
+    for pid, (preamp, bands) in EQ_PRESETS.items():
+        stages = [
+            compute_peaking_biquad(freq, sr, gain)
+            for freq, gain in zip(EQ_FREQUENCIES, bands)
+            if abs(gain) >= 0.05
+        ]
+        peak_db = max(
+            preamp
+            + sum(
+                20.0
+                * math.log10(
+                    max(
+                        1e-12,
+                        abs(
+                            (
+                                b0
+                                + b1 * cmath.exp(-1j * 2.0 * math.pi * f / sr)
+                                + b2 * cmath.exp(-2j * 2.0 * math.pi * f / sr)
+                            )
+                            / (
+                                1.0
+                                + a1 * cmath.exp(-1j * 2.0 * math.pi * f / sr)
+                                + a2 * cmath.exp(-2j * 2.0 * math.pi * f / sr)
+                            )
+                        ),
+                    )
+                )
+                for b0, b1, b2, a1, a2 in stages
+            )
+            for f in freqs
+        )
+        assert peak_db <= 0.1, f"Preset {pid!r} exceeds 0 dBFS headroom: {peak_db:+.2f} dB"
+
+
+def test_headphones_preset_and_soft_limiter_prevent_hard_clipping() -> None:
+    """Headphones preset avoids clipping on hot signals; extreme boosts soft-limit smoothly."""
+    proc = BiquadEqualizerProcessor()
+    pre, bands = EQ_PRESETS["headphones"]
+    proc.configure(True, pre, bands, sample_rate=48000)
+
+    for freq_hz in (62.0, 8000.0, 12000.0):
+        hot = _make_stereo_sine_pcm(freq_hz, amp_left=30000.0, frames=2048, sr=48000)
+        out = proc.process_pcm_s16le(hot, sample_rate=48000)
+        samples = struct.unpack(f"<{len(out) // 2}h", out)
+        # Skip initial filter transient; steady-state output must never hard-clip at ±32767
+        steady = samples[256:]
+        assert all(abs(s) < 32767 for s in steady)
+
+    # Extreme custom boost (+12 dB preamp) soft-limits smoothly without hitting ±32767
+    proc.configure(True, 12.0, [0.0] * 10, sample_rate=48000)
+    loud = _make_stereo_sine_pcm(1000.0, amp_left=28000.0, frames=512, sr=48000)
+    limited = proc.process_pcm_s16le(loud, sample_rate=48000)
+    lim_samples = struct.unpack(f"<{len(limited) // 2}h", limited)
+    assert all(abs(s) < 32767 for s in lim_samples)
+    assert max(lim_samples) > 31500

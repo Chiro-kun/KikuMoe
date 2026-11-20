@@ -4534,7 +4534,7 @@ class ListenMoePlayer(QWidget):
             preamp = DEFAULT_EQ_PREAMP
         raw_bands = self.settings.value(KEY_EQ_BANDS, "")
         bands = parse_eq_bands(raw_bands)
-        if preset != EQ_PRESET_CUSTOM and preset in EQ_PRESETS and not raw_bands:
+        if preset != EQ_PRESET_CUSTOM and preset in EQ_PRESETS:
             p_pre, p_bands = EQ_PRESETS[preset]
             preamp = clamp_eq_db(p_pre)
             bands = normalize_eq_bands(p_bands)
