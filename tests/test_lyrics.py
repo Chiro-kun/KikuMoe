@@ -425,9 +425,13 @@ def test_settings_dialog_and_main_window_sync_lyrics_provider(qapp, monkeypatch,
     )
 
     dlg = settings_dialog.SettingsDialog()
+    dlg.show()
+    qapp.processEvents()
     assert dlg.cmb_lyrics_provider.currentData() == LYRICS_PROVIDER_BETTERLYRICS_FIRST
     assert dlg.txt_betterlyrics_api_key.text() == "initial-key"
     assert not dlg.betterlyrics_key_row.isHidden()
+    assert dlg.txt_betterlyrics_api_key.height() >= 34
+    assert dlg.txt_betterlyrics_api_key.width() > dlg.cmb_lyrics_provider.width()
 
     lrclib_idx = dlg.cmb_lyrics_provider.findData(LYRICS_PROVIDER_LRCLIB)
     dlg.cmb_lyrics_provider.setCurrentIndex(lrclib_idx)

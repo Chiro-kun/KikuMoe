@@ -1329,9 +1329,9 @@ class SettingsDialog(QDialog):
             self.i18n.t("settings_discord_id_placeholder")
         )
         self.txt_discord_client_id.setFixedWidth(combo_w)
-        self.txt_discord_client_id.setFixedHeight(30)
+        self.txt_discord_client_id.setFixedHeight(34)
         self.discord_id_row = QWidget()
-        self.discord_id_row.setFixedHeight(36)
+        self.discord_id_row.setFixedHeight(38)
         discord_id_layout = self._make_field_row(
             self.i18n.t("settings_discord_id"), self.txt_discord_client_id
         )
@@ -1397,15 +1397,15 @@ class SettingsDialog(QDialog):
             self.i18n.t("settings_betterlyrics_api_key_placeholder")
         )
         self.txt_betterlyrics_api_key.setToolTip(self.i18n.t("settings_betterlyrics_api_key_tip"))
-        self.txt_betterlyrics_api_key.setFixedWidth(combo_w)
-        self.txt_betterlyrics_api_key.setFixedHeight(30)
+        self.txt_betterlyrics_api_key.setFixedHeight(34)
         self.betterlyrics_key_row = QWidget()
-        self.betterlyrics_key_row.setFixedHeight(36)
-        bl_key_layout = self._make_field_row(
-            self.i18n.t("settings_betterlyrics_api_key"), self.txt_betterlyrics_api_key
-        )
-        self._lbl_betterlyrics_api_key = self._layout_first_widget(bl_key_layout)
-        self.betterlyrics_key_row.setLayout(bl_key_layout)
+        bl_key_layout = QVBoxLayout(self.betterlyrics_key_row)
+        bl_key_layout.setContentsMargins(0, 2, 0, 0)
+        bl_key_layout.setSpacing(5)
+        self._lbl_betterlyrics_api_key = QLabel(self.i18n.t("settings_betterlyrics_api_key"))
+        self._lbl_betterlyrics_api_key.setObjectName("settingsFieldLabel")
+        bl_key_layout.addWidget(self._lbl_betterlyrics_api_key)
+        bl_key_layout.addWidget(self.txt_betterlyrics_api_key)
         self.betterlyrics_key_row.setVisible(
             self.cmb_lyrics_provider.currentData() != LYRICS_PROVIDER_LRCLIB
         )
@@ -1606,7 +1606,7 @@ class SettingsDialog(QDialog):
             self.i18n.t("settings_dynamic_volume_apps_placeholder")
         )
         self.txt_dynamic_volume_apps.setToolTip(self.i18n.t("settings_dynamic_volume_apps_tip"))
-        self.txt_dynamic_volume_apps.setFixedHeight(32)
+        self.txt_dynamic_volume_apps.setFixedHeight(34)
         dyn_apps_row.addWidget(self.txt_dynamic_volume_apps, 1)
 
         self.btn_pick_dynamic_app = QPushButton(self.i18n.t("settings_dynamic_volume_pick_app"))
@@ -1691,7 +1691,7 @@ class SettingsDialog(QDialog):
         path_row.setSpacing(6)
         self.txt_vlc_path = QLineEdit(self.settings.value(KEY_LIBVLC_PATH, ""))
         self.txt_vlc_path.setPlaceholderText(self.i18n.t("settings_vlc_path_placeholder"))
-        self.txt_vlc_path.setFixedHeight(32)
+        self.txt_vlc_path.setFixedHeight(34)
         path_row.addWidget(self.txt_vlc_path, 1)
 
         self.btn_browse = QPushButton(self.i18n.t("settings_browse"))
@@ -2560,7 +2560,7 @@ class SettingsDialog(QDialog):
             color: {PALETTE["text_primary"]};
             font-size: 13px;
             font-weight: 600;
-            min-height: 22px;
+            min-height: 24px;
         }}
         QSpinBox {{
             background-color: rgba(255, 255, 255, 0.06);
