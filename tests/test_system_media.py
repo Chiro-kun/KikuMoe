@@ -471,3 +471,195 @@ def test_mpris_pause_and_resume_keeps_state_synced_and_recovers_after_end():
     assert state["paused"] is False
     assert window._ui_paused is False
     assert fake_service.updates[-1].status == "Playing"
+
+
+def test_linux_mpris_caches_remote_radio_cover_as_local_file_uri(qapp, tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from PyQt6.QtCore import QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QImage, QPixmap
+
+    from core.constants import STATION_LISTENMOE
+    from network import image_cache
+    from ui import main_window
+
+    cache_dir = tmp_path / "mpris_art"
+    monkeypatch.setattr(image_cache, "get_cover_cache_dir", lambda: cache_dir)
+    image_cache.clear_cached_pixmaps()
+    image_cache.clear_cached_cover_files()
+
+    img = QImage(16, 16, QImage.Format.Format_ARGB32)
+    img.fill(QColor("#ec186c"))
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    png_bytes = bytes(buf.data())
+
+    cover_url = "https://cdn.listen.moe/covers/mpris_test_cover.png"
+    sent = []
+    fake_win = SimpleNamespace(
+        system_media=SimpleNamespace(update=sent.append),
+        player=SimpleNamespace(
+            is_playing=lambda: True,
+            is_paused=lambda: False,
+            get_mute=lambda: False,
+        ),
+        _ui_paused=False,
+        _current_title="MPRIS Song",
+        _current_artist="MPRIS Artist",
+        _current_radio_provider=STATION_LISTENMOE,
+        _current_start_epoch=1000.0,
+        _current_duration_seconds=180,
+        _clock_sync_offset=0,
+        _current_cover_ref="mpris_test_cover.png",
+        _current_cover_url=cover_url,
+        _is_local_mode=lambda: False,
+        _normalize_album_cover_url=lambda ref: (
+            main_window.ListenMoePlayer._normalize_album_cover_url(None, ref)
+        ),
+        _set_album_cover_pixmap=lambda _pix: None,
+        _media_last_state=MediaState(),
+        i18n=SimpleNamespace(t=lambda key: key),
+        volume_slider=SimpleNamespace(value=lambda: 60),
+        log=logging.getLogger("test.media.linux_cover"),
+    )
+    fake_win._resolve_system_media_cover_url = lambda ref: (
+        main_window.ListenMoePlayer._resolve_system_media_cover_url(fake_win, ref)
+    )
+    fake_win._sync_system_media = lambda: main_window.ListenMoePlayer._sync_system_media(fake_win)
+
+    monkeypatch.setattr(main_window, "_IS_WIN32", False)
+    monkeypatch.setattr(main_window, "_IS_LINUX", True)
+
+    # Before download finishes, falls back to normalized HTTPS URL
+    fake_win._sync_system_media()
+    assert sent[-1].cover_url == cover_url
+
+    # Once cover bytes finish downloading, saved locally as file:// and synced immediately to MPRIS
+    main_window.ListenMoePlayer._on_album_cover_data_ready(fake_win, cover_url, png_bytes)
+    assert sent[-1].cover_url.startswith("file://")
+    cached_path = Path(sent[-1].cover_url.replace("file:///", "").replace("file://", ""))
+    # Verify via image_cache lookup and on-disk file existence
+    cached_uri = image_cache.get_cached_cover_file_uri(cover_url)
+    assert cached_uri == sent[-1].cover_url
+    assert cached_uri is not None and cached_uri.endswith(".png")
+    assert any(
+        p.suffix == ".png" and p.stat().st_size == len(png_bytes) for p in cache_dir.iterdir()
+    )
+    assert cached_path.name.endswith(".png")
+
+    # WebP payload is transcoded to PNG when a QPixmap is supplied for universal Linux MPRIS support
+    webp_url = "https://cdn.listen.moe/covers/mpris_webp_cover.webp"
+    webp_uri = image_cache.store_cover_file(
+        webp_url, raw=b"RIFF\x00\x00\x00\x00WEBPxxxx", pixmap=QPixmap.fromImage(img)
+    )
+    assert webp_uri is not None and webp_uri.startswith("file://") and webp_uri.endswith(".png")
+
+    # On Windows, remote radio covers remain HTTPS URLs
+    monkeypatch.setattr(main_window, "_IS_LINUX", False)
+    assert fake_win._resolve_system_media_cover_url("mpris_test_cover.png") == cover_url
+
+    image_cache.clear_cached_pixmaps()
+    image_cache.clear_cached_cover_files(delete_files=True)
+
+
+def test_local_track_embedded_cover_publishes_file_uri_to_system_media(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QImage
+
+    from core.constants import STATION_LOCAL
+    from core.local_metadata import LocalTrackInfo
+    from network import image_cache
+    from ui import main_window
+
+    cache_dir = tmp_path / "local_mpris_art"
+    monkeypatch.setattr(image_cache, "get_cover_cache_dir", lambda: cache_dir)
+    image_cache.clear_cached_pixmaps()
+    image_cache.clear_cached_cover_files()
+
+    img = QImage(16, 16, QImage.Format.Format_ARGB32)
+    img.fill(QColor("#38bdf8"))
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    png_bytes = bytes(buf.data())
+
+    sent = []
+    fake_win = SimpleNamespace(
+        system_media=SimpleNamespace(update=sent.append),
+        player=SimpleNamespace(
+            is_playing=lambda: True,
+            is_paused=lambda: False,
+            get_mute=lambda: False,
+            get_time=lambda: 5.0,
+        ),
+        _ui_paused=False,
+        _current_title="",
+        _current_artist="",
+        _current_radio_provider=STATION_LOCAL,
+        _current_start_epoch=None,
+        _current_duration_seconds=None,
+        _clock_sync_offset=0,
+        _current_cover_ref=None,
+        _current_cover_url=None,
+        _current_cover_bytes_digest=None,
+        _current_local_cover_sig=None,
+        _current_cover_pixmap=None,
+        _is_local_mode=lambda: True,
+        _normalize_album_cover_url=lambda ref: (
+            main_window.ListenMoePlayer._normalize_album_cover_url(None, ref)
+        ),
+        _set_album_cover_pixmap=lambda pix: setattr(fake_win, "_current_cover_pixmap", pix),
+        _media_last_state=MediaState(),
+        song_progress=SimpleNamespace(
+            set_seekable=lambda _v: None,
+            set_live_mode=lambda _v: None,
+            setMaximum=lambda _v: None,
+            setValue=lambda _v: None,
+        ),
+        local_playlist=SimpleNamespace(current_index=0, tracks=[object(), object()], repeat_mode=0),
+        playback_controls=SimpleNamespace(set_nav_enabled=lambda _p, _n: None),
+        lyrics_button=SimpleNamespace(isChecked=lambda: False),
+        label_refresh=SimpleNamespace(emit=lambda: None),
+        _sync_mini_hud=lambda: None,
+        update_tray_texts=lambda: None,
+        i18n=SimpleNamespace(t=lambda key: key),
+        volume_slider=SimpleNamespace(value=lambda: 70),
+        log=logging.getLogger("test.media.local_embedded"),
+    )
+    fake_win._resolve_system_media_cover_url = lambda ref: (
+        main_window.ListenMoePlayer._resolve_system_media_cover_url(fake_win, ref)
+    )
+    fake_win._sync_system_media = lambda: main_window.ListenMoePlayer._sync_system_media(fake_win)
+
+    monkeypatch.setattr(main_window, "_IS_WIN32", False)
+    monkeypatch.setattr(main_window, "_IS_LINUX", True)
+
+    track1 = LocalTrackInfo(
+        file_path=str(tmp_path / "01.mp3"),
+        title="Track One",
+        artist="Album Artist",
+        duration_seconds=150.0,
+        cover_bytes=png_bytes,
+        cover_mime="image/png",
+    )
+    main_window.ListenMoePlayer._on_local_track_changed(fake_win, track1)
+    assert fake_win._current_cover_ref is not None
+    assert fake_win._current_cover_ref.startswith("file://")
+    assert sent[-1].cover_url == fake_win._current_cover_ref
+
+    # Second track with identical embedded cover still keeps the valid file:// URI
+    track2 = LocalTrackInfo(
+        file_path=str(tmp_path / "02.mp3"),
+        title="Track Two",
+        artist="Album Artist",
+        duration_seconds=160.0,
+        cover_bytes=png_bytes,
+        cover_mime="image/png",
+    )
+    main_window.ListenMoePlayer._on_local_track_changed(fake_win, track2)
+    assert sent[-1].title == "Track Two"
+    assert sent[-1].cover_url == fake_win._current_cover_ref
+
+    image_cache.clear_cached_pixmaps()
+    image_cache.clear_cached_cover_files(delete_files=True)

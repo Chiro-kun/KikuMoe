@@ -175,9 +175,11 @@ from core.wayland_window import (
 )
 from network.image_cache import (
     ALLOWED_COVER_HOSTS,
+    get_cached_cover_file_uri,
     get_cached_pixmap,
     normalize_cover_url,
     store_cached_pixmap,
+    store_cover_file,
 )
 from network.station_manager import StationManager
 from network.ws_client import NowPlayingWS
@@ -4035,14 +4037,19 @@ class ListenMoePlayer(QWidget):
         )
 
     def _resolve_system_media_cover_url(self, cover_ref: Optional[str]) -> str:
-        """Resolve an MPRIS/SMTC artwork URI, preserving verified local file:// covers."""
+        """Resolve an MPRIS/SMTC artwork URI, preferring local file:// covers on Linux."""
         if ListenMoePlayer._allows_local_cover_files(self):
             local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
             if local_file:
                 return Path(local_file).resolve().as_uri()
             if isinstance(cover_ref, str) and cover_ref.strip().lower().startswith("file://"):
                 return ""
-        return self._normalize_album_cover_url(cover_ref) or ""
+        norm_url = self._normalize_album_cover_url(cover_ref) or ""
+        if norm_url and _IS_LINUX:
+            cached_uri = get_cached_cover_file_uri(norm_url)
+            if cached_uri:
+                return cached_uri
+        return norm_url
 
     @staticmethod
     def _resolve_local_cover_file(cover_ref: Optional[str]) -> Optional[str]:
@@ -4175,7 +4182,12 @@ class ListenMoePlayer(QWidget):
 
             cached = get_cached_pixmap(cover_url) or self._cover_cache.get(cover_url)
             if cached is not None and not cached.isNull():
+                if _IS_LINUX and get_cached_cover_file_uri(cover_url) is None:
+                    store_cover_file(cover_url, pixmap=cached)
                 self._set_album_cover_pixmap(cached)
+                sync_media = getattr(self, "_sync_system_media", None)
+                if callable(sync_media):
+                    sync_media()
                 return
 
             with self._cover_download_lock:
@@ -4238,9 +4250,14 @@ class ListenMoePlayer(QWidget):
                 return
 
             store_cached_pixmap(cover_url, pixmap)
+            if _IS_LINUX:
+                store_cover_file(cover_url, raw=raw, pixmap=pixmap)
 
             if cover_url and cover_url == self._current_cover_url:
                 self._set_album_cover_pixmap(pixmap)
+                sync_media = getattr(self, "_sync_system_media", None)
+                if callable(sync_media):
+                    sync_media()
             ListenMoePlayer._refresh_history_popover_if_visible(self)
         except Exception:
             pass
@@ -6491,6 +6508,7 @@ class ListenMoePlayer(QWidget):
                     self.now_playing_artist.setText(self._current_artist)
                     self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
                 self.label_refresh.emit()
+                self._sync_system_media()
                 return
 
             self._current_title = track.display_title()
@@ -6522,11 +6540,17 @@ class ListenMoePlayer(QWidget):
             # Update album art (deduplicate identical embedded/sidecar bytes across tracks)
             if track.cover_bytes:
                 digest = hashlib.blake2b(track.cover_bytes, digest_size=16).digest()
+                cover_cache_key = f"local:{digest.hex()}"
                 if digest != getattr(self, "_current_cover_bytes_digest", None):
                     pix = QPixmap()
                     if pix.loadFromData(track.cover_bytes) and not pix.isNull():
                         self._current_cover_bytes_digest = digest
                         self._current_local_cover_sig = None
+                        cover_uri = store_cover_file(
+                            cover_cache_key, raw=track.cover_bytes, pixmap=pix
+                        )
+                        self._current_cover_ref = cover_uri
+                        self._current_cover_url = cover_uri
                         self._set_album_cover_pixmap(pix)
                     else:
                         self._current_cover_ref = None
@@ -6534,6 +6558,14 @@ class ListenMoePlayer(QWidget):
                         self._current_cover_bytes_digest = None
                         self._current_local_cover_sig = None
                         self._set_album_cover_pixmap(None)
+                else:
+                    cover_uri = get_cached_cover_file_uri(cover_cache_key) or store_cover_file(
+                        cover_cache_key,
+                        raw=track.cover_bytes,
+                        pixmap=getattr(self, "_current_cover_pixmap", None),
+                    )
+                    self._current_cover_ref = cover_uri
+                    self._current_cover_url = cover_uri
             else:
                 self._current_cover_ref = None
                 self._current_cover_url = None
@@ -6548,6 +6580,7 @@ class ListenMoePlayer(QWidget):
 
             self.label_refresh.emit()
             self._sync_mini_hud()
+            self._sync_system_media()
             self.update_tray_texts()
         except Exception as e:
             self.log.debug(f"[UI] _on_local_track_changed failed: {e}")
