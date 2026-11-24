@@ -3,6 +3,8 @@ name: Build & Release
 on:
   push:
     branches:
+      - main
+      - devel
       - redesign
     tags:
       - 'v*'

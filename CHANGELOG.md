@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [2.0.0-beta5] - Unreleased
+## [2.0.0] - 2026-11-24
+
+### Added
+- **Recommended 10-Band EQ Preset & Persistent Equalizer Window (`audio/equalizer.py`, `ui/equalizer_popover.py`, `ui/main_window.py`)**:
+  - Added the built-in `★ Recommended` / `★ Consigliato` EQ preset (`-4.5 dB` preamp, smooth V-curve with `0.0 dB` headroom safety) right under `Flat`.
+  - Enlarged `EqualizerPopover` to `580×380` with taller faders, made it persistent (no longer auto-closes on outside clicks or window focus changes) and draggable (including native Wayland `startSystemMove()`), and added a pixel-centered vector `×` close button.
+- **Wayland Tiling Compositor Support for Mini-HUD (`core/wayland_window.py`, `ui/widgets/mini_hud.py`, `ui/main_window.py`)**:
+  - Hosted Mini-HUD inside a dedicated fixed-size (`420×112`) top-level `MiniHudWindow` on Linux Wayland so tiling compositors (`niri`, `Hyprland`, `Sway`) automatically open it in the floating layer above tiled windows without disturbing the tiled main window.
+  - Wired the Mini-HUD Pin toggle on Wayland to idempotent compositor-native IPC (`niri msg`, `hyprctl`, `swaymsg`), and gracefully disabled the button with an explanatory tooltip on Wayland compositors without IPC support.
 
 ### Performance
 - **Background / Tray Power-Saving & Visualizer Bypass (`ui/main_window.py`, `ui/widgets/ambient_cover.py`)**:
@@ -29,12 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Optimized Mini-HUD `MarqueeLabel` to cache text widths, handle `hideEvent()`, and only run its 35 ms scroll timer when visible and overflowing.
 
 ### Fixed
+- **Linux MPRIS album cover artwork (`network/image_cache.py`, `ui/main_window.py`)**: cached downloaded radio covers and local track embedded covers to a bounded local disk cache (`$XDG_CACHE_HOME/kikumoe/mpris_art`), transcoded WebP/non-universal formats to PNG for universal widget compatibility, and published `file://` URIs in `mpris:artUrl` with immediate D-Bus `PropertiesChanged` sync.
+- **Better Lyrics API key input clipping (`ui/settings_dialog.py`)**: moved the Better Lyrics API Key field to a full-width stacked layout and aligned all settings `QLineEdit` heights to `34px` (`min-height: 24px`) to prevent horizontal and vertical text clipping.
 - **Equalizer anti-clipping headroom & soft-limiter (`audio/equalizer.py`, `ui/main_window.py`)**: recalibrated `headphones` and all built-in 10-band EQ presets so summed `Q=1.414` peak response stays at or below `0.0 dB` across 20 Hz–20 kHz, added a transparent C1 soft-clipping safety knee above `-0.92 dBFS` in `BiquadEqualizerProcessor` to prevent harsh digital crackling even on extreme custom boosts, and ensured built-in presets always reload their canonical curve on startup.
 - **Embedded SettingsDialog close handling (`ui/settings_dialog.py`)**: accepted `closeEvent` and hid the dialog when `embedded=True`, preventing hidden/closed embedded settings dialogs from canceling `QApplication.quit()`.
 
 ### Testing
 - Added a global per-test hang watchdog in `tests/conftest.py` (`KIKUMOE_TEST_TIMEOUT`, default 30s) that dumps all thread tracebacks and exits immediately if any test stalls.
-- Added comprehensive performance and power-saving regression tests in `tests/test_performance_optimizations.py`.
+- Added regression tests covering performance/power-saving (`tests/test_performance_optimizations.py`), Wayland Mini-HUD IPC & detached lifecycle (`tests/test_wayland_mini_hud.py`), persistent draggable Equalizer UI (`tests/test_equalizer_ui.py`), and Linux MPRIS local `file://` cover art (`tests/test_system_media.py`).
 
 ---
 
