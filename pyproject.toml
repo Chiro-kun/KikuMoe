@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "kikumoe"
-version = "1.11.1"
+version = "2.0.0"
 description = "LISTEN.moe desktop radio player"
 authors = ["Chiro", "alsog"]
 homepage = "https://git.alsogamer.com/chiro/KikuMoe"
@@ -10,18 +10,26 @@ readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = ">=3.10"
 PyQt6 = ">=6.4.0"
 websocket-client = ">=1.6.0"
 python-vlc = ">=3.0.0"
 python-mpv = ">=1.0.0"
 pyaudio = ">=0.2.11"
 certifi = "^2026.10.19"
+winrt-windows-media-interop = {version = ">=3.1,<4", markers = "sys_platform == \"win32\" and python_version >= \"3.10\""}
+winrt-runtime = {version = ">=2.3,<4", markers = "sys_platform == \"win32\" and python_version >= \"3.10\""}
+winrt-windows-media = {version = ">=2.3,<4", markers = "sys_platform == \"win32\" and python_version >= \"3.10\""}
+winrt-windows-storage-streams = {version = ">=2.3,<4", markers = "sys_platform == \"win32\" and python_version >= \"3.10\""}
+winrt-windows-foundation = {version = ">=3.1,<4", markers = "sys_platform == \"win32\" and python_version >= \"3.10\""}
+dbus-next = {version = ">=0.2.3,<0.3", markers = "sys_platform == \"linux\""}
+
+[tool.poetry.group.build.dependencies]
+pyinstaller = {version = ">=5.0", python = ">=3.8,<3.15"}
+pyinstaller-hooks-contrib = {version = ">=2023.0", python = ">=3.8,<3.15"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
-pyinstaller = {version = ">=5.0", python = ">=3.8,<3.15"}
-pyinstaller-hooks-contrib = {version = ">=2023.0", python = ">=3.8,<3.15"}
 mypy = ">=1.0"
 ruff = ">=0.4"
 
@@ -34,7 +42,7 @@ build-backend = "poetry.core.masonry.api"
 # ---------------------------------------------------------------------------
 [tool.mypy]
 files = ["KikuMoe.py", "core", "audio", "network", "ui", "tests"]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

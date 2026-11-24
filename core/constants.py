@@ -71,7 +71,7 @@ def _read_version_from_files() -> str:
                     data = f.read()
                 break
         if data:
-            # Prefer StringStruct 'FileVersion', e.g. 1.11.1.0
+            # Prefer StringStruct 'FileVersion', e.g. 1.11.0.0
             m = re.search(r"FileVersion\'\s*,\s*u?\'([^\']+)\'", data)
             if m:
                 return m.group(1).strip()
@@ -82,12 +82,24 @@ def _read_version_from_files() -> str:
     except Exception:
         pass
 
-    # 3) Fallback to default
-    return "1.11.1"
+    # 3) Fallback if files are missing
+    return "0.0.0-dev"
 
 
 APP_VERSION = _read_version_from_files()
 APP_TITLE = f"{APP_NAME} {APP_VERSION}"
+
+# Project metadata & links
+AUTHORS = "Chirokun & alsogamer"
+URL_FORGEJO = "https://git.alsogamer.com/chiro/KikuMoe"
+URL_GITHUB = "https://github.com/Chiro-kun/KikuMoe"
+URL_TELEGRAM = "https://t.me/Chiro_kun"
+URL_LISTENMOE = "https://listen.moe"
+URL_GENSOKYO = "https://gensokyoradio.net/"
+URL_ANISON = "https://en.anison.fm/"
+URL_NEURO21 = "https://radio.twinskaraoke.com/"
+URL_TRUCKERSFM = "https://truckers.fm/"
+LICENSE_NAME = "MIT License"
 
 # QSettings scope
 ORG_NAME = "KikuMoe"
@@ -100,15 +112,21 @@ KEY_MUTE = "mute"
 KEY_CHANNEL = "channel"
 KEY_FORMAT = "format"
 KEY_AUTOPLAY = "autoplay"
+KEY_DISCORD_RPC_ENABLED = "discord_rpc_enabled"
+KEY_DISCORD_CLIENT_ID = "discord_client_id"
+DEFAULT_DISCORD_CLIENT_ID = "484517809179852800"
 KEY_TRAY_ENABLED = "tray_enabled"
 KEY_TRAY_NOTIFICATIONS = "tray_notifications"
 KEY_TRAY_HIDE_ON_MINIMIZE = "tray_hide_on_minimize"
 KEY_LIBVLC_PATH = "libvlc_path"
 KEY_WINDOW_GEOMETRY = "window_geometry"
+KEY_MINI_GEOMETRY = "mini_geometry"
+KEY_MINI_ALWAYS_ON_TOP = "mini_always_on_top"
 KEY_NETWORK_CACHING = "network_caching"
 # New settings keys
 KEY_SLEEP_MINUTES = "sleep_minutes"
 KEY_SLEEP_STOP_ON_END = "sleep_stop_on_end"
+KEY_SHOW_SLEEP_TIMER = "show_sleep_timer"
 KEY_DEV_CONSOLE_ENABLED = "dev_console_enabled"
 KEY_SESSION_TIMER_ENABLED = "session_timer_enabled"
 # Audio output selection
@@ -120,3 +138,91 @@ KEY_CLOSE_TO_TRAY = "close_to_tray"
 KEY_DEV_CONSOLE_SHOW_DEV = "dev_console_show_dev"
 # Audio backend selection: 'auto' | 'ffmpeg' | 'mpv' | 'vlc'
 KEY_AUDIO_BACKEND = "audio_backend"
+# Radio station selection & provider identifiers
+KEY_STATION = "station"
+STATION_LISTENMOE = "listenmoe"
+STATION_GENSOKYO = "gensokyo"
+STATION_ANISON = "anison"
+STATION_NEURO21 = "neuro21"
+STATION_TRUCKERSFM = "truckersfm"
+STATION_LOCAL = "local"
+DEFAULT_STATION = STATION_LISTENMOE
+
+# Local Music Playback
+SUPPORTED_AUDIO_EXTENSIONS = (
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".opus",
+    ".m4a",
+    ".aac",
+    ".wav",
+)
+KEY_LOCAL_SHUFFLE = "local_shuffle"
+KEY_LOCAL_REPEAT_MODE = "local_repeat_mode"
+KEY_LOCAL_LAST_DIR = "local_last_dir"
+KEY_LOCAL_SAVED_TRACKS = "local_saved_tracks"
+REPEAT_OFF = 0
+REPEAT_ALL = 1
+REPEAT_ONE = 2
+
+# Theme & Custom Accent Engine (Phase 8)
+KEY_THEME = "theme"
+KEY_CUSTOM_ACCENT_ENABLED = "custom_accent_enabled"
+KEY_CUSTOM_ACCENT = "custom_accent"
+KEY_CUSTOM_ACCENT_PALETTE = "custom_accent_palette"
+THEME_CYBER_MOE = "cyber_moe"
+THEME_MIDNIGHT_AMOLED = "midnight_amoled"
+THEME_SAKURA_BLOOM = "sakura_bloom"
+THEME_NEON_MATRIX = "neon_matrix"
+THEME_OCEAN_CYAN = "ocean_cyan"
+DEFAULT_THEME = THEME_CYBER_MOE
+DEFAULT_ACCENT_COLOR = "#ec186c"
+
+# Audio visualizer (Conformal Fluid Wave)
+KEY_VISUALIZER_ENABLED = "visualizer_enabled"
+DEFAULT_VISUALIZER_ENABLED = False
+
+# Ambient Mode (Full-bleed blurred cover backdrop)
+KEY_AMBIENT_MODE_ENABLED = "ambient_mode_enabled"
+DEFAULT_AMBIENT_MODE_ENABLED = True
+
+# Dynamic Volume (automatic audio ducking per app/game)
+KEY_DYNAMIC_VOLUME_ENABLED = "dynamic_volume_enabled"
+DEFAULT_DYNAMIC_VOLUME_ENABLED = False
+KEY_DYNAMIC_VOLUME_APPS = "dynamic_volume_apps"
+DEFAULT_DYNAMIC_VOLUME_APPS = ""
+KEY_DYNAMIC_VOLUME_LEVEL = "dynamic_volume_level"
+DEFAULT_DYNAMIC_VOLUME_LEVEL = 25
+KEY_DYNAMIC_VOLUME_MODE = "dynamic_volume_mode"
+DEFAULT_DYNAMIC_VOLUME_MODE = "any_open"
+
+# OTA Updates (GitHub Releases)
+KEY_UPDATE_CHECK_ON_STARTUP = "update_check_on_startup"
+KEY_UPDATE_CHANNEL = "update_channel"
+KEY_UPDATE_LAST_CHECK = "update_last_check"
+KEY_UPDATE_IGNORED_VERSION = "update_ignored_version"
+UPDATE_CHANNEL_STABLE = "stable"
+UPDATE_CHANNEL_BETA = "beta"
+DEFAULT_UPDATE_CHECK_ON_STARTUP = True
+URL_GITHUB_API_RELEASES = "https://api.github.com/repos/Chiro-kun/KikuMoe/releases"
+
+# Lyrics providers (LRCLIB + Better Lyrics)
+KEY_LYRICS_PROVIDER = "lyrics_provider"
+KEY_BETTERLYRICS_API_KEY = "betterlyrics_api_key"
+LYRICS_PROVIDER_AUTO = "auto"
+LYRICS_PROVIDER_BETTERLYRICS_FIRST = "betterlyrics_first"
+LYRICS_PROVIDER_LRCLIB = "lrclib"
+LYRICS_PROVIDER_BETTERLYRICS = "betterlyrics"
+DEFAULT_LYRICS_PROVIDER = LYRICS_PROVIDER_AUTO
+
+# 10-band ISO Audio Equalizer (EQ)
+KEY_EQ_ENABLED = "eq_enabled"
+DEFAULT_EQ_ENABLED = False
+KEY_EQ_PRESET = "eq_preset"
+DEFAULT_EQ_PRESET = "flat"
+KEY_EQ_PREAMP = "eq_preamp"
+DEFAULT_EQ_PREAMP = 0.0
+KEY_EQ_BANDS = "eq_bands"
+KEY_EQ_CUSTOM_PREAMP = "eq_custom_preamp"
+KEY_EQ_CUSTOM_BANDS = "eq_custom_bands"

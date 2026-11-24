@@ -1,37 +1,536 @@
-from typing import Callable, Optional
+from __future__ import annotations
 
-from PyQt6.QtCore import QObject, QTimer
-from PyQt6.QtGui import QAction, QActionGroup, QFont, QIcon
-from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+import html
+import os
+import sys
+from typing import Callable
 
-from core.constants import KEY_CHANNEL, KEY_FORMAT
+from PyQt6.QtCore import QObject, QSize, Qt, QTimer
+from PyQt6.QtGui import (
+    QAction,
+    QActionGroup,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QImage,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+    QRadialGradient,
+)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QSizePolicy,
+    QSystemTrayIcon,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+    QWidgetAction,
+)
+
+from core.config import get_station_config, get_station_display_name
+from core.constants import (
+    DEFAULT_STATION,
+    KEY_CHANNEL,
+    KEY_FORMAT,
+    KEY_STATION,
+    STATION_ANISON,
+    STATION_GENSOKYO,
+    STATION_LISTENMOE,
+    STATION_LOCAL,
+    STATION_NEURO21,
+    STATION_TRUCKERSFM,
+)
+from ui.themes.cyber_moe import PALETTE
+from ui.vector_icons import (
+    get_channel_icon,
+    get_codec_icon,
+    get_history_icon,
+    get_info_icon,
+    get_pause_icon,
+    get_play_icon,
+    get_power_quit_icon,
+    get_settings_icon,
+    get_station_icon,
+    get_stop_icon,
+    get_volume_icon,
+    get_window_icon,
+)
+
+
+def _make_rounded_pixmap(source: QPixmap, size: int = 58, radius: int = 8) -> QPixmap:
+    """Renders a smooth, anti-aliased square pixmap with rounded corners."""
+    target = QPixmap(size, size)
+    target.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(target)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    path = QPainterPath()
+    path.addRoundedRect(0.0, 0.0, float(size), float(size), float(radius), float(radius))
+    painter.setClipPath(path)
+    scaled = source.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    x = (size - scaled.width()) // 2
+    y = (size - scaled.height()) // 2
+    painter.drawPixmap(x, y, scaled)
+    painter.end()
+    return target
+
+
+class TrayNowPlayingCard(QFrame):
+    """
+    Sleek Cyber-Glass card shown at the very top of the system tray menu.
+    Displays:
+    - Rounded cover art thumbnail (with smooth anti-aliasing and fallback)
+    - Station badge pill (e.g. LISTEN.MOE, GENSOKYO RADIO)
+    - Session timer pill (e.g. 00:00)
+    - Track title (bold, bright white, elided)
+    - Artist name (muted slate, elided)
+    - Inline glass media action buttons: [Play/Pause], [Stop], [Mute], [History]
+    - Subtle "Open KikuMoe ↗" hint label
+    Clicking anywhere on the card body (outside buttons) raises the main window
+    and dismisses the context menu.
+    """
+
+    def __init__(
+        self,
+        parent: QFrame | None = None,
+        menu: QMenu | None = None,
+        i18n: object | None = None,
+        on_show_window: Callable | None = None,
+        on_toggle_play_pause: Callable | None = None,
+        on_stop_stream: Callable | None = None,
+        on_toggle_mute: Callable | None = None,
+        on_history: Callable | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._menu = menu
+        self._i18n = i18n
+        self._on_show_window = on_show_window
+        self._on_toggle_play_pause = on_toggle_play_pause
+        self._on_stop_stream = on_stop_stream
+        self._on_toggle_mute = on_toggle_mute
+        self._on_history = on_history
+
+        self._raw_title: str = ""
+        self._raw_artist: str = ""
+        self._raw_station: str = ""
+        self._raw_session: str = ""
+        self._cover_pixmap: QPixmap | None = None
+        self._is_playing: bool = False
+        self._is_paused: bool = False
+        self._is_muted: bool = False
+
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumWidth(260)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        self._setup_ui()
+        self.refresh_theme()
+
+    def _t(self, key: str, fallback: str) -> str:
+        t_fn = getattr(self._i18n, "t", None)
+        if callable(t_fn):
+            try:
+                res = t_fn(key)
+                if res:
+                    return str(res)
+            except Exception:
+                pass
+        return fallback
+
+    def _setup_ui(self) -> None:
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 10, 12, 8)
+        main_layout.setSpacing(10)
+
+        # Top row: Artwork + Metadata column
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(10)
+
+        # Cover thumbnail (58x58 px)
+        self._cover_lbl = QLabel(self)
+        self._cover_lbl.setFixedSize(58, 58)
+        self._cover_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_row.addWidget(self._cover_lbl)
+
+        # Metadata column
+        meta_col = QVBoxLayout()
+        meta_col.setContentsMargins(0, 0, 0, 0)
+        meta_col.setSpacing(2)
+
+        # Pill row (Station badge + Session elapsed)
+        pill_row = QHBoxLayout()
+        pill_row.setContentsMargins(0, 0, 0, 0)
+        pill_row.setSpacing(6)
+
+        self._badge_station = QLabel("LISTEN.MOE", self)
+        self._badge_station.setTextFormat(Qt.TextFormat.PlainText)
+        pill_row.addWidget(self._badge_station)
+
+        self._lbl_session = QLabel("00:00", self)
+        self._lbl_session.setTextFormat(Qt.TextFormat.PlainText)
+        self._lbl_session.setStyleSheet("color: #8E95A5; font-size: 10px; font-weight: 500;")
+        pill_row.addWidget(self._lbl_session)
+        pill_row.addStretch()
+        meta_col.addLayout(pill_row)
+
+        # Title label
+        self._lbl_title = QLabel("KikuMoe", self)
+        self._lbl_title.setTextFormat(Qt.TextFormat.PlainText)
+        self._lbl_title.setStyleSheet("color: #FFFFFF; font-size: 12px; font-weight: bold;")
+        meta_col.addWidget(self._lbl_title)
+
+        # Artist label
+        self._lbl_artist = QLabel(self._t("tray_no_track", "Nessun brano in riproduzione"), self)
+        self._lbl_artist.setTextFormat(Qt.TextFormat.PlainText)
+        self._lbl_artist.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        meta_col.addWidget(self._lbl_artist)
+
+        top_row.addLayout(meta_col)
+        main_layout.addLayout(top_row)
+
+        # Quick inline action buttons row (centered)
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 2, 0, 0)
+        btn_row.setSpacing(6)
+        btn_row.addStretch(1)
+
+        accent = PALETTE.get("accent", "#EC186C")
+
+        # Play / Pause button
+        self._btn_play = QToolButton(self)
+        self._btn_play.setFixedSize(36, 28)
+        self._btn_play.setIconSize(QSize(15, 15))
+        self._btn_play.setIcon(get_play_icon(14, accent))
+        self._btn_play.setToolTip(self._t("play", "Riproduci"))
+        if self._on_toggle_play_pause:
+            cb_play = self._on_toggle_play_pause
+            self._btn_play.clicked.connect(lambda: cb_play())
+        btn_row.addWidget(self._btn_play)
+
+        # Stop button
+        self._btn_stop = QToolButton(self)
+        self._btn_stop.setFixedSize(36, 28)
+        self._btn_stop.setIconSize(QSize(14, 14))
+        self._btn_stop.setIcon(get_stop_icon(13, accent))
+        self._btn_stop.setToolTip(self._t("stop", "Stop"))
+        if self._on_stop_stream:
+            cb_stop = self._on_stop_stream
+            self._btn_stop.clicked.connect(lambda: cb_stop())
+        btn_row.addWidget(self._btn_stop)
+
+        # Mute button
+        self._btn_mute = QToolButton(self)
+        self._btn_mute.setFixedSize(36, 28)
+        self._btn_mute.setIconSize(QSize(15, 15))
+        self._btn_mute.setIcon(get_volume_icon(14, "#CBD5E1", muted=False))
+        self._btn_mute.setToolTip(self._t("mute", "Muto"))
+        if self._on_toggle_mute:
+            cb_mute = self._on_toggle_mute
+            self._btn_mute.clicked.connect(lambda: cb_mute())
+        btn_row.addWidget(self._btn_mute)
+
+        # History button
+        self._btn_history = QToolButton(self)
+        self._btn_history.setFixedSize(36, 28)
+        self._btn_history.setIconSize(QSize(15, 15))
+        self._btn_history.setIcon(get_history_icon(14, "#CBD5E1"))
+        self._btn_history.setToolTip(self._t("history_button", "Cronologia brani..."))
+        if self._on_history:
+            cb_hist = self._on_history
+            self._btn_history.clicked.connect(lambda: self._trigger_history(cb_hist))
+        btn_row.addWidget(self._btn_history)
+
+        btn_row.addStretch(1)
+        main_layout.addLayout(btn_row)
+
+        # Set initial default fallback thumbnail
+        self.set_cover_pixmap(None)
+
+    def _trigger_history(self, cb: Callable) -> None:
+        try:
+            cb()
+        finally:
+            if self._menu is not None:
+                self._menu.close()
+
+    def mouseReleaseEvent(self, a0) -> None:
+        if a0 and a0.button() == Qt.MouseButton.LeftButton:
+            if self._on_show_window:
+                self._on_show_window()
+            if self._menu is not None:
+                self._menu.close()
+        super().mouseReleaseEvent(a0)
+
+    def _update_elided_text(self) -> None:
+        """Recalculates elided title and artist strings based on current widget width."""
+        available_width = max(160, self.width() - 84)
+        fm_title = QFontMetrics(self._lbl_title.font())
+        display_title = (
+            fm_title.elidedText(self._raw_title, Qt.TextElideMode.ElideRight, available_width)
+            if self._raw_title
+            else "KikuMoe"
+        )
+        self._lbl_title.setText(display_title)
+        self._lbl_title.setToolTip(html.escape(self._raw_title) if self._raw_title else "KikuMoe")
+
+        fm_artist = QFontMetrics(self._lbl_artist.font())
+        display_artist = (
+            fm_artist.elidedText(self._raw_artist, Qt.TextElideMode.ElideRight, available_width)
+            if self._raw_artist
+            else self._t("tray_no_track", "Nessun brano in riproduzione")
+        )
+        self._lbl_artist.setText(display_artist)
+        self._lbl_artist.setToolTip(html.escape(self._raw_artist) if self._raw_artist else "")
+
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._update_elided_text()
+
+    def paintEvent(self, a0) -> None:
+        super().paintEvent(a0)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        accent = QColor(PALETTE.get("accent", "#EC186C"))
+        w = self.width()
+        h = self.height()
+        if w <= 0 or h <= 0:
+            painter.end()
+            return
+
+        # Render ambient glow onto an offscreen surface with smooth vertical falloff
+        glow_img = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
+        glow_img.fill(Qt.GlobalColor.transparent)
+
+        gp = QPainter(glow_img)
+        gp.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 1. Radial ambient glow centered behind cover art (41, 39)
+        rad = QRadialGradient(41.0, 39.0, 110.0)
+        c1 = QColor(accent)
+        c1.setAlpha(65)
+        c2 = QColor(accent)
+        c2.setAlpha(20)
+        c3 = QColor(accent)
+        c3.setAlpha(0)
+        rad.setColorAt(0.0, c1)
+        rad.setColorAt(0.55, c2)
+        rad.setColorAt(1.0, c3)
+        gp.fillRect(0, 0, w, h, rad)
+
+        # 2. Soft horizontal/top-down wash
+        lin = QLinearGradient(0.0, 0.0, 0.0, float(h))
+        l1 = QColor(accent)
+        l1.setAlpha(22)
+        l2 = QColor(accent)
+        l2.setAlpha(0)
+        lin.setColorAt(0.0, l1)
+        lin.setColorAt(0.80, l2)
+        gp.fillRect(0, 0, w, h, lin)
+
+        # 3. Soft vertical falloff mask to ensure glow dissolves completely before card bottom
+        gp.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        fade_mask = QLinearGradient(0.0, 0.0, 0.0, float(h))
+        fade_mask.setColorAt(0.0, QColor(0, 0, 0, 255))
+        fade_mask.setColorAt(0.68, QColor(0, 0, 0, 255))
+        fade_mask.setColorAt(0.92, QColor(0, 0, 0, 0))
+        fade_mask.setColorAt(1.0, QColor(0, 0, 0, 0))
+        gp.fillRect(0, 0, w, h, fade_mask)
+        gp.end()
+
+        # Clip top corners matching menu border radius (10px) without rounding bottom
+        clip = QPainterPath()
+        clip.addRoundedRect(0.0, 0.0, float(w), float(h + 10.0), 10.0, 10.0)
+        painter.setClipPath(clip)
+        painter.drawImage(0, 0, glow_img)
+        painter.end()
+
+    def retranslate(self, i18n: object) -> None:
+        """Re-applies localized labels and tooltips on language switch."""
+        self._i18n = i18n
+        self._btn_stop.setToolTip(self._t("stop", "Stop"))
+        self._btn_history.setToolTip(self._t("history_button", "Cronologia brani..."))
+        self.update_controls_state(self._is_playing, self._is_paused, self._is_muted)
+        self._update_elided_text()
+
+    def set_track_info(
+        self,
+        title: str = "",
+        artist: str = "",
+        station: str = "",
+        session: str = "",
+    ) -> None:
+        """Updates track metadata and elides text cleanly to prevent overflow."""
+        self._raw_title = title or ""
+        self._raw_artist = artist or ""
+        self._raw_station = station or ""
+        self._raw_session = session or ""
+
+        # Update station badge
+        st_clean = (self._raw_station or "LISTEN.MOE").upper()
+        self._badge_station.setText(st_clean)
+
+        # Update session timer / status
+        sess_clean = self._raw_session
+        if sess_clean.lower().startswith("sessione:"):
+            sess_clean = sess_clean.split(":", 1)[1].strip()
+        elif sess_clean.lower().startswith("session:"):
+            sess_clean = sess_clean.split(":", 1)[1].strip()
+        self._lbl_session.setText(sess_clean or "00:00")
+        self._lbl_session.setVisible(bool(sess_clean))
+
+        # Title & Artist with dynamic width-aware elision
+        self._update_elided_text()
+
+    def set_cover_pixmap(self, pixmap: QPixmap | None) -> None:
+        """Sets smooth rounded artwork or falls back to KikuMoe brand icon."""
+        self._cover_pixmap = pixmap
+        size = 58
+        radius = 8
+
+        if pixmap is not None and not pixmap.isNull():
+            rounded = _make_rounded_pixmap(pixmap, size=size, radius=radius)
+            self._cover_lbl.setPixmap(rounded)
+            return
+
+        # Fallback icon
+        fallback_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "icons",
+            "Kikumoe - no txt.png",
+        )
+        if os.path.exists(fallback_path):
+            src_pm = QPixmap(fallback_path)
+            if not src_pm.isNull():
+                rounded = _make_rounded_pixmap(src_pm, size=size, radius=radius)
+                self._cover_lbl.setPixmap(rounded)
+                return
+
+        # Blank rounded fallback canvas if file missing
+        canvas = QPixmap(size, size)
+        canvas.fill(Qt.GlobalColor.transparent)
+        p = QPainter(canvas)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(0.0, 0.0, float(size), float(size), float(radius), float(radius))
+        p.fillPath(path, QColor("#1E2235"))
+        p.end()
+        self._cover_lbl.setPixmap(canvas)
+
+    def update_controls_state(
+        self,
+        is_playing: bool,
+        is_paused: bool,
+        is_muted: bool,
+    ) -> None:
+        """Updates inline button states and icons."""
+        self._is_playing = is_playing
+        self._is_paused = is_paused
+        self._is_muted = is_muted
+
+        accent = PALETTE.get("accent", "#EC186C")
+        effective_playing = bool(is_playing and not is_paused)
+
+        if effective_playing:
+            self._btn_play.setIcon(get_pause_icon(14, accent))
+            self._btn_play.setToolTip(self._t("pause", "Pausa"))
+        else:
+            self._btn_play.setIcon(get_play_icon(14, accent))
+            self._btn_play.setToolTip(self._t("play", "Riproduci"))
+
+        self._btn_stop.setIcon(get_stop_icon(13, accent))
+
+        if is_muted:
+            self._btn_mute.setIcon(get_volume_icon(14, "#FF4B6E", muted=True))
+            self._btn_mute.setToolTip(self._t("tray_unmute", "Riattiva audio"))
+        else:
+            self._btn_mute.setIcon(get_volume_icon(14, "#CBD5E1", muted=False))
+            self._btn_mute.setToolTip(self._t("tray_mute", "Muto"))
+
+    def refresh_theme(self) -> None:
+        """Synchronizes colors and borders with the active Cyber-Moe palette."""
+        accent = PALETTE.get("accent", "#EC186C")
+        hover_border = PALETTE.get("accent_glow", "rgba(236, 24, 108, 0.35)")
+
+        self.setStyleSheet(
+            "TrayNowPlayingCard { "
+            "  background-color: transparent; "
+            "  border: none; "
+            "  margin: 0px; "
+            "} "
+            "TrayNowPlayingCard:hover { "
+            "  background-color: transparent; "
+            "}"
+        )
+
+        self._cover_lbl.setStyleSheet(
+            "border-radius: 8px; background-color: rgba(255, 255, 255, 0.05); "
+            "border: 1px solid rgba(255, 255, 255, 0.08);"
+        )
+
+        self._badge_station.setStyleSheet(
+            f"background-color: rgba(236, 24, 108, 0.22); color: {accent}; "
+            "border-radius: 4px; padding: 1px 6px; font-size: 9px; font-weight: bold; "
+            "letter-spacing: 0.5px;"
+        )
+
+        btn_style = (
+            "QToolButton { background-color: rgba(255, 255, 255, 0.06); "
+            "border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; } "
+            f"QToolButton:hover {{ background-color: rgba(255, 255, 255, 0.13); "
+            f"border: 1px solid {hover_border}; }} "
+            "QToolButton:pressed { background-color: rgba(255, 255, 255, 0.20); }"
+        )
+        for b in [self._btn_play, self._btn_stop, self._btn_mute, self._btn_history]:
+            b.setStyleSheet(btn_style)
+
+        # Refresh button icons
+        self.update_controls_state(self._is_playing, self._is_paused, self._is_muted)
+        self._btn_history.setIcon(get_history_icon(14, "#CBD5E1"))
+        self.update()
 
 
 class TrayManager(QObject):
     """
-    Incapsula la gestione del QSystemTrayIcon: creazione, menu, visibilità,
-    tooltip, icona e notifiche. Fornisce metodi sicuri con try/except per
-    evitare crash dell'app a causa della tray.
+    Incapsula la gestione del QSystemTrayIcon: creazione, menu con Now Playing card,
+    visibilità, tooltip, icona e notifiche. Fornisce metodi sicuri con try/except
+    per garantire stabilità assoluta.
     """
 
     def __init__(
         self,
         parent,
         i18n,
-        on_show_window: Optional[Callable] = None,
-        on_quit: Optional[Callable] = None,
-        on_open_settings: Optional[Callable] = None,
-        on_change_channel: Optional[Callable[[str], None]] = None,
-        on_change_format: Optional[Callable[[str], None]] = None,
-        on_toggle_play_pause: Optional[Callable] = None,
-        on_stop_stream: Optional[Callable] = None,
-        on_force_stop: Optional[Callable] = None,
-        on_toggle_mute: Optional[Callable] = None,
+        on_show_window: Callable | None = None,
+        on_quit: Callable | None = None,
+        on_open_settings: Callable | None = None,
+        on_change_station: Callable[[str], None] | None = None,
+        on_change_channel: Callable[[str], None] | None = None,
+        on_change_format: Callable[[str], None] | None = None,
+        on_toggle_play_pause: Callable | None = None,
+        on_stop_stream: Callable | None = None,
+        on_force_stop: Callable | None = None,
+        on_toggle_mute: Callable | None = None,
+        on_about: Callable | None = None,
     ):
         super().__init__(parent)
         self._parent = parent
         self._i18n = i18n
-        self._tray: Optional[QSystemTrayIcon] = None
+        self._tray: QSystemTrayIcon | None = None
         self._on_show_window = on_show_window
 
         def default_quit():
@@ -41,35 +540,83 @@ class TrayManager(QObject):
 
         self._on_quit = on_quit or default_quit
         self._on_open_settings = on_open_settings
+        self._on_change_station = on_change_station
         self._on_change_channel = on_change_channel
         self._on_change_format = on_change_format
+        self._station_actions: dict[str, QAction] = {}
+        self._grp_station: QActionGroup | None = None
+        self._act_st: QAction | None = None
         self._on_toggle_play_pause = on_toggle_play_pause
         self._on_stop_stream = on_stop_stream
         self._on_force_stop = on_force_stop
         self._on_toggle_mute = on_toggle_mute
-        # Azioni informative in cima al menu
-        self._act_info_now: Optional[QAction] = None
-        self._act_info_session: Optional[QAction] = None
-        self._sep_info: Optional[QAction] = None
+        self._on_about = on_about
+
+        # Now Playing Header Card
+        self._card: TrayNowPlayingCard | None = None
+        self._card_action: QWidgetAction | None = None
+
+        # Azioni informative backward-compatible
+        self._act_info_now: QAction | None = None
+        self._act_info_session: QAction | None = None
+        self._sep_info: QAction | None = None
+
         # Azioni di controllo riproduzione
-        self._act_play_pause: Optional[QAction] = None
-        self._act_stop: Optional[QAction] = None
-        self._act_force_stop: Optional[QAction] = None
-        self._act_mute: Optional[QAction] = None
-        self._act_quit: Optional[QAction] = None
-        self._act_ch: Optional[QAction] = None
-        self._act_fmt: Optional[QAction] = None
+        self._act_play_pause: QAction | None = None
+        self._act_stop: QAction | None = None
+        self._act_force_stop: QAction | None = None
+        self._act_mute: QAction | None = None
+        self._act_quit: QAction | None = None
+        self._act_settings: QAction | None = None
+        self._act_about: QAction | None = None
+        self._act_history: QAction | None = None
+        self._act_show: QAction | None = None
+        self._act_ch: QAction | None = None
+        self._act_fmt: QAction | None = None
+        self._sub_station: QMenu | None = None
+        self._sub_channel: QMenu | None = None
+        self._sub_format: QMenu | None = None
+        self._channel_actions: dict[str, QAction] = {}
+        self._format_actions: dict[str, QAction] = {}
+        self._grp_channel: QActionGroup | None = None
+        self._grp_format: QActionGroup | None = None
+
         # Intestazioni e separatori di sezione
-        self._act_hdr_playback: Optional[QAction] = None
-        self._sep_playback_end: Optional[QAction] = None
-        self._act_hdr_window: Optional[QAction] = None
-        self._sep_window_end: Optional[QAction] = None
-        self._act_hdr_prefs: Optional[QAction] = None
+        self._act_hdr_playback: QAction | None = None
+        self._sep_playback_end: QAction | None = None
+        self._act_hdr_window: QAction | None = None
+        self._sep_window_end: QAction | None = None
+        self._act_hdr_prefs: QAction | None = None
+
         # Icone per i controlli
         self._icons: dict = {}
+        self._last_tooltip: str | None = None
+
+    def _t(self, key: str, fallback: str) -> str:
+        t_fn = getattr(self._i18n, "t", None)
+        if callable(t_fn):
+            try:
+                res = t_fn(key)
+                if res:
+                    return str(res)
+            except Exception:
+                pass
+        return fallback
+
+    def _read_parent_setting(self, key: str, default: str) -> str:
+        settings = getattr(self._parent, "settings", None)
+        if settings is None:
+            return default
+        try:
+            return str(settings.value(key, default))
+        except Exception:
+            return default
 
     def ensure_tray_enabled(
-        self, enabled: bool, window_icon: Optional[QIcon] = None, tooltip: Optional[str] = None
+        self,
+        enabled: bool,
+        window_icon: QIcon | None = None,
+        tooltip: str | None = None,
     ) -> None:
         try:
             if enabled:
@@ -80,295 +627,472 @@ class TrayManager(QObject):
                         else QIcon()
                     )
                     self._tray = QSystemTrayIcon(icon, self._parent)
-                    menu = QMenu()
+                    menu_parent = self._parent if isinstance(self._parent, QWidget) else None
+                    menu = QMenu(menu_parent)
                     try:
                         menu.setSeparatorsCollapsible(False)
                     except Exception:
                         pass
-                    # Effetto hover per evidenziare le voci selezionabili nel menu,
-                    # con colore dei titoli adattato al tema
-                    try:
-                        sep_rgba = "rgba(255, 255, 255, 0.12)"
-                        hover_rgba = "rgba(194, 24, 91, 0.25)"
-                        menu.setStyleSheet(
-                            f"""
-                            QMenu {{
-                                background-color: #1a1a1a;
-                                border: 1px solid #333333;
-                                padding: 6px 0px;
-                                spacing: 4px;
-                            }}
-                            QMenu::item {{
-                                padding: 6px 32px 6px 8px;
-                                border-radius: 4px;
-                                margin: 1px 6px;
-                                color: #e0e0e0;
-                                font-size: 13px;
-                            }}
-                            QMenu::icon {{
-                                padding-right: 2px;
-                            }}
-                            QMenu::item:enabled:selected {{
-                                background-color: {hover_rgba};
-                                color: #ffffff;
-                            }}
-                            QMenu::item:disabled {{
-                                color: #666666;
-                                background-color: transparent;
-                            }}
-                            QMenu::separator {{
-                                height: 1px;
-                                background-color: {sep_rgba};
-                                margin: 8px 14px;
-                            }}
-                            """
-                        )
-                    except Exception:
-                        pass
-                    # Font per intestazioni: leggermente più grande e in grassetto
-                    try:
-                        base_font = menu.font()
-                        header_font = QFont(base_font)
-                        # Standard text with bold for headers instead of increased size
-                        header_font.setBold(True)
-                        header_font.setPointSize(
-                            base_font.pointSize() if base_font.pointSize() > 0 else 10
-                        )
-                    except Exception:
-                        header_font = QFont()
-                        header_font.setPointSize(11)
-                        header_font.setBold(True)
-                    # Prime due righe informative: Now Playing e Sessione (se attiva)
-                    lines = tooltip.splitlines() if tooltip else []
-                    info_now = lines[1] if len(lines) > 1 else ""
-                    info_session = lines[2] if len(lines) > 2 else ""
-                    self._act_info_now = QAction(info_now or "", self._parent)
-                    self._act_info_now.setEnabled(False)
-                    self._act_info_now.setVisible(bool(info_now))
-                    menu.addAction(self._act_info_now)
-                    self._act_info_session = QAction(info_session or "", self._parent)
-                    self._act_info_session.setEnabled(False)
-                    self._act_info_session.setVisible(bool(info_session))
-                    menu.addAction(self._act_info_session)
-                    self._sep_info = menu.addSeparator()
-                    if self._sep_info is not None:
-                        self._sep_info.setVisible(bool(info_now or info_session))
 
-                    # Sezione: Playback (intestazione)
-                    try:
-                        txt_hdr_play = (
-                            self._i18n.t("tray_section_playback")
-                            if hasattr(self._i18n, "t")
-                            else "Riproduzione"
-                        )
-                        if not txt_hdr_play:
-                            txt_hdr_play = "Riproduzione"
-                    except Exception:
-                        txt_hdr_play = "Riproduzione"
-                    # Intestazione come QAction disabilitata
-                    # (più compatibile con alcuni menù di tray su Windows)
-                    self._act_hdr_playback = QAction(txt_hdr_play, self._parent)
+                    self._apply_menu_stylesheet(menu)
+
+                    current_station = self._read_parent_setting(KEY_STATION, DEFAULT_STATION)
+                    display_station = get_station_display_name(current_station, self._i18n)
+
+                    # Font per intestazioni di sezione (maiuscole, bold, letter-spaced)
+                    header_font = QFont(menu.font())
+                    header_font.setPointSize(10)
+                    header_font.setBold(True)
+                    header_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
+
+                    is_win = sys.platform.startswith("win")
+                    force_linux = bool(
+                        os.environ.get("KIKUMOE_TEST_LINUX_TRAY", "0") == "1"
+                        or os.environ.get("KIKUMOE_LINUX_NATIVE_TRAY", "0") == "1"
+                    )
+                    force_card = bool(os.environ.get("KIKUMOE_TRAY_FORCE_CARD", "0") == "1")
+                    show_native_playback = ((not is_win) or force_linux) and not force_card
+                    show_card = (not show_native_playback) or force_card
+
+                    # 1. Now Playing Cyber-Glass Header Card (shown on Windows / direct Qt menus)
+                    toggle_history = getattr(self._parent, "toggle_history_popover", None)
+                    on_history_cb: Callable[[], None] | None = None
+                    if callable(toggle_history):
+
+                        def _invoke_history() -> None:
+                            toggle_history()
+
+                        on_history_cb = _invoke_history
+                    self._card = TrayNowPlayingCard(
+                        parent=None,
+                        menu=menu,
+                        i18n=self._i18n,
+                        on_show_window=self._handle_show_window,
+                        on_toggle_play_pause=self._on_toggle_play_pause,
+                        on_stop_stream=self._on_stop_stream,
+                        on_toggle_mute=self._on_toggle_mute,
+                        on_history=on_history_cb,
+                    )
+                    self._card.set_track_info(station=display_station)
+                    self._card_action = QWidgetAction(menu)
+                    self._card_action.setDefaultWidget(self._card)
+                    if show_card:
+                        menu.addAction(self._card_action)
+
+                    # Now Playing info actions (visible on Linux / DBus where QWidgetAction drops).
+                    # Populate non-empty initial labels before exporting the menu over DBusMenu.
+                    init_now_text = self._t("tray_no_track", "Nessun brano in riproduzione")
+                    self._act_info_now = QAction(init_now_text, menu)
+                    self._act_info_now.setVisible(show_native_playback)
+                    self._act_info_now.triggered.connect(self._handle_show_window)
+                    if show_native_playback:
+                        menu.addAction(self._act_info_now)
+
+                    self._act_info_session = QAction(display_station.upper(), menu)
+                    self._act_info_session.setVisible(show_native_playback)
+                    self._act_info_session.triggered.connect(self._handle_show_window)
+                    if show_native_playback:
+                        menu.addAction(self._act_info_session)
+
+                    accent = PALETTE.get("accent", "#EC186C")
+
+                    # Playback section actions (visible on Linux / DBus; handled by card on Windows)
+                    txt_hdr_pb = self._t("tray_section_playback", "Riproduzione").upper()
+                    self._act_hdr_playback = QAction(txt_hdr_pb, self._parent)
                     self._act_hdr_playback.setEnabled(False)
                     self._act_hdr_playback.setFont(header_font)
-                    menu.addAction(self._act_hdr_playback)
+                    self._act_hdr_playback.setVisible(show_native_playback)
+                    if show_native_playback:
+                        menu.addAction(self._act_hdr_playback)
 
-                    # Controlli di playback: Play/Pausa, Stop, Muto
-                    try:
-                        txt_play_pause = (
-                            self._i18n.t("tray_play_pause")
-                            if hasattr(self._i18n, "t")
-                            else "Play/Pausa"
-                        )
-                    except Exception:
-                        txt_play_pause = "Play/Pausa"
-                    act_play_pause = QAction(txt_play_pause, self._parent)
+                    txt_pp = self._t("tray_play_pause", "Play/Pausa")
+                    self._act_play_pause = QAction(txt_pp, self._parent)
+                    self._act_play_pause.setIcon(get_play_icon(16, accent))
+                    self._act_play_pause.setVisible(show_native_playback)
                     if self._on_toggle_play_pause:
                         cb_play = self._on_toggle_play_pause
-                        act_play_pause.triggered.connect(lambda: cb_play())
-                    menu.addAction(act_play_pause)
-                    self._act_play_pause = act_play_pause
-                    # Stop
-                    try:
-                        txt_stop = self._i18n.t("tray_stop") if hasattr(self._i18n, "t") else "Stop"
-                    except Exception:
-                        txt_stop = "Stop"
-                    act_stop = QAction(txt_stop, self._parent)
+                        self._act_play_pause.triggered.connect(lambda: cb_play())
+                    if show_native_playback:
+                        menu.addAction(self._act_play_pause)
+
+                    self._act_stop = QAction(self._t("tray_stop", "Stop"), self._parent)
+                    self._act_stop.setIcon(get_stop_icon(16, accent))
+                    self._act_stop.setVisible(show_native_playback)
                     if self._on_stop_stream:
-                        act_stop.triggered.connect(self._on_stop_stream)
-                    menu.addAction(act_stop)
-                    self._act_stop = act_stop
-                    # Muto / Riattiva audio (testo aggiornato dinamicamente altrove)
-                    try:
-                        txt_mute = self._i18n.t("tray_mute") if hasattr(self._i18n, "t") else "Muto"
-                    except Exception:
-                        txt_mute = "Muto"
-                    act_mute = QAction(txt_mute, self._parent)
+                        self._act_stop.triggered.connect(self._on_stop_stream)
+                    if show_native_playback:
+                        menu.addAction(self._act_stop)
+
+                    self._act_mute = QAction(self._t("tray_mute", "Muto"), self._parent)
+                    self._act_mute.setIcon(get_volume_icon(16, accent))
+                    self._act_mute.setVisible(show_native_playback)
                     if self._on_toggle_mute:
-                        act_mute.triggered.connect(self._on_toggle_mute)
-                    menu.addAction(act_mute)
-                    self._act_mute = act_mute
+                        self._act_mute.triggered.connect(self._on_toggle_mute)
+                    if show_native_playback:
+                        menu.addAction(self._act_mute)
 
-                    # Separatore fine sezione Playback
-                    self._sep_playback_end = menu.addSeparator()
+                    txt_hist = self._t("history_button", "Cronologia brani")
+                    self._act_history = QAction(txt_hist, self._parent)
+                    self._act_history.setIcon(get_history_icon(16, accent))
+                    self._act_history.setVisible(show_native_playback)
+                    if on_history_cb is not None:
+                        self._act_history.triggered.connect(on_history_cb)
+                    if show_native_playback:
+                        menu.addAction(self._act_history)
 
-                    # Sezione: Window (intestazione)
-                    try:
-                        txt_hdr_window = (
-                            self._i18n.t("tray_section_window")
-                            if hasattr(self._i18n, "t")
-                            else "Finestra"
-                        )
-                        if not txt_hdr_window:
-                            txt_hdr_window = "Finestra"
-                    except Exception:
-                        txt_hdr_window = "Finestra"
+                    self._sep_playback_end = None
+
+                    # 2. Sezione: FINESTRA
+                    txt_hdr_window = self._t("tray_section_window", "Finestra").upper()
                     self._act_hdr_window = QAction(txt_hdr_window, self._parent)
                     self._act_hdr_window.setEnabled(False)
                     self._act_hdr_window.setFont(header_font)
                     menu.addAction(self._act_hdr_window)
 
-                    try:
-                        txt_show = (
-                            self._i18n.t("tray_show")
-                            if hasattr(self._i18n, "t")
-                            else "Mostra finestra"
-                        )
-                    except Exception:
-                        txt_show = "Mostra finestra"
+                    # Mostra finestra
+                    txt_show = self._t("tray_show", "Mostra finestra")
                     act_show = QAction(txt_show, self._parent)
-                    if self._on_show_window:
-                        act_show.triggered.connect(self._on_show_window)
+                    act_show.setIcon(get_window_icon(16, accent))
+                    act_show.triggered.connect(self._handle_show_window)
                     menu.addAction(act_show)
+                    self._act_show = act_show
 
-                    # Apri Impostazioni
-                    try:
-                        txt_settings = (
-                            self._i18n.t("settings_button")
-                            if hasattr(self._i18n, "t")
-                            else "Impostazioni"
-                        )
-                    except Exception:
-                        txt_settings = "Impostazioni"
+                    # Impostazioni
+                    txt_settings = self._t("settings_button", "Impostazioni")
                     act_settings = QAction(txt_settings, self._parent)
+                    act_settings.setIcon(get_settings_icon(16, accent))
                     if self._on_open_settings:
                         cb_settings = self._on_open_settings
                         act_settings.triggered.connect(lambda: cb_settings())
-                    # Separatore fine sezione Window
-                    self._sep_window_end = menu.addSeparator()
-                    # Sezione: Preferences (intestazione)
-                    try:
-                        txt_hdr_prefs = (
-                            self._i18n.t("tray_section_preferences")
-                            if hasattr(self._i18n, "t")
-                            else "Preferenze"
-                        )
-                        if not txt_hdr_prefs:
-                            txt_hdr_prefs = "Preferenze"
-                    except Exception:
-                        txt_hdr_prefs = "Preferenze"
+                    menu.addAction(act_settings)
+                    self._act_settings = act_settings
+
+                    # Informazioni su KikuMoe...
+                    txt_about = self._t("tray_about", "Informazioni su KikuMoe...")
+                    act_about = QAction(txt_about, self._parent)
+                    act_about.setIcon(get_info_icon(16, accent))
+                    if self._on_about:
+                        cb_about = self._on_about
+                        act_about.triggered.connect(lambda: cb_about())
+                    menu.addAction(act_about)
+                    self._act_about = act_about
+
+                    self._sep_window_end = None
+
+                    # 4. Sezione: PREFERENZE
+                    txt_hdr_prefs = self._t("tray_section_preferences", "Preferenze").upper()
                     self._act_hdr_prefs = QAction(txt_hdr_prefs, self._parent)
                     self._act_hdr_prefs.setEnabled(False)
                     self._act_hdr_prefs.setFont(header_font)
                     menu.addAction(self._act_hdr_prefs)
 
-                    # Canale (J-POP/K-POP)
-                    try:
-                        txt_channel = (
-                            self._i18n.t("tray_channel") if hasattr(self._i18n, "t") else "Canale"
-                        )
-                    except Exception:
-                        txt_channel = "Canale"
-                    sub_channel = QMenu(txt_channel, menu)
-                    grp_channel = QActionGroup(self._parent)
-                    grp_channel.setExclusive(True)
-                    try:
-                        current_channel = self._parent.settings.value(KEY_CHANNEL, "J-POP")
-                    except Exception:
-                        current_channel = "J-POP"
-                    for ch in ["J-POP", "K-POP"]:
-                        act = QAction(ch, self._parent)
-                        act.setCheckable(True)
-                        act.setChecked(str(current_channel) == ch)
-                        if self._on_change_channel:
-                            act.triggered.connect(
-                                lambda checked, v=ch: (
+                    # Sottomenu Stazione
+                    txt_station = self._t("tray_station", "Stazione")
+                    sub_station = QMenu(txt_station, menu)
+                    self._sub_station = sub_station
+                    self._apply_menu_stylesheet(sub_station, is_submenu=True)
+                    grp_station = QActionGroup(sub_station)
+                    grp_station.setExclusive(True)
+                    self._grp_station = grp_station
+                    self._station_actions.clear()
+                    station_items = [
+                        ("LISTEN.moe", STATION_LISTENMOE),
+                        ("Gensokyo Radio", STATION_GENSOKYO),
+                        ("ANISON.FM", STATION_ANISON),
+                        ("Neuro 21", STATION_NEURO21),
+                        ("TruckersFM", STATION_TRUCKERSFM),
+                        (self._t("station_local", "Musica locale"), STATION_LOCAL),
+                    ]
+                    for name, s_id in station_items:
+                        acts = QAction(name, sub_station)
+                        acts.setCheckable(True)
+                        acts.setChecked(current_station.lower() == s_id.lower())
+                        if self._on_change_station:
+                            acts.triggered.connect(
+                                lambda checked, v=s_id: (
                                     checked
-                                    and self._on_change_channel
-                                    and self._on_change_channel(v)
+                                    and self._on_change_station
+                                    and self._on_change_station(v)
                                 )
                             )
-                        grp_channel.addAction(act)
-                        sub_channel.addAction(act)
+                        grp_station.addAction(acts)
+                        sub_station.addAction(acts)
+                        self._station_actions[s_id] = acts
+                    act_st = menu.addMenu(sub_station)
+                    self._act_st = act_st
+                    if self._act_st is not None:
+                        self._act_st.setIcon(get_station_icon(16, accent))
+                    try:
+                        sub_station.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
+
+                    # Sottomenu Canale
+                    txt_channel = self._t("tray_channel", "Canale")
+                    sub_channel = QMenu(txt_channel, menu)
+                    self._sub_channel = sub_channel
+                    self._apply_menu_stylesheet(sub_channel, is_submenu=True)
+                    grp_channel = QActionGroup(sub_channel)
+                    grp_channel.setExclusive(True)
+                    self._grp_channel = grp_channel
+                    self._channel_actions.clear()
                     act_ch = menu.addMenu(sub_channel)
                     self._act_ch = act_ch
-                    if "channel" in self._icons and self._act_ch is not None:
-                        self._act_ch.setIcon(self._icons["channel"])
+                    if self._act_ch is not None:
+                        self._act_ch.setIcon(get_channel_icon(16, accent))
+                    try:
+                        sub_channel.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
 
-                    # Formato (Vorbis/MP3)
-                    try:
-                        txt_format = (
-                            self._i18n.t("tray_format")
-                            if hasattr(self._i18n, "t")
-                            else "Formato/Codec"
-                        )
-                    except Exception:
-                        txt_format = "Formato/Codec"
+                    # Sottomenu Formato (codec)
+                    txt_format = self._t("tray_format", "Formato (codec)")
                     sub_format = QMenu(txt_format, menu)
-                    grp_format = QActionGroup(self._parent)
+                    self._sub_format = sub_format
+                    self._apply_menu_stylesheet(sub_format, is_submenu=True)
+                    grp_format = QActionGroup(sub_format)
                     grp_format.setExclusive(True)
-                    try:
-                        current_format = self._parent.settings.value(KEY_FORMAT, "Vorbis")
-                    except Exception:
-                        current_format = "Vorbis"
-                    for fmt in ["Vorbis", "MP3"]:
-                        actf = QAction(fmt, self._parent)
-                        actf.setCheckable(True)
-                        actf.setChecked(str(current_format) == fmt)
-                        if self._on_change_format:
-                            actf.triggered.connect(
-                                lambda checked, v=fmt: (
-                                    checked and self._on_change_format and self._on_change_format(v)
-                                )
-                            )
-                        grp_format.addAction(actf)
-                        sub_format.addAction(actf)
+                    self._grp_format = grp_format
+                    self._format_actions.clear()
                     act_fmt = menu.addMenu(sub_format)
                     self._act_fmt = act_fmt
-                    if "codec" in self._icons and self._act_fmt is not None:
-                        self._act_fmt.setIcon(self._icons["codec"])
-
-                    # Esci
+                    if self._act_fmt is not None:
+                        self._act_fmt.setIcon(get_codec_icon(16, accent))
                     try:
-                        txt_quit = self._i18n.t("tray_quit") if hasattr(self._i18n, "t") else "Esci"
+                        sub_format.aboutToShow.connect(self.sync_stream_settings)
                     except Exception:
-                        txt_quit = "Esci"
+                        pass
+
+                    # 5. Esci
                     menu.addSeparator()
+                    txt_quit = self._t("tray_quit", "Esci")
                     self._act_quit = QAction(txt_quit, self._parent)
-                    if "quit" in self._icons:
-                        self._act_quit.setIcon(self._icons["quit"])
+                    self._act_quit.setIcon(get_power_quit_icon(16, "#FF4B6E"))
                     if self._on_quit is not None:
                         self._act_quit.triggered.connect(self._on_quit)
                     menu.addAction(self._act_quit)
 
                     self._tray.setContextMenu(menu)
-                    # Sposta il menu a sinistra per evitare che i sottomenu escano dallo schermo
-                    menu.aboutToShow.connect(self._nudge_menu_left)
+                    self._tray.activated.connect(self._on_tray_activated)
+                    if show_card:
+                        menu.aboutToShow.connect(self._nudge_menu_left)
+                    try:
+                        menu.aboutToShow.connect(self.sync_stream_settings)
+                    except Exception:
+                        pass
+                    try:
+                        menu.aboutToShow.connect(self._sync_controls_from_parent)
+                    except Exception:
+                        pass
                     if tooltip:
                         self.update_tooltip(tooltip)
+                    self.sync_stream_settings()
+                    self._sync_controls_from_parent()
                     self._tray.setVisible(True)
                 else:
-                    # già creato: assicurati sia visibile e aggiornato
                     self._tray.setVisible(True)
                     if window_icon is not None:
                         self.update_icon(window_icon)
                     if tooltip is not None:
                         self.update_tooltip(tooltip)
+                    self.sync_stream_settings()
+                    self._sync_controls_from_parent()
             else:
                 if self._tray is not None:
                     try:
                         self._tray.setVisible(False)
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """Handles clicks on tray icon (left/double-click: show, middle-click: play/pause)."""
+        try:
+            if reason in (
+                QSystemTrayIcon.ActivationReason.Trigger,
+                QSystemTrayIcon.ActivationReason.DoubleClick,
+            ):
+                self._handle_show_window()
+            elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
+                if self._on_toggle_play_pause:
+                    self._on_toggle_play_pause()
+        except Exception:
+            pass
+
+    def _sync_controls_from_parent(self) -> None:
+        """Synchronizes play/pause, stop, and mute state from parent player."""
+        try:
+            player = getattr(self._parent, "player", None)
+            is_playing = (
+                bool(player.is_playing()) if player and hasattr(player, "is_playing") else False
+            )
+            is_paused = (
+                bool(player.is_paused()) if player and hasattr(player, "is_paused") else False
+            )
+            ui_paused = bool(getattr(self._parent, "_ui_paused", False))
+            is_muted = bool(player.is_muted()) if player and hasattr(player, "is_muted") else False
+            self.update_controls_state(is_playing, is_paused or ui_paused, is_muted)
+        except Exception:
+            pass
+
+    def _handle_show_window(self) -> None:
+        """Restores the main window to the front and activates it."""
+        try:
+            if self._on_show_window:
+                self._on_show_window()
+            if hasattr(self._parent, "raise_"):
+                self._parent.raise_()
+            if hasattr(self._parent, "activateWindow"):
+                self._parent.activateWindow()
+        except Exception:
+            pass
+
+    def set_cover_pixmap(self, pixmap: QPixmap | None) -> None:
+        """Forwards album cover art thumbnail to the Now Playing Card and Linux action icon."""
+        try:
+            if self._card is not None:
+                self._card.set_cover_pixmap(pixmap)
+            if self._act_info_now is not None:
+                if pixmap is not None and not pixmap.isNull():
+                    thumb = _make_rounded_pixmap(pixmap, size=24, radius=4)
+                    self._act_info_now.setIcon(QIcon(thumb))
+                else:
+                    self._act_info_now.setIcon(QIcon())
+        except Exception:
+            pass
+
+    def _rebuild_channel_actions(self, station_id: str, current_channel: str | None = None) -> None:
+        """Rebuilds or synchronizes channel subactions based on station configuration."""
+        if self._sub_channel is None or self._act_ch is None:
+            return
+
+        cfg = get_station_config(station_id)
+        has_channels = bool(cfg.get("has_channels", False))
+        channels = list(cfg.get("channels", []))
+
+        if not has_channels or not channels:
+            self._act_ch.setVisible(False)
+            self._act_ch.setEnabled(False)
+            return
+
+        self._act_ch.setVisible(True)
+        self._act_ch.setEnabled(True)
+
+        if current_channel is None:
+            current_channel = self._read_parent_setting(
+                KEY_CHANNEL, str(cfg.get("default_channel", channels[0]))
+            )
+
+        if current_channel not in channels:
+            current_channel = str(cfg.get("default_channel", channels[0]))
+
+        target_channel = str(current_channel).strip().upper()
+
+        if list(self._channel_actions.keys()) == channels:
+            for ch_key, act in self._channel_actions.items():
+                should_check = ch_key.strip().upper() == target_channel
+                if act.isChecked() != should_check:
+                    act.blockSignals(True)
+                    act.setChecked(should_check)
+                    act.blockSignals(False)
+            return
+
+        self._sub_channel.clear()
+        if self._grp_channel is not None:
+            for act in list(self._grp_channel.actions()):
+                self._grp_channel.removeAction(act)
+        else:
+            self._grp_channel = QActionGroup(self._parent)
+            self._grp_channel.setExclusive(True)
+        self._channel_actions.clear()
+
+        for ch in channels:
+            act = QAction(ch, self._sub_channel)
+            act.setCheckable(True)
+            act.setChecked(ch.strip().upper() == target_channel)
+            if self._on_change_channel:
+                act.triggered.connect(
+                    lambda checked, ch_name=ch: (
+                        checked and self._on_change_channel and self._on_change_channel(ch_name)
+                    )
+                )
+            self._grp_channel.addAction(act)
+            self._sub_channel.addAction(act)
+            self._channel_actions[ch] = act
+
+    def _rebuild_format_actions(self, station_id: str, current_format: str | None = None) -> None:
+        """Rebuilds or synchronizes format/codec subactions based on station configuration."""
+        if self._sub_format is None:
+            return
+
+        cfg = get_station_config(station_id)
+        formats = list(cfg.get("formats", ["Vorbis", "Opus", "MP3"]))
+        if not formats:
+            formats = ["Vorbis", "Opus", "MP3"]
+
+        if current_format is None:
+            current_format = self._read_parent_setting(
+                KEY_FORMAT, str(cfg.get("default_format", formats[0]))
+            )
+
+        if current_format not in formats:
+            current_format = str(cfg.get("default_format", formats[0]))
+
+        target_fmt = str(current_format).strip().upper()
+
+        if list(self._format_actions.keys()) == formats:
+            for fmt_key, act in self._format_actions.items():
+                should_check = fmt_key.strip().upper() == target_fmt
+                if act.isChecked() != should_check:
+                    act.blockSignals(True)
+                    act.setChecked(should_check)
+                    act.blockSignals(False)
+            return
+
+        self._sub_format.clear()
+        if self._grp_format is not None:
+            for act in list(self._grp_format.actions()):
+                self._grp_format.removeAction(act)
+        else:
+            self._grp_format = QActionGroup(self._parent)
+            self._grp_format.setExclusive(True)
+        self._format_actions.clear()
+
+        for f in formats:
+            act = QAction(f, self._sub_format)
+            act.setCheckable(True)
+            act.setChecked(f.strip().upper() == target_fmt)
+            if self._on_change_format:
+                act.triggered.connect(
+                    lambda checked, fmt_name=f: (
+                        checked and self._on_change_format and self._on_change_format(fmt_name)
+                    )
+                )
+            self._grp_format.addAction(act)
+            self._sub_format.addAction(act)
+            self._format_actions[f] = act
+
+    def sync_stream_settings(
+        self,
+        channel: str | None = None,
+        fmt: str | None = None,
+        station: str | None = None,
+    ) -> None:
+        """Synchronizes the checked state of stream/channel/format actions."""
+        try:
+            if station is None:
+                station = self._read_parent_setting(KEY_STATION, DEFAULT_STATION)
+            target_station = str(station).strip().lower()
+            for st_key, acts in self._station_actions.items():
+                should_check = st_key.strip().lower() == target_station
+                if acts.isChecked() != should_check:
+                    acts.blockSignals(True)
+                    acts.setChecked(should_check)
+                    acts.blockSignals(False)
+
+            self._rebuild_channel_actions(target_station, channel)
+            self._rebuild_format_actions(target_station, fmt)
         except Exception:
             pass
 
@@ -380,106 +1104,117 @@ class TrayManager(QObject):
             pass
 
     def update_tooltip(self, text: str) -> None:
+        """Updates the system tray tooltip and extracts now playing metadata for the header card."""
         try:
-            if self._tray is not None and text is not None:
+            if self._tray is None or text is None:
+                return
+
+            if text != self._last_tooltip:
                 self._tray.setToolTip(text)
-                try:
-                    menu = self._tray.contextMenu()
-                    if menu is not None:
-                        lines = text.splitlines() if text else []
-                        info_now = lines[1] if len(lines) > 1 else ""
-                        info_session = lines[2] if len(lines) > 2 else ""
-                        # Aggiorna/crea azione Now Playing
-                        if self._act_info_now is None:
-                            self._act_info_now = QAction(info_now or "", self._parent)
-                            self._act_info_now.setEnabled(False)
-                            first_action = menu.actions()[0] if menu.actions() else None
-                            if first_action is not None:
-                                menu.insertAction(first_action, self._act_info_now)
-                            else:
-                                menu.addAction(self._act_info_now)
-                        else:
-                            self._act_info_now.setText(info_now or "")
-                        self._act_info_now.setVisible(bool(info_now))
-                        # Aggiorna/crea azione Sessione
-                        if self._act_info_session is None:
-                            self._act_info_session = QAction(info_session or "", self._parent)
-                            self._act_info_session.setEnabled(False)
-                            # Inserisci subito dopo Now Playing
-                            after = self._act_info_now
-                            if after:
-                                menu.insertAction(after, self._act_info_session)
-                            else:
-                                menu.addAction(self._act_info_session)
-                        else:
-                            self._act_info_session.setText(info_session or "")
-                        self._act_info_session.setVisible(bool(info_session))
-                        # Separatore visibile solo se c'è almeno una riga informativa
-                        if self._sep_info is None:
-                            self._sep_info = menu.addSeparator()
-                        if self._sep_info is not None:
-                            self._sep_info.setVisible(bool(info_now or info_session))
-                except Exception:
-                    pass
+                self._last_tooltip = text
+
+            # Extract header, now playing, and session lines
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            info_now = lines[1] if len(lines) > 1 else ""
+            info_session = lines[2] if len(lines) > 2 else ""
+
+            # Directly extract title and artist if available on parent
+            title = str(getattr(self._parent, "_current_title", "") or "").strip()
+            artist = str(getattr(self._parent, "_current_artist", "") or "").strip()
+            if title in ("–", "-"):
+                title = ""
+            if info_now in ("–", "-"):
+                info_now = ""
+            if not title and info_now:
+                for sep in [" — ", " – ", " - "]:
+                    if sep in info_now:
+                        p = info_now.split(sep, 1)
+                        title, artist = p[0].strip(), p[1].strip()
+                        break
+                if not title:
+                    title = info_now
+
+            # Extract station name
+            station = getattr(self._parent, "station_name", "")
+            if not station:
+                station = self._read_parent_setting(KEY_STATION, DEFAULT_STATION)
+
+            # Update the header card
+            display_station = get_station_display_name(station, self._i18n)
+            if self._card is not None:
+                self._card.set_track_info(
+                    title=title,
+                    artist=artist,
+                    station=display_station,
+                    session=info_session,
+                )
+
+            # Update backward-compatible and Linux DBus actions
+            if self._act_info_now is not None:
+                if title and artist:
+                    now_text = f"{title} — {artist}"
+                elif title:
+                    now_text = title
+                elif info_now:
+                    now_text = info_now
+                else:
+                    now_text = self._t("tray_no_track", "Nessun brano in riproduzione")
+                if self._act_info_now.text() != now_text:
+                    self._act_info_now.setText(now_text)
+
+            if self._act_info_session is not None:
+                st_name = display_station.upper()
+                sess_text = f"{st_name} • {info_session}" if info_session else st_name
+                if self._act_info_session.text() != sess_text:
+                    self._act_info_session.setText(sess_text)
+
         except Exception:
             pass
 
     def update_controls_icons(self, icons: dict) -> None:
-        """Aggiorna i riferimenti alle icone caricate e tintate."""
+        """Preserved for backward-compatibility while ensuring crisp vector icon fidelity."""
         try:
             self._icons = icons
-            # Forza aggiornamento immediato icone se visibili
-            if "play" in icons and self._act_play_pause:
-                self._act_play_pause.setIcon(icons["play"])
-            if "stop" in icons and self._act_stop:
-                self._act_stop.setIcon(icons["stop"])
-            if "force_stop" in icons and self._act_force_stop:
-                self._act_force_stop.setIcon(icons["force_stop"])
-            if "mute" in icons and self._act_mute:
-                self._act_mute.setIcon(icons["mute"])
-            if "channel" in icons and self._act_ch:
-                self._act_ch.setIcon(icons["channel"])
-            if "codec" in icons and self._act_fmt:
-                self._act_fmt.setIcon(icons["codec"])
-            if "quit" in icons and self._act_quit:
-                self._act_quit.setIcon(icons["quit"])
+            self.refresh_theme()
         except Exception:
             pass
 
     def update_controls_state(self, is_playing: bool, is_paused: bool, is_muted: bool) -> None:
-        """Aggiorna i testi delle azioni di controllo in base allo stato corrente."""
+        """Aggiorna testi e icone vettoriali dei controlli in base allo stato corrente."""
         try:
-            if self._act_play_pause is not None:
-                try:
-                    # Applica override UI pausa se presente sul parent
-                    ui_paused = bool(getattr(self._parent, "_ui_paused", False))
-                    effective_paused = bool(is_paused or ui_paused)
-                    effective_playing = bool(is_playing and not effective_paused)
-                    txt = self._i18n.t("pause") if effective_playing else self._i18n.t("play")
-                except Exception:
-                    ui_paused = bool(getattr(self._parent, "_ui_paused", False))
-                    effective_paused = bool(is_paused or ui_paused)
-                    effective_playing = bool(is_playing and not effective_paused)
-                    txt = "Pause" if effective_playing else "Play"
-                self._act_play_pause.setText(txt)
-                if "play" in self._icons and "pause" in self._icons:
-                    self._act_play_pause.setIcon(
-                        self._icons["pause"] if effective_playing else self._icons["play"]
-                    )
+            accent = PALETTE.get("accent", "#EC186C")
 
-        except Exception:
-            pass
-        try:
+            ui_paused = bool(getattr(self._parent, "_ui_paused", False))
+            effective_paused = bool(is_paused or ui_paused)
+            effective_playing = bool(is_playing and not effective_paused)
+
+            if self._card is not None:
+                self._card.update_controls_state(is_playing, effective_paused, is_muted)
+
+            if self._act_play_pause is not None:
+                txt = (
+                    self._t("pause", "Pausa") if effective_playing else self._t("play", "Riproduci")
+                )
+                self._act_play_pause.setText(txt)
+                self._act_play_pause.setIcon(
+                    get_pause_icon(16, accent) if effective_playing else get_play_icon(16, accent)
+                )
+
+            if self._act_stop is not None:
+                self._act_stop.setIcon(get_stop_icon(16, accent))
+
             if self._act_mute is not None:
-                try:
-                    txtm = self._i18n.t("tray_unmute") if is_muted else self._i18n.t("tray_mute")
-                except Exception:
-                    txtm = "Unmute" if is_muted else "Mute"
+                txtm = (
+                    self._t("tray_unmute", "Riattiva audio")
+                    if is_muted
+                    else self._t("tray_mute", "Muto")
+                )
                 self._act_mute.setText(txtm)
-                if "mute" in self._icons and "unmute" in self._icons:
-                    self._act_mute.setIcon(
-                        self._icons["mute"] if is_muted else self._icons["unmute"]
-                    )
+                self._act_mute.setIcon(
+                    get_volume_icon(16, "#FF4B6E", muted=True)
+                    if is_muted
+                    else get_volume_icon(16, accent, muted=False)
+                )
 
         except Exception:
             pass
@@ -491,15 +1226,145 @@ class TrayManager(QObject):
         except Exception:
             pass
 
+    def _apply_menu_stylesheet(self, menu: QMenu, is_submenu: bool = False) -> None:
+        try:
+            sep_rgba = PALETTE.get("border_card", "rgba(255, 255, 255, 0.12)")
+            hover_rgba = PALETTE.get("accent_menu_hover", "rgba(236, 24, 108, 0.25)")
+            bg_pop = PALETTE.get("bg_popover", "#141624")
+            text_pri = PALETTE.get("text_primary", "#ffffff")
+            accent = PALETTE.get("accent", "#EC186C")
+            padding_val = "2px 0px" if is_submenu else "0px"
+            menu.setStyleSheet(
+                f"""
+                QMenu {{
+                    background-color: {bg_pop};
+                    border: 1px solid {sep_rgba};
+                    border-radius: 10px;
+                    padding: {padding_val};
+                    spacing: 0px;
+                }}
+                QMenu::item {{
+                    padding: 5px 22px 5px 6px;
+                    margin: 0px;
+                    border: none;
+                    color: {text_pri};
+                    font-size: 13px;
+                }}
+                QMenu::icon {{
+                    padding-left: 10px;
+                    padding-right: 6px;
+                }}
+                QMenu::right-arrow {{
+                    subcontrol-origin: margin;
+                    subcontrol-position: center right;
+                    right: 12px;
+                }}
+                QMenu::item:enabled:selected {{
+                    background-color: {hover_rgba};
+                    color: #ffffff;
+                }}
+                QMenu::item:enabled:pressed {{
+                    background-color: {hover_rgba};
+                    color: #ffffff;
+                }}
+                QMenu::item:disabled {{
+                    color: {accent};
+                    background-color: transparent;
+                    margin-left: -13px;
+                    padding: 5px 12px 2px 0px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+                QMenu::separator {{
+                    height: 1px;
+                    background-color: {sep_rgba};
+                    margin: 2px 0px;
+                }}
+                """
+            )
+        except Exception:
+            pass
+
+    def retranslate(self, i18n: object) -> None:
+        """Re-applies localized labels across tray card, menu actions, and submenus."""
+        self._i18n = i18n
+        if self._card is not None:
+            self._card.retranslate(i18n)
+        if self._act_hdr_playback is not None:
+            self._act_hdr_playback.setText(self._t("tray_section_playback", "Riproduzione").upper())
+        if self._act_stop is not None:
+            self._act_stop.setText(self._t("tray_stop", "Stop"))
+        if self._act_history is not None:
+            self._act_history.setText(self._t("history_button", "Cronologia brani"))
+        if self._act_hdr_window is not None:
+            self._act_hdr_window.setText(self._t("tray_section_window", "Finestra").upper())
+        if self._act_show is not None:
+            self._act_show.setText(self._t("tray_show", "Mostra finestra"))
+        if self._act_settings is not None:
+            self._act_settings.setText(self._t("settings_button", "Impostazioni"))
+        if self._act_about is not None:
+            self._act_about.setText(self._t("tray_about", "Informazioni su KikuMoe..."))
+        if self._act_hdr_prefs is not None:
+            self._act_hdr_prefs.setText(self._t("tray_section_preferences", "Preferenze").upper())
+        if self._sub_station is not None:
+            self._sub_station.setTitle(self._t("tray_station", "Stazione"))
+        if STATION_LOCAL in self._station_actions:
+            self._station_actions[STATION_LOCAL].setText(self._t("station_local", "Musica locale"))
+        if self._sub_channel is not None:
+            self._sub_channel.setTitle(self._t("tray_channel", "Canale"))
+        if self._sub_format is not None:
+            self._sub_format.setTitle(self._t("tray_format", "Formato (codec)"))
+        if self._act_quit is not None:
+            self._act_quit.setText(self._t("tray_quit", "Esci"))
+        self._sync_controls_from_parent()
+
+    def refresh_theme(self) -> None:
+        """Refreshes menu styling, Now Playing Card, and vector icons with the active theme."""
+        try:
+            accent = PALETTE.get("accent", "#EC186C")
+
+            if self._tray is not None:
+                menu = self._tray.contextMenu()
+                if menu is not None:
+                    self._apply_menu_stylesheet(menu, is_submenu=False)
+                    for sub in menu.findChildren(QMenu):
+                        self._apply_menu_stylesheet(sub, is_submenu=True)
+
+            if self._card is not None:
+                self._card.refresh_theme()
+
+            if self._act_stop is not None:
+                self._act_stop.setIcon(get_stop_icon(16, accent))
+            if self._act_history is not None:
+                self._act_history.setIcon(get_history_icon(16, accent))
+            if self._act_show is not None:
+                self._act_show.setIcon(get_window_icon(16, accent))
+            if self._act_settings is not None:
+                self._act_settings.setIcon(get_settings_icon(16, accent))
+            if self._act_about is not None:
+                self._act_about.setIcon(get_info_icon(16, accent))
+            if self._act_st is not None:
+                self._act_st.setIcon(get_station_icon(16, accent))
+            if self._act_ch is not None:
+                self._act_ch.setIcon(get_channel_icon(16, accent))
+            if self._act_fmt is not None:
+                self._act_fmt.setIcon(get_codec_icon(16, accent))
+            if self._act_quit is not None:
+                self._act_quit.setIcon(get_power_quit_icon(16, "#FF4B6E"))
+
+        except Exception:
+            pass
+
     def has_tray(self) -> bool:
         return self._tray is not None
 
     def _nudge_menu_left(self):
         """Sposta il menu della tray a sinistra per evitare overflow dei sottomenu."""
         try:
-            menu = self._tray.contextMenu()
-            if menu:
-                QTimer.singleShot(0, lambda: self._do_nudge(menu))
+            if self._tray is not None:
+                menu = self._tray.contextMenu()
+                if menu:
+                    QTimer.singleShot(0, lambda: self._do_nudge(menu))
         except Exception:
             pass
 
@@ -510,8 +1375,7 @@ class TrayManager(QObject):
             if screen:
                 screen_right = screen.availableGeometry().right()
                 menu_right = pos.x() + menu.width()
-                # Se il menu + sottomenu potrebbe uscire, sposta a sinistra
-                submenu_width = 150  # larghezza stimata dei sottomenu
+                submenu_width = 160
                 if menu_right + submenu_width > screen_right:
                     shift = (menu_right + submenu_width) - screen_right + 8
                     menu.move(pos.x() - shift, pos.y())

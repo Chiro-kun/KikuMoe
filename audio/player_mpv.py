@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import locale
+import math
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
+from audio.equalizer import EQ_NUM_BANDS, build_mpv_af_string, clamp_eq_db, normalize_eq_bands
 from core.constants import (
     APP_NAME,
     APP_SETTINGS,
@@ -14,53 +17,85 @@ from core.constants import (
     ORG_NAME,
     _get_project_root,
 )
-from core.logger import get_logger
+from core.logger import PORTAUDIO_LOCK, get_logger, silence_stderr
 
 _IS_WIN32 = sys.platform == "win32"
 
 
 def _find_libmpv_path() -> str | None:
-    """Cerca la DLL di libmpv nelle posizioni comuni su Windows in modo robusto."""
-    if not _IS_WIN32:
-        return None
-
-    # Se MPV_PATH punta direttamente a un file esistente, usalo subito
+    """Cerca la libreria dinamica libmpv (DLL su Windows, .so su Linux, .dylib su macOS)
+    in modo robusto e ne restituisce il percorso assoluto."""
+    # 1. Se MPV_PATH punta direttamente a un file esistente, usalo subito
     env_mpv_path = os.environ.get("MPV_PATH")
     if env_mpv_path and os.path.isfile(env_mpv_path):
         return str(Path(env_mpv_path).resolve())
 
-    # Nomi comuni per libmpv su Windows
-    names = ["libmpv-2.dll", "mpv-2.dll", "libmpv-1.dll", "mpv-1.dll", "mpv.dll"]
-
     candidate_dirs: list[Path] = []
 
-    # 1. Directory da variabile d'ambiente MPV_DIR se specificata
+    # 2. Directory da variabile d'ambiente MPV_DIR se specificata
     env_mpv_dir = os.environ.get("MPV_DIR")
     if env_mpv_dir:
         candidate_dirs.append(Path(env_mpv_dir))
 
-    # 2. Se congelato (PyInstaller)
+    # 3. Directory dell'applicazione (PyInstaller frozen o ambiente di sviluppo)
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             candidate_dirs.append(Path(meipass))
-        candidate_dirs.append(Path(sys.executable).resolve().parent)
+        exe_dir = Path(sys.executable).resolve().parent
+        candidate_dirs.append(exe_dir)
+        if not _IS_WIN32:
+            candidate_dirs.append(exe_dir.parent / "lib")
+            candidate_dirs.append(exe_dir / "lib")
     else:
         # In sviluppo: radice del repository determinata dal file corrente
         script_dir = Path(__file__).resolve().parent  # <repo>/audio
         repo_root = script_dir.parent  # <repo>
         candidate_dirs.append(repo_root)
         candidate_dirs.append(script_dir)
-        candidate_dirs.append(repo_root / "packaging" / "windows")
+        if _IS_WIN32:
+            candidate_dirs.append(repo_root / "packaging" / "windows")
 
         try:
             proj_root = Path(_get_project_root()).resolve()
             candidate_dirs.append(proj_root)
-            candidate_dirs.append(proj_root / "packaging" / "windows")
+            if _IS_WIN32:
+                candidate_dirs.append(proj_root / "packaging" / "windows")
         except Exception:
             pass
 
-    # 3. Rimuovi duplicati preservando l'ordine (NO fallback su CWD per prevenire DLL hijacking)
+    # 4. Nomi delle librerie in base alla piattaforma
+    if _IS_WIN32:
+        names = ["libmpv-2.dll", "mpv-2.dll", "libmpv-1.dll", "mpv-1.dll", "mpv.dll"]
+    elif sys.platform == "darwin":
+        names = ["libmpv.2.dylib", "libmpv.1.dylib", "libmpv.dylib"]
+        candidate_dirs.extend(
+            [
+                Path("/opt/homebrew/lib"),
+                Path("/usr/local/lib"),
+                Path("/opt/local/lib"),
+            ]
+        )
+    else:
+        # Linux / BSD / Unix (in ordine di preferenza ABI)
+        names = ["libmpv.so.2", "libmpv.so.1", "libmpv.so"]
+        candidate_dirs.extend(
+            [
+                Path("/usr/lib/x86_64-linux-gnu"),
+                Path("/usr/lib/aarch64-linux-gnu"),
+                Path("/usr/lib/arm-linux-gnueabihf"),
+                Path("/usr/lib64"),
+                Path("/usr/lib"),
+                Path("/usr/local/lib"),
+                Path("/lib/x86_64-linux-gnu"),
+                Path("/lib64"),
+                Path("/lib"),
+                Path("/app/lib"),  # Flatpak
+                Path(os.path.expanduser("~/.local/lib")),
+            ]
+        )
+
+    # 5. Rimuovi duplicati preservando l'ordine
     unique_dirs: list[Path] = []
     seen = set()
     for d in candidate_dirs:
@@ -72,27 +107,71 @@ def _find_libmpv_path() -> str | None:
         except Exception:
             pass
 
-    # 5. Cerca le DLL nelle directory individuate
-    for d in unique_dirs:
-        for name in names:
-            dll_path = d / name
+    # 6. Cerca le librerie nelle directory individuate rispettando l'ordine dei nomi
+    for name in names:
+        for d in unique_dirs:
+            candidate = d / name
             try:
-                if dll_path.is_file():
-                    return str(dll_path.resolve())
+                if candidate.is_file():
+                    return str(candidate.resolve())
             except Exception:
                 pass
+
+    # 7. Su Linux, se non ancora trovata nelle directory note, interroga ldconfig -p
+    if not _IS_WIN32 and sys.platform != "darwin":
+        try:
+            import subprocess
+
+            for ldconfig_bin in ("/sbin/ldconfig", "ldconfig"):
+                try:
+                    res = subprocess.run(
+                        [ldconfig_bin, "-p"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        check=False,
+                    )
+                    if res.returncode == 0 and res.stdout:
+                        lines = res.stdout.splitlines()
+                        for name in names:
+                            for line in lines:
+                                if name in line and "=>" in line:
+                                    target = line.split("=>", 1)[1].strip()
+                                    if target and os.path.isfile(target):
+                                        return str(Path(target).resolve())
+                        break
+                except (FileNotFoundError, PermissionError):
+                    continue
+        except Exception:
+            pass
+
+    # 8. Prova come ultima risorsa ctypes.util.find_library
+    try:
+        import ctypes.util
+
+        lib_name = ctypes.util.find_library("mpv")
+        if lib_name:
+            if os.path.isabs(lib_name) and os.path.isfile(lib_name):
+                return str(Path(lib_name).resolve())
+            for d in unique_dirs:
+                candidate = d / lib_name
+                try:
+                    if candidate.is_file():
+                        return str(candidate.resolve())
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     return None
 
 
-# Configura il path DLL PRIMA di importare mpv
+# Configura il path DLL/SO PRIMA di importare mpv
 _found_libmpv = _find_libmpv_path()
 if _found_libmpv:
     _dll_dir = str(Path(_found_libmpv).parent)
+    os.environ["MPV_PATH"] = _found_libmpv
     if _IS_WIN32:
-        # Forza python-mpv a usare questa specifica DLL
-        # (utile per nomi non standard come libmpv-2.dll)
-        os.environ["MPV_PATH"] = _found_libmpv
         # Aggiungi al PATH per sicurezza
         os.environ["PATH"] = _dll_dir + os.pathsep + os.environ.get("PATH", "")
         # Per Python 3.8+ su Windows, aggiungi alla directory DLL sicura
@@ -101,14 +180,60 @@ if _found_libmpv:
                 os.add_dll_directory(_dll_dir)
             except Exception:
                 pass
+    else:
+        # Su Linux/Unix, esporta la directory in LD_LIBRARY_PATH
+        curr_ld = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = _dll_dir + (os.pathsep + curr_ld if curr_ld else "")
 
 
 _mpv_import_error: Exception | None = None
-try:
-    import mpv
-except Exception as e:
-    mpv = None  # type: ignore
-    _mpv_import_error = e
+
+# Su piattaforme non-Windows, python-mpv chiama internamente ctypes.util.find_library('mpv').
+# In un binario PyInstaller frozen, PyInstaller intercetta CDLL() e solleva PyInstallerImportError
+# se il nome passato è relativo e non è stato impacchettato in sys._MEIPASS.
+# Monkey-patchando ctypes.util.find_library per restituire il percorso assoluto della libreria
+# consentiamo a CDLL() di effettuare la dlopen() direttamente dal percorso di sistema.
+_orig_find_library = None
+if _found_libmpv and not _IS_WIN32:
+    try:
+        import ctypes.util
+
+        _orig_find_library = ctypes.util.find_library
+
+        def _custom_find_library(name: str) -> str | None:
+            if name == "mpv":
+                return _found_libmpv
+            return _orig_find_library(name) if _orig_find_library else None
+
+        ctypes.util.find_library = _custom_find_library
+    except Exception:
+        pass
+
+# Se libmpv non è presente nel sistema Linux/Unix, evitiamo l'import fallimentare
+# di python-mpv con errore fuorviante di PyInstaller e forniamo un messaggio chiaro.
+mpv: Any = None
+if not _IS_WIN32 and not _found_libmpv:
+    _mpv_import_error = OSError(
+        "libmpv was not found on this system. Please install libmpv "
+        "(e.g. 'sudo apt install libmpv-dev libmpv1' on Debian/Ubuntu, "
+        "'sudo pacman -S mpv' on Arch, or 'sudo dnf install mpv-libs' on Fedora)."
+    )
+else:
+    try:
+        import mpv as _mpv_mod
+
+        mpv = _mpv_mod
+    except Exception as e:
+        mpv = None
+        _mpv_import_error = e
+    finally:
+        if _orig_find_library is not None:
+            try:
+                import ctypes.util
+
+                ctypes.util.find_library = _orig_find_library
+            except Exception:
+                pass
 
 # MPV end-file reason integers (MPV_END_FILE_REASON_*)
 _MPV_END_STOP = 2
@@ -119,6 +244,7 @@ _MPV_END_ERROR = 4
 class PlayerMPV:
     def __init__(self, on_event: Callable[[str, int | None], None] | None = None) -> None:
         self._on_event = on_event
+        self._lock = threading.RLock()
         self._muted: bool = False
         self._volume: int = 100
         self._ready: bool = False
@@ -127,11 +253,20 @@ class PlayerMPV:
         # Set when stop()/force_cleanup() is called so the end-file callback
         # doesn't mis-classify the resulting event as a natural 'ended'.
         self._stopping: bool = False
+        # Set when play_url() replaces an active stream without calling stop()
+        # so the replaced stream's end-file event is absorbed until start-file.
+        self._switching: bool = False
+        self._cached_device_val: str = ""
+        self._cached_device_name: str | None = None
+        self._applied_audio_device: str | None = None
+        self._eq_enabled: bool = False
+        self._eq_preamp: float = 0.0
+        self._eq_bands: list[float] = [0.0] * EQ_NUM_BANDS
         self.log = get_logger("PlayerMPV")
         try:
             self._user_agent = f"{APP_NAME}/{APP_VERSION}"
         except Exception:
-            self._user_agent = "KikuMoe/1.11.1"
+            self._user_agent = "KikuMoe/1.11.0"
         self._init_mpv()
 
     def _get_stored_device_name(self) -> str | None:
@@ -142,16 +277,25 @@ class PlayerMPV:
 
             settings = QSettings(ORG_NAME, APP_SETTINGS)
             val = settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-            if val in (None, ""):
+            val_str = "" if val is None else str(val).strip()
+            if not val_str:
+                self._cached_device_val = ""
+                self._cached_device_name = None
                 return None
+            if val_str == self._cached_device_val and self._cached_device_name is not None:
+                return self._cached_device_name
             import pyaudio
 
-            pa = pyaudio.PyAudio()
-            try:
-                info = pa.get_device_info_by_index(int(val))
-                return str(info.get("name", "")) if isinstance(info, dict) else None
-            finally:
-                pa.terminate()
+            with PORTAUDIO_LOCK, silence_stderr():
+                pa = pyaudio.PyAudio()
+                try:
+                    info = pa.get_device_info_by_index(int(val_str))
+                    name = str(info.get("name", "")) if isinstance(info, dict) else None
+                finally:
+                    pa.terminate()
+            self._cached_device_val = val_str
+            self._cached_device_name = name
+            return name
         except Exception:
             return None
 
@@ -162,6 +306,13 @@ class PlayerMPV:
             return
         device_name = self._get_stored_device_name()
         if not device_name:
+            if self._applied_audio_device is not None:
+                try:
+                    assert self._player is not None
+                    self._player.audio_device = "auto"
+                except Exception:
+                    pass
+                self._applied_audio_device = None
             return
         try:
             assert self._player is not None
@@ -173,15 +324,20 @@ class PlayerMPV:
                 try:
                     desc = str(dev.get("description", "")).lower()
                     name = str(dev.get("name", "")).lower()
+                    raw_name = dev.get("name")
                 except Exception:
                     try:
                         desc = str(getattr(dev, "description", "")).lower()
                         name = str(getattr(dev, "name", "")).lower()
+                        raw_name = getattr(dev, "name", None)
                     except Exception:
                         continue
                 if needle in desc or needle in name or desc in needle:
+                    if raw_name == self._applied_audio_device:
+                        return
                     try:
-                        self._player.audio_device = dev.get("name") or getattr(dev, "name", None)
+                        self._player.audio_device = raw_name
+                        self._applied_audio_device = raw_name
                         self.log.debug("[MPV] audio_device set to: %s", self._player.audio_device)
                     except Exception as e:
                         self.log.debug("[MPV] Could not set audio_device: %s", e)
@@ -192,7 +348,9 @@ class PlayerMPV:
     def _init_mpv(self) -> None:
         self._ready = False
         if mpv is None:
-            self._init_error = str(_mpv_import_error or "unknown import error")
+            cause = getattr(_mpv_import_error, "__cause__", None)
+            cause_msg = f" (cause: {cause})" if cause else ""
+            self._init_error = f"{_mpv_import_error}{cause_msg}"
             self.log.error(
                 "[BACKEND] PlayerMPV: python-mpv import unavailable: %s",
                 self._init_error,
@@ -209,7 +367,7 @@ class PlayerMPV:
         linux_ao: str | None = None
         if not _IS_WIN32:
             try:
-                uid = os.getuid()  # type: ignore[attr-defined]
+                uid = getattr(os, "getuid", lambda: 1000)()
                 pw_sock = os.environ.get("PIPEWIRE_RUNTIME_DIR", f"/run/user/{uid}")
                 if os.path.exists(os.path.join(pw_sock, "pipewire-0")):
                     linux_ao = "pipewire,pulse,alsa"
@@ -217,70 +375,39 @@ class PlayerMPV:
                     linux_ao = "pulse,alsa"
             except Exception:
                 linux_ao = "pulse,alsa"
+        kwargs: dict = {}
         try:
             lib_path = _found_libmpv
             if lib_path:
                 self.log.info("[BACKEND] PlayerMPV: using libmpv at %s", lib_path)
 
-            kwargs: dict = dict(
+            def _mpv_log_handler(loglevel: str, component: str, message: str) -> None:
+                lvl = (loglevel or "").lower()
+                clean = f"[{component}] {message.strip()}"
+                if lvl in ("fatal", "error"):
+                    self.log.error("[MPV] %s", clean)
+                elif lvl == "warn":
+                    self.log.warning("[MPV] %s", clean)
+                else:
+                    self.log.debug("[MPV] %s", clean)
+
+            kwargs = dict(
                 vid="no",
                 terminal=False,
-                quiet=True,
+                ytdl=False,
+                log_handler=_mpv_log_handler,
+                loglevel="warn",
                 user_agent=self._user_agent,
             )
             if linux_ao:
                 kwargs["ao"] = linux_ao
-            self._player = mpv.MPV(**kwargs)
-            self._player.volume = float(self._volume)
-            self._player.mute = self._muted
-
-            @self._player.event_callback("start-file")
-            def _on_start(event):
-                self._stopping = False
-                self._emit("opening", None)
-
-            @self._player.event_callback("file-loaded")
-            def _on_loaded(event):
-                self._emit("playing", None)
-
-            @self._player.event_callback("end-file")
-            def _on_end(event):
-                # If stop()/force_cleanup() set the flag, absorb this event —
-                # 'stopped' was already emitted by the calling method.
-                if self._stopping:
-                    self._stopping = False
-                    return
-
-                # Determine reason: event.reason is an int in libmpv
-                # (MPV_END_FILE_REASON_STOP=2, QUIT=3, ERROR=4, EOF=0/1).
-                # Guard against string/enum forms in future python-mpv versions.
-                reason = getattr(event, "reason", None)
-                try:
-                    reason_int = int(reason)
-                except Exception:
-                    reason_int = -1
-                reason_str = str(reason).lower()
-
-                if (
-                    reason_int in (_MPV_END_STOP, _MPV_END_QUIT)
-                    or "stop" in reason_str
-                    or "quit" in reason_str
-                ):
-                    self._emit("stopped", None)
-                elif reason_int == _MPV_END_ERROR or "error" in reason_str:
-                    self._emit("error", None)
-                else:
-                    self._emit("ended", None)
-
-            @self._player.property_observer("cache-buffering-state")
-            def _on_cache(name, value):
-                if value is not None:
-                    try:
-                        self._emit("buffering", int(value))
-                    except Exception:
-                        pass
-
+            player = mpv.MPV(**kwargs)
+            self._player = player
+            player.volume = self._to_backend_volume(self._volume)
+            player.mute = self._muted
+            self._attach_mpv_callbacks(player)
             self._ready = True
+            self._apply_equalizer_to_mpv()
             try:
                 self.log.info(
                     "[BACKEND] PlayerMPV: backend initialized (version: %s)", self.get_version()
@@ -295,18 +422,88 @@ class PlayerMPV:
                 try:
                     self.log.debug("[DEBUG] PlayerMPV: retrying without ao preference")
                     kwargs.pop("ao")
-                    self._player = mpv.MPV(**kwargs)
-                    self._player.volume = float(self._volume)
-                    self._player.mute = self._muted
+                    player = mpv.MPV(**kwargs)
+                    self._player = player
+                    player.volume = self._to_backend_volume(self._volume)
+                    player.mute = self._muted
+                    self._attach_mpv_callbacks(player)
                     self._ready = True
                 except Exception as e2:
                     self._init_error = str(e2)
-                    self.log.debug("[DEBUG] PlayerMPV: retry also failed: %s", e2)
+                    self.log.error(
+                        "[BACKEND] PlayerMPV: retry without ao preference also failed: %s", e2
+                    )
                     self._player = None
                     self._ready = False
             else:
                 self._player = None
                 self._ready = False
+
+    def _attach_mpv_callbacks(self, player: Any) -> None:
+        """Attach event and property callbacks to an MPV instance."""
+
+        @player.event_callback("start-file")
+        def _on_start(event: Any) -> None:
+            with self._lock:
+                self._stopping = False
+                self._switching = False
+            self._emit("opening", None)
+
+        @player.event_callback("file-loaded")
+        def _on_loaded(event: Any) -> None:
+            self._emit("playing", None)
+
+        @player.event_callback("end-file")
+        def _on_end(event: Any) -> None:
+            ev_data = getattr(event, "data", None)
+            reason = getattr(ev_data, "reason", None)
+            if reason is None:
+                reason = getattr(event, "reason", None)
+            if reason is None and hasattr(event, "as_dict"):
+                try:
+                    reason = event.as_dict().get("reason")
+                except Exception:
+                    reason = None
+            try:
+                reason_int = int(reason) if isinstance(reason, (int, float)) else -1
+            except Exception:
+                reason_int = -1
+            if isinstance(reason, (bytes, bytearray)):
+                reason_str = reason.decode("utf-8", errors="ignore").lower()
+            else:
+                reason_str = str(reason).lower() if reason is not None else ""
+
+            with self._lock:
+                # If stop()/force_cleanup() set the flag, absorb this event —
+                # 'stopped' was already emitted by the calling method.
+                if self._stopping:
+                    self._stopping = False
+                    return
+                # If play_url() is replacing an active stream, absorb teardown
+                # events from the replaced stream before start-file fires.
+                if self._switching:
+                    self._switching = False
+                    return
+
+            if (
+                reason_int in (_MPV_END_STOP, _MPV_END_QUIT)
+                or "stop" in reason_str
+                or "quit" in reason_str
+            ):
+                self._emit("stopped", None)
+            elif reason_int == _MPV_END_ERROR or "error" in reason_str:
+                self.log.error("[BACKEND] PlayerMPV: playback ended with error (reason=%s)", reason)
+                self._emit("error", None)
+            else:
+                self._emit("ended", None)
+
+        @player.property_observer("cache-buffering-state")
+        def _on_cache(name: Any, value: Any) -> None:
+            if value is not None:
+                try:
+                    self._emit("buffering", int(value))
+                except Exception:
+                    pass
 
     def is_ready(self) -> bool:
         return bool(self._ready and self._player is not None)
@@ -327,37 +524,49 @@ class PlayerMPV:
                 pass
 
     def play_url(self, url: str) -> bool:
-        if not self.is_ready():
+        with self._lock:
+            if not self.is_ready():
+                emit_err = True
+            else:
+                emit_err = False
+                try:
+                    assert self._player is not None
+                    try:
+                        was_active = not bool(getattr(self._player, "idle_active", True))
+                    except Exception:
+                        was_active = False
+                    self._stopping = False
+                    self._switching = was_active
+                    self._apply_linux_audio_device()
+                    self._player.pause = False
+                    self._player.play(url)
+                    return True
+                except Exception as e:
+                    self._switching = False
+                    self.log.error("[BACKEND] PlayerMPV: play_url failed: %s", e)
+                    emit_err = True
+        if emit_err:
             self._emit("error", None)
-            return False
-        try:
-            assert self._player is not None
-            self._stopping = False
-            self._apply_linux_audio_device()
-            self._player.pause = False
-            self._player.play(url)
-            return True
-        except Exception as e:
-            self.log.error("[BACKEND] PlayerMPV: play_url failed: %s", e)
-            self._emit("error", None)
-            return False
+        return False
 
     def stop(self) -> None:
-        if not self.is_ready():
-            return
-        assert self._player is not None
-        # Only set the flag when there's actually something playing/paused;
-        # if MPV is already idle no end-file event will fire and the flag
-        # would linger, suppressing the next natural 'ended'.
-        try:
-            idle = bool(getattr(self._player, "idle_active", True))
-            self._stopping = not idle
-        except Exception:
-            self._stopping = False
-        try:
-            self._player.stop()
-        except Exception:
-            self._stopping = False
+        with self._lock:
+            if not self.is_ready():
+                return
+            assert self._player is not None
+            # Only set the flag when there's actually something playing/paused;
+            # if MPV is already idle no end-file event will fire and the flag
+            # would linger, suppressing the next natural 'ended'.
+            self._switching = False
+            try:
+                idle = bool(getattr(self._player, "idle_active", True))
+                self._stopping = not idle
+            except Exception:
+                self._stopping = False
+            try:
+                self._player.stop()
+            except Exception:
+                self._stopping = False
         self._emit("stopped", None)
 
     def pause_toggle(self) -> None:
@@ -373,13 +582,29 @@ class PlayerMPV:
         except Exception:
             self._emit("error", None)
 
+    @staticmethod
+    def _to_backend_volume(vol: int) -> float:
+        """Map user slider percentage (0..100) to mpv internal software volume.
+
+        MPV's internal softvol operates on a cubic scale (gain = (vol/100)^3).
+        A raw linear pass-through makes volume < 20% virtually imperceptible (-42 dB).
+        Mapping with 100 * (vol/100)^0.5 ensures an effective perceptual response curve
+        (gain = (vol/100)^1.5), providing clear, natural, and fully audible dynamics
+        across the entire 0-100% range without sudden drop-offs.
+        """
+        if vol <= 0:
+            return 0.0
+        if vol >= 100:
+            return 100.0
+        return float(100.0 * math.sqrt(vol / 100.0))
+
     def set_volume(self, vol: int) -> None:
         self._volume = max(0, min(100, int(vol)))
         if not self.is_ready():
             return
         try:
             assert self._player is not None
-            self._player.volume = float(self._volume)
+            self._player.volume = self._to_backend_volume(self._volume)
         except Exception:
             pass
 
@@ -392,6 +617,29 @@ class PlayerMPV:
             self._player.mute = self._muted
         except Exception:
             pass
+
+    def set_audio_tap(self, callback: Any | None) -> None:
+        """Interfaccia opzionale tap audio (non implementata per MPV)."""
+        self._audio_tap = callback
+
+    def _apply_equalizer_to_mpv(self) -> None:
+        if not self.is_ready() or self._player is None:
+            return
+        af_str = build_mpv_af_string(self._eq_enabled, self._eq_preamp, self._eq_bands)
+        try:
+            self._player.af = af_str
+        except Exception as e:
+            self.log.debug("[MPV] Could not apply equalizer af=%r: %s", af_str, e)
+
+    def set_equalizer(
+        self, enabled: bool, preamp_db: float, bands_db: list[float] | tuple[float, ...]
+    ) -> None:
+        """Update real-time 10-band EQ via libmpv 'af' lavfi filter graph."""
+        with self._lock:
+            self._eq_enabled = bool(enabled)
+            self._eq_preamp = clamp_eq_db(preamp_db)
+            self._eq_bands = normalize_eq_bands(bands_db)
+            self._apply_equalizer_to_mpv()
 
     def get_volume(self) -> int:
         return self._volume
@@ -421,6 +669,37 @@ class PlayerMPV:
         except Exception:
             return False
 
+    def seek(self, seconds: float) -> bool:
+        """Seek to target seconds in current track."""
+        if not self.is_ready() or self._player is None:
+            return False
+        try:
+            self._player.seek(max(0.0, float(seconds)), "absolute")
+            return True
+        except Exception as e:
+            self.log.debug("[MPV] seek failed: %s", e)
+            return False
+
+    def get_time(self) -> float | None:
+        """Return current playback position in seconds."""
+        if not self.is_ready() or self._player is None:
+            return None
+        try:
+            pos = getattr(self._player, "time_pos", None)
+            return float(pos) if pos is not None else 0.0
+        except Exception:
+            return None
+
+    def get_duration(self) -> float | None:
+        """Return track duration in seconds."""
+        if not self.is_ready() or self._player is None:
+            return None
+        try:
+            dur = getattr(self._player, "duration", None)
+            return float(dur) if dur is not None and dur > 0 else None
+        except Exception:
+            return None
+
     def get_version(self) -> str | None:
         if mpv is None or not self.is_ready():
             return None
@@ -435,15 +714,17 @@ class PlayerMPV:
         return None
 
     def force_cleanup(self) -> None:
-        if not self.is_ready():
-            return
-        assert self._player is not None
-        try:
-            idle = bool(getattr(self._player, "idle_active", True))
-            self._stopping = not idle
-        except Exception:
-            self._stopping = False
-        try:
-            self._player.stop()
-        except Exception:
-            self._stopping = False
+        with self._lock:
+            if not self.is_ready():
+                return
+            assert self._player is not None
+            self._switching = False
+            try:
+                idle = bool(getattr(self._player, "idle_active", True))
+                self._stopping = not idle
+            except Exception:
+                self._stopping = False
+            try:
+                self._player.stop()
+            except Exception:
+                self._stopping = False

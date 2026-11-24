@@ -75,3 +75,9 @@ Desktop.ini
 *.dll
 *.so
 *.dylib
+
+# Scratch / appunti locali di sviluppo (non versionati)
+scratch/
+
+# Scratch / appunti locali di sviluppo (non versionati)
+scratch/
