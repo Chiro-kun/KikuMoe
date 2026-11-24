@@ -1,4 +1,4 @@
-# KikuMoe v1.11.1
+# KikuMoe v2.0.0
 
 Player desktop per [LISTEN.moe](https://listen.moe) basato su PyQt6.  
 Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg (predefinito), MPV e VLC (fallback).
@@ -11,8 +11,11 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Installazione](#installazione)
 - [Avvio](#avvio)
 - [Interfaccia](#interfaccia)
+- [Mini player](#mini-player)
+- [Controlli multimediali di sistema](#controlli-multimediali-di-sistema)
 - [Funzionalità](#funzionalità)
 - [Impostazioni](#impostazioni)
+- [Discord Rich Presence](#discord-rich-presence)
 - [Scorciatoie da tastiera](#scorciatoie-da-tastiera)
 - [Tray di sistema](#tray-di-sistema)
 - [Sleep timer](#sleep-timer)
@@ -21,6 +24,49 @@ Supporta stream J-POP e K-POP in formato Vorbis o MP3, con backend audio FFmpeg 
 - [Build](#build)
 
 ---
+
+## Controlli multimediali di sistema
+
+KikuMoe supporta i controlli multimediali di Windows (SMTC) e Linux (MPRIS).
+Il sistema può mostrare titolo, artista, stazione e copertina disponibili;
+i controlli permettono di avviare, mettere in pausa o fermare la radio. Su Linux
+è disponibile anche il controllo del volume MPRIS. Gli stream radio non
+supportano lo spostamento nella traccia o il salto al brano successivo.
+
+Su Linux è necessaria una sessione D-Bus. Su Windows, se SMTC non è disponibile,
+KikuMoe usa i messaggi multimediali della finestra come ripiego per i tasti
+supportati dal sistema.
+
+## Mini player
+
+Premi **F9** oppure il pulsante nella barra del titolo per passare al Mini HUD.
+Il pannello compatto mostra copertina, titolo e artista e permette di controllare
+riproduzione e volume. Usa il pulsante di ripristino o premi di nuovo F9 per
+tornare alla finestra completa. Il pulsante con la puntina attiva la modalità
+sempre in primo piano; posizione e dimensioni delle due viste vengono salvate
+separatamente.
+
+Premi **Ctrl+,** per aprire o chiudere le impostazioni; dal Mini HUD la
+scorciatoia ripristina prima la finestra completa.
+
+## Discord Rich Presence
+
+In **Impostazioni → Generale**, abilita Discord Rich Presence per usare
+l'Application ID predefinito di KikuMoe. Puoi inserire un ID personalizzato
+nel campo che compare quando la funzione è attiva, oppure impostare la
+variabile d'ambiente `KIKUMOE_DISCORD_CLIENT_ID`. L'ID nelle impostazioni ha
+priorità sulla variabile d'ambiente, che a sua volta prevale sull'ID predefinito.
+La funzione è disattivata per impostazione predefinita.
+
+KikuMoe si collega al server IPC locale di Discord desktop o di un client
+compatibile con [arRPC](https://github.com/OpenAsar/arrpc), e riprova se il
+server non è ancora disponibile. Per Discord Web occorre un server arRPC e un
+bridge compatibile; alcuni client alternativi lo integrano già. La copertina
+viene mostrata quando è disponibile un URL supportato. L'attività include un
+pulsante che apre la pagina del progetto; Discord lo mostra agli altri utenti.
+Per mostrare anche un
+piccolo logo, la distribuzione può impostare `KIKUMOE_DISCORD_ICON` con il nome
+di un asset caricato nell'applicazione Discord o con un URL immagine.
 
 ## Requisiti
 
@@ -60,7 +106,7 @@ cd kikumoe
 **Windows** — esegui lo script incluso (richiede privilegi amministratore):
 
 ```powershell
-.\FFMPEG.bat
+.\install-ffmpeg.bat
 ```
 
 Dopo l'installazione **riavvia Windows** per aggiornare il PATH.
@@ -224,7 +270,7 @@ La console sviluppatore mostra i log interni dell'applicazione in tempo reale.
 
 ## Risoluzione problemi
 
-**FFmpeg non trovato dopo aver eseguito FFMPEG.bat**
+**FFmpeg non trovato dopo aver eseguito install-ffmpeg.bat**
 
 Riavvia Windows per aggiornare il PATH di sistema.
 
@@ -295,6 +341,12 @@ bash packaging/linux/build-appimage.sh   # Opzionale: pacchettizza in AppImage
 ```
 
 Produce `dist/KikuMoe-<versione>`. VLC non viene incluso nel binario; deve essere installato a livello di sistema (`sudo pacman -S vlc`, `sudo apt install vlc`, ecc.) e verrà trovato automaticamente da `python-vlc`.
+
+> [!NOTE]
+> **Compatibilità glibc (AppImage precompilata):**  
+> A partire dalla versione 1.11.0, l'AppImage precompilata rilasciata su GitHub viene generata su Ubuntu 26.04 LTS (glibc >= 2.41). Se utilizzi una distribuzione con una versione di glibc inferiore (ad esempio Ubuntu 22.04 LTS, Debian 12 o precedenti), l'AppImage precompilata potrebbe non avviarsi a causa della versione di glibc richiesta dal sistema.  
+> In questo caso, per continuare a usare KikuMoe è sufficiente compilare il pacchetto direttamente sulla propria distribuzione clonando il repository ed eseguendo `./build.sh` (e opzionalmente `bash packaging/linux/build-appimage.sh`): il binario o AppImage generato utilizzerà nativamente la versione di glibc della propria macchina.
+
 ---
 
 ## Crediti

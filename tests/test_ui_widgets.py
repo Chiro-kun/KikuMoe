@@ -1,0 +1,1607 @@
+"""
+Tests for KikuMoe 2.0.0 Cyber-Moe UI widgets and theming system.
+"""
+
+import os
+import time
+
+import pytest
+from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtWidgets import QApplication
+
+from ui.themes.cyber_moe import get_cyber_moe_stylesheet
+from ui.widgets.ambient_cover import AmbientCoverCard
+from ui.widgets.playback_controls import PlaybackControls
+from ui.widgets.segmented_switch import SegmentedSwitch
+from ui.widgets.sleep_timer_widget import SleepTimerWidget
+from ui.widgets.status_footer import StatusFooter
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(["pytest"])
+    return app
+
+
+def test_cyber_moe_stylesheet():
+    css = get_cyber_moe_stylesheet("#ec186c")
+    assert "#ec186c" in css
+    assert "mainWindowRoot" in css
+    assert "glassCard" in css
+    assert "heroPlayButton" in css
+
+
+def test_segmented_switch(qapp):
+    switch = SegmentedSwitch(items=["J-POP", "K-POP"], default_index=0)
+    assert switch.current_selection() == "J-POP"
+
+    emitted = []
+    switch.selection_changed.connect(emitted.append)
+    switch.set_selected("K-POP")
+    assert switch.current_selection() == "K-POP"
+
+
+def test_playback_controls(qapp):
+    ctrl = PlaybackControls()
+    assert ctrl._volume == 60
+
+    vol_events = []
+    ctrl.volume_changed.connect(vol_events.append)
+    ctrl.set_volume(85)
+    assert ctrl.volume_label.text() == "85%"
+
+    ctrl.set_playing_state(is_playing=True, is_paused=False)
+    assert ctrl.hero_play._is_playing is True
+    assert ctrl.hero_play._is_paused is False
+    assert not hasattr(ctrl, "btn_force_stop")
+    assert not hasattr(ctrl, "btn_sleep")
+    assert not hasattr(ctrl, "btn_autoplay")
+
+    ctrl.resize(520, ctrl.sizeHint().height())
+    ctrl.show()
+    qapp.processEvents()
+    assert abs(ctrl.hero_play.geometry().center().x() - ctrl.rect().center().x()) <= 1
+    ctrl.close()
+
+
+def test_sleep_timer_widget(qapp):
+    timer = SleepTimerWidget()
+    timer.set_minutes(45)
+    assert timer.get_minutes() == 45
+    assert hasattr(timer, "moon_icon")
+
+    toggled_states = []
+    timer.drawer_toggled.connect(toggled_states.append)
+    timer.show()
+    qapp.processEvents()
+    assert timer.isVisible() is True
+
+    # Clicking × hides the entire SleepTimerWidget block cleanly
+    timer.btn_close.click()
+    qapp.processEvents()
+    assert timer.isVisible() is False
+    assert toggled_states == [False]
+
+    timer.toggle_visible()
+    qapp.processEvents()
+    assert timer.isVisible() is True
+    assert toggled_states == [False, True]
+
+    timer.set_active_countdown(1500)
+    assert timer._is_active is True
+    assert "25:00" in timer.badge_countdown.text()
+    assert timer.btn_cancel.isEnabled() is True
+    assert timer.btn_start.isEnabled() is False
+
+    timer.set_inactive()
+    assert timer._is_active is False
+    assert timer.badge_countdown.isVisible() is False
+    timer.close()
+
+
+def test_status_footer(qapp):
+    footer = StatusFooter()
+    footer.set_backend_status("MPV", is_ready=True)
+    assert footer.backend_label.text() == "MPV"
+
+    footer.set_format("OPUS")
+    assert footer.format_label.text() == "OPUS"
+
+    footer.set_session_time("01:23:45")
+    assert footer.session_label.text() == "01:23:45"
+
+
+def test_backend_footer_updates_without_legacy_widgets(qapp):
+    from types import SimpleNamespace
+
+    from ui.main_window import ListenMoePlayer
+
+    class PlayerFFmpeg:
+        def is_ready(self):
+            return True
+
+        def get_version(self):
+            return "ffmpeg"
+
+    footer = StatusFooter()
+    host = SimpleNamespace(
+        player=PlayerFFmpeg(),
+        status_footer=footer,
+        settings=SimpleNamespace(value=lambda key, default: default),
+    )
+    ListenMoePlayer.update_vlc_status_label(host)
+    assert footer.backend_label.text() == "FFMPEG"
+    assert "#00e676" in footer.backend_dot.styleSheet()
+
+
+def test_ambient_cover(qapp):
+    from ui.widgets.ambient_cover import AnimatedTrackLabel, FullBleedCanvas
+
+    cover = AmbientCoverCard(cover_size=160)
+    cover.show()
+    assert cover._cover_size == 160
+
+    # Test with blank / None cover
+    cover.set_cover(None)
+    assert cover._cover_pixmap is None
+
+    # Test with a dummy 100x100 pixmap -> triggers 60 FPS crossfade
+    pm = QPixmap(100, 100)
+    pm.fill(QColor("#ec186c"))
+    cover.set_cover(pm)
+    assert cover._cover_pixmap is not None
+    assert cover._fade_progress == 0.0
+    assert cover._prev_rounded_cover is not None
+
+    canvas = FullBleedCanvas()
+    canvas.show()
+    canvas.set_backdrop(pm)
+    assert canvas._fade_progress == 0.0
+
+    lbl = AnimatedTrackLabel("Old Song", font_px=16, font_weight=800)
+    lbl.show()
+    lbl.setText("New Song")
+    assert lbl._prev_text == "Old Song"
+    assert lbl._anim_progress == 0.0
+
+
+@pytest.mark.parametrize("width", [222, 380])
+def test_cover_halo_fades_before_widget_edges(qapp, width):
+    from PyQt6.QtCore import Qt
+
+    cover = AmbientCoverCard(cover_size=196)
+    cover.resize(width, cover.height())
+    pixmap = QPixmap(cover.size())
+    pixmap.fill(Qt.GlobalColor.transparent)
+    cover.render(pixmap)
+    image = pixmap.toImage()
+    assert image.pixelColor(width // 2, 0).alpha() == 0
+    assert image.pixelColor(0, cover.height() // 2).alpha() == 0
+    assert image.pixelColor(0, 0).alpha() == 0
+
+
+def test_ambient_cover_radial_visualizer(qapp):
+    cover = AmbientCoverCard(cover_size=196)
+    cover.show()
+    # Default is disabled (off)
+    assert cover.is_visualizer_enabled() is False
+
+    # Test toggling visualizer
+    cover.set_visualizer_enabled(True)
+    assert cover.is_visualizer_enabled() is True
+    cover.set_visualizer_enabled(False)
+    assert cover.is_visualizer_enabled() is False
+    assert all(m == 0.0 for m in cover._spectrum_bars)
+    cover.set_visualizer_enabled(True)
+    assert cover.is_visualizer_enabled() is True
+
+    # Test playback active triggers timer and spectrum tick
+    cover.set_playing(True)
+    assert cover._is_playing is True
+    assert cover._viz_timer.isActive() is True
+
+    # Tick visualizer directly
+    cover._tick_visualizer()
+    assert len(cover._spectrum_bars) == 64
+    assert any(m > 0.0 for m in cover._spectrum_bars)
+
+    # Test feed PCM
+    fake_pcm = b"\x00\x10" * 512
+    cover.feed_pcm(fake_pcm)
+
+    # Test stop decay: bars smoothly decay to zero and timer auto-stops to save CPU while idle
+    cover.set_playing(False)
+    assert cover._is_playing is False
+    for _ in range(80):
+        cover._tick_visualizer()
+    assert all(m == 0.0 for m in cover._spectrum_bars)
+    assert cover._viz_timer.isActive() is False
+
+    # Resuming playback restarts the timer; disabling visualizer stops it immediately
+    cover.set_playing(True)
+    assert cover._viz_timer.isActive() is True
+    cover.set_visualizer_enabled(False)
+    assert cover._viz_timer.isActive() is False
+    cover.set_playing(False)
+    cover.set_visualizer_enabled(True)
+
+    # Test horizontal wave path safety boundaries (prevent clipping in lyrics mode)
+    from PyQt6.QtCore import QPointF
+
+    cover_viz = AmbientCoverCard(cover_size=180)
+    cover_viz.resize(264, cover_viz.height())
+    cover_viz._spectrum_bars = [1.0] * 64
+    cover_viz._bass_energy = 1.0
+    center = QPointF(cover_viz.width() / 2.0, cover_viz.height() / 2.0)
+    path = cover_viz._build_wave_path(center, extra_offset=3.0, amp_scale=1.0)
+    bounds = path.boundingRect()
+    assert bounds.left() >= 0.0
+    assert bounds.right() <= cover_viz.width()
+    assert bounds.top() >= 0.0
+    assert bounds.bottom() <= cover_viz.height()
+
+
+def test_settings_dialog_and_toggles(qapp):
+    from ui.settings_dialog import AnimatedToggleSwitch, SettingsDialog
+
+    toggle = AnimatedToggleSwitch("Autoplay")
+    toggle.setChecked(True)
+    assert toggle.isChecked() is True
+    assert toggle._progress == 1.0
+
+    dlg = SettingsDialog()
+    assert dlg.pages.count() == 4
+    dlg.category_bar.set_selected(1)
+    dlg.pages.setCurrentIndex(1)
+    assert dlg.pages.currentIndex() == 1
+    assert hasattr(dlg, "chk_autoplay")
+    assert hasattr(dlg, "chk_ambient_mode")
+    assert hasattr(dlg, "chk_show_sleep_timer")
+    assert hasattr(dlg, "cmb_audio_backend")
+    assert hasattr(dlg, "btn_force_audio_reset")
+    assert hasattr(dlg, "btn_ok")
+
+    reset_calls = []
+
+    class DummyResetHost(SettingsDialog.__bases__[0]):
+        def force_stop_all(self):
+            reset_calls.append(True)
+
+    host = DummyResetHost()
+    host.resize(400, 600)
+    host.show()
+    dlg_with_host = SettingsDialog(host, embedded=True)
+    dlg_with_host.resize(400, 600)
+    dlg_with_host.show()
+    qapp.processEvents()
+    dlg_with_host.btn_force_audio_reset.click()
+    assert reset_calls == [True]
+    assert dlg_with_host._apply_toast.isVisible()
+    dlg_with_host.close()
+    host.close()
+    dlg.close()
+
+
+def test_settings_apply_shows_and_restarts_toast(qapp, monkeypatch):
+    from ui.settings_dialog import SettingsDialog
+
+    dlg = SettingsDialog(embedded=True)
+    dlg.resize(400, 600)
+    dlg.show()
+    qapp.processEvents()
+    saved = []
+    monkeypatch.setattr(dlg, "_save_settings", lambda: saved.append(True))
+    emitted = []
+    dlg.settings_changed.connect(lambda: emitted.append(True))
+    dlg.cmb_lang.setCurrentIndex(0)
+    dlg._applied_values = dlg._settings_values()
+    dlg.btn_apply.click()
+    assert not saved and not emitted
+    assert dlg._apply_toast.text() == "Nessuna modifica da applicare"
+    initial_autoplay = dlg.chk_autoplay.isChecked()
+    dlg.chk_autoplay.setChecked(not initial_autoplay)
+    dlg.chk_autoplay.setChecked(initial_autoplay)
+    dlg.btn_apply.click()
+    assert not saved and not emitted
+    assert dlg._apply_toast.text() == "Nessuna modifica da applicare"
+    dlg.chk_autoplay.setChecked(not dlg.chk_autoplay.isChecked())
+    dlg.btn_apply.click()
+    assert saved == [True] and emitted == [True]
+    assert dlg._apply_toast.isVisible()
+    assert dlg._apply_toast.text() == "Impostazioni salvate"
+    assert abs(dlg._apply_toast.geometry().center().x() - dlg.rect().center().x()) <= 1
+    dlg._hide_apply_toast()
+    dlg.cmb_lang.setCurrentIndex(1)
+    dlg.btn_apply.click()
+    assert dlg._apply_toast.isVisible()
+    assert dlg._apply_toast.text() == "Settings saved"
+    dlg.btn_apply.click()
+    assert dlg._apply_toast.text() == "No changes to apply"
+    assert len(saved) == len(emitted) == 2
+    assert dlg._toast_timer.isActive()
+    dlg._hide_apply_toast()
+    dlg._toast_animation.setCurrentTime(dlg._toast_animation.duration())
+    assert dlg._apply_toast.isHidden()
+    dlg.close()
+
+
+def test_apply_before_device_enumeration_preserves_audio_device(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtCore import QSettings
+
+    import ui.settings_dialog as settings_module
+    from core.constants import KEY_AUDIO_DEVICE_INDEX
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_AUDIO_DEVICE_INDEX, 7)
+    monkeypatch.setattr(settings_module, "QSettings", lambda *args: settings)
+    dlg = settings_module.SettingsDialog(embedded=True)
+    assert not dlg._devices_populated
+    dlg.chk_autoplay.setChecked(not dlg.chk_autoplay.isChecked())
+    dlg._on_apply()
+    assert int(settings.value(KEY_AUDIO_DEVICE_INDEX)) == 7
+    dlg.close()
+
+
+def test_embedded_settings_slide_and_console_button(qapp):
+    from PyQt6.QtWidgets import QWidget
+
+    from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+
+    class DummyHost(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.console_opened = False
+
+        def open_dev_console(self):
+            self.console_opened = True
+
+    host = DummyHost()
+    host.resize(400, 600)
+    stack = SlidingStackedWidget(host)
+    stack.resize(400, 600)
+    page0 = QWidget()
+    stack.addWidget(page0)
+
+    dlg = SettingsDialog(host, embedded=True)
+    stack.addWidget(dlg)
+
+    # Even though stack.addWidget reparents dlg to stack, _host_window stays host
+    assert dlg._host_window is host
+
+    # Slide from page 0 to page 1 (settings)
+    host.show()
+    stack.slide_to_index(1, direction=1)
+    stack.finish_active_slide()
+    assert stack.currentIndex() == 1
+
+    # Clicking Console button invokes host.open_dev_console()
+    dlg.chk_dev_console.setChecked(True)
+    dlg._on_open_console()
+    assert host.console_opened is True
+
+    # Switching tabs resets any sticky hover/popup state on GlassComboBox
+    dlg.cmb_lang._hover = True
+    dlg.cmb_lang._popup_open = True
+    dlg._on_tab_changed(1)
+    assert dlg.cmb_lang._hover is False
+    assert dlg.cmb_lang._popup_open is False
+
+
+def test_smooth_progress_bar_and_dev_console(qapp):
+    from ui.dev_console import DevConsole
+    from ui.main_window import SmoothProgressBar
+
+    bar = SmoothProgressBar()
+    assert bar.height() == 16
+    bar.trigger_play_launch()
+    assert bar._launch_progress == 0.0
+    bar.set_buffering_active(True)
+    bar.set_buffering_indeterminate(True)
+    assert bar._buffering_active is True
+    bar.set_buffering_active(False)
+    assert bar._buffering_active is False
+
+    import logging
+
+    from core.logger import get_logger, is_debug
+
+    log = get_logger("KikuMoeTest")
+    console = DevConsole(logger=log)
+    console.open()
+    assert console.is_open() is True
+    assert is_debug() is True
+    assert log.isEnabledFor(logging.DEBUG) is True
+
+    log.debug("[UI] volume_changed -> 42")
+    qapp.processEvents()
+    assert "[DEBUG] [UI] volume_changed -> 42" in (
+        console._console_text.toPlainText() if console._console_text else ""
+    )
+
+    if console._level_combo is not None:
+        console._level_combo.setCurrentText("INFO")
+    qapp.processEvents()
+    assert is_debug() is False
+    assert log.isEnabledFor(logging.DEBUG) is False
+    console._on_toggle_pause()
+    assert console._paused is True
+    console._on_toggle_pause()
+    assert console._paused is False
+    console.close()
+    assert console.is_open() is False
+    assert is_debug() is False
+
+
+def test_glass_combo_box_rendering_and_layout(qapp):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QVBoxLayout, QWidget
+
+    from ui.settings_dialog import GlassComboBox, GlassComboDelegate
+
+    win = QWidget()
+    lay = QVBoxLayout(win)
+    combo = GlassComboBox(win)
+    combo.addItems(["Vorbis", "Opus", "MP3"])
+    lay.addWidget(combo)
+    win.show()
+
+    # 1. Verify GlassComboBox internal configuration
+    view = combo.view()
+    assert view.uniformItemSizes() is True
+    assert isinstance(view.itemDelegate(), GlassComboDelegate)
+
+    popup = view.window()
+    assert popup.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) is True
+    flags = popup.windowFlags()
+    assert Qt.WindowType.FramelessWindowHint in flags
+    assert Qt.WindowType.NoDropShadowWindowHint in flags
+
+    # 2. Test short dropdown layout across styles (Fusion on Linux, Windows)
+    for style_name in ["Fusion", "Windows"]:
+        qapp.setStyle(style_name)
+        qapp.setStyleSheet(get_cyber_moe_stylesheet("#ec186c"))
+        combo.showPopup()
+        m = combo.model()
+        rects = [view.visualRect(m.index(i, 0)) for i in range(m.rowCount())]
+
+        # Each item must satisfy minimum height
+        for r in rects:
+            assert r.height() >= 25
+
+        # Strict non-overlapping test: row i + height must not intrude into row i+1
+        for i in range(len(rects) - 1):
+            assert rects[i].y() + rects[i].height() <= rects[i + 1].y()
+
+        # Visual corner transparency test (no white background box)
+        pix = QPixmap(popup.size())
+        pix.fill(Qt.GlobalColor.transparent)
+        popup.render(pix)
+        img = pix.toImage()
+        assert img.pixelColor(0, 0).alpha() == 0
+        # Card interior must remain solid/opaque (never transparent)
+        assert img.pixelColor(img.width() // 2, img.height() // 2).alpha() == 255
+        combo.hidePopup()
+
+    # 3. Test long dropdown layout
+    combo.clear()
+    combo.addItems([f"Device {i}" for i in range(15)])
+    combo.showPopup()
+    m = combo.model()
+    rects_long = [
+        view.visualRect(m.index(i, 0))
+        for i in range(m.rowCount())
+        if view.visualRect(m.index(i, 0)).y() > 0
+    ]
+    for i in range(len(rects_long) - 1):
+        assert rects_long[i].y() + rects_long[i].height() <= rects_long[i + 1].y()
+    combo.hidePopup()
+    win.close()
+
+
+def test_about_widget(qapp):
+    from core.constants import (
+        AUTHORS,
+        LICENSE_NAME,
+        URL_ANISON,
+        URL_FORGEJO,
+        URL_GENSOKYO,
+        URL_GITHUB,
+        URL_LISTENMOE,
+        URL_NEURO21,
+        URL_TELEGRAM,
+        URL_TRUCKERSFM,
+    )
+    from core.i18n import I18n
+    from ui.about_dialog import AboutWidget
+
+    i18n = I18n("it")
+    widget = AboutWidget(i18n=i18n, backend_name="MPV")
+    widget.show()
+
+    # 1. Authors & License
+    assert AUTHORS in widget._lbl_authors_val.text()
+    assert LICENSE_NAME in widget._lbl_license_val.text()
+
+    # 2. URLs
+    assert widget.btn_forgejo.toolTip() == URL_FORGEJO
+    assert widget.btn_github.toolTip() == URL_GITHUB
+    assert widget.btn_telegram.toolTip().endswith(URL_TELEGRAM)
+    assert widget.btn_listenmoe.toolTip() == URL_LISTENMOE
+    assert widget.btn_gensokyo.toolTip() == URL_GENSOKYO
+    assert widget.btn_anison.toolTip() == URL_ANISON
+    assert widget.btn_neuro21.toolTip() == URL_NEURO21
+    assert widget.btn_truckersfm.toolTip() == URL_TRUCKERSFM
+
+    # 3. Audio Backend
+    assert widget._lbl_backend_val.text() == "MPV"
+    widget.set_backend_name("VLC")
+    assert widget._lbl_backend_val.text() == "VLC"
+
+    # 4. Copy System Info to clipboard
+    widget._copy_system_info()
+    clipboard_text = QApplication.clipboard().text()
+    assert "KikuMoe" in clipboard_text
+    assert AUTHORS in clipboard_text
+    assert "VLC" in clipboard_text
+    assert URL_FORGEJO in clipboard_text
+
+    # 5. Language switch
+    i18n_en = I18n("en")
+    widget.set_i18n(i18n_en)
+    assert widget.btn_copy.text() == i18n_en.t("about_copy_sys_info")
+    widget.close()
+
+
+def test_about_dialog(qapp):
+    from ui.about_dialog import AboutDialog
+
+    dlg = AboutDialog(backend_name="FFmpeg")
+    dlg.show()
+    assert dlg.about_widget._backend_name == "FFmpeg"
+    assert dlg.windowTitle() != ""
+    dlg.close()
+
+
+def test_settings_dialog_four_tabs(qapp):
+    from ui.settings_dialog import SettingsDialog
+
+    dlg = SettingsDialog(embedded=True)
+    # Check 4 labels present in category bar
+    assert len(dlg.category_bar._labels) == 4
+    assert dlg.category_bar._labels[0] == dlg.i18n.t("settings_tab_general")
+    assert dlg.category_bar._labels[1] == dlg.i18n.t("settings_tab_audio")
+    assert dlg.category_bar._labels[2] == dlg.i18n.t("settings_tab_advanced")
+    assert dlg.category_bar._labels[3] == dlg.i18n.t("settings_tab_info")
+
+    # Switch to 4th tab (Info)
+    dlg.set_tab(3)
+    assert dlg.category_bar._selected == 3
+    assert dlg.pages.currentIndex() == 3
+    dlg.close()
+
+
+def test_embedded_back_snapshots_visible_settings(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QWidget
+
+    from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+
+    host = QWidget()
+    host.resize(405, 600)
+    stack = SlidingStackedWidget(host)
+    stack.resize(405, 600)
+    stack.addWidget(QWidget())
+    dialog = SettingsDialog(host, embedded=True)
+    stack.addWidget(dialog)
+    host.show()
+    stack.setCurrentIndex(1)
+    qapp.processEvents()
+    visibility = []
+    render = stack._render_snapshot
+
+    def record_snapshot(widget):
+        visibility.append(widget.isVisible())
+        return render(widget)
+
+    monkeypatch.setattr(stack, "_render_snapshot", record_snapshot)
+    dialog.rejected.connect(lambda: stack.slide_to_index(0, direction=-1))
+    dialog.btn_back.click()
+    assert visibility[0] is True
+    assert stack._pm_from is not None and stack._pm_to is not None
+    stack.finish_active_slide()
+    assert stack.currentIndex() == 0
+    host.close()
+
+
+def test_settings_pages_scroll_in_compact_window(qapp):
+    from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
+
+    from ui.settings_dialog import SettingsDialog
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    dlg = SettingsDialog(host, embedded=True)
+    layout.addWidget(dlg)
+    host.resize(405, 550)
+    host.show()
+    dlg.set_tab(3)
+    qapp.processEvents()
+    scroll = dlg.pages.currentWidget()
+    assert isinstance(scroll, QScrollArea)
+    assert scroll.verticalScrollBar().maximum() > 0
+    cards = [
+        dlg.about_widget.layout().itemAt(i).widget()
+        for i in range(dlg.about_widget.layout().count())
+        if dlg.about_widget.layout().itemAt(i).widget() is not None
+    ]
+    assert all(a.geometry().bottom() < b.geometry().top() for a, b in zip(cards, cards[1:]))
+    scroll.ensureWidgetVisible(dlg.about_widget.btn_copy)
+    qapp.processEvents()
+    copy_pos = dlg.about_widget.btn_copy.mapTo(
+        scroll.viewport(), dlg.about_widget.btn_copy.rect().center()
+    )
+    assert scroll.viewport().rect().contains(copy_pos)
+    assert dlg.btn_apply.isVisible()
+    host.close()
+
+
+def test_compact_settings_controls_remain_reachable_horizontally(qapp):
+    from PyQt6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
+
+    from ui.settings_dialog import SettingsDialog
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    dlg = SettingsDialog(host, embedded=True)
+    layout.addWidget(dlg)
+    host.resize(380, 700)
+    host.show()
+    for tab, controls in (
+        (1, (dlg.cmb_format, dlg.cmb_audio_backend, dlg.btn_audio_refresh, dlg.btn_browse)),
+        (3, (dlg.about_widget.btn_telegram, dlg.about_widget.btn_truckersfm)),
+    ):
+        dlg.set_tab(tab)
+        qapp.processEvents()
+        scroll = dlg.pages.currentWidget()
+        assert isinstance(scroll, QScrollArea)
+        for control in controls:
+            scroll.ensureWidgetVisible(control, 0, 0)
+            qapp.processEvents()
+            left = control.mapTo(scroll.viewport(), control.rect().topLeft())
+            right = control.mapTo(scroll.viewport(), control.rect().bottomRight())
+            assert 0 <= left.x() <= right.x() < scroll.viewport().width()
+        assert dlg.btn_apply.isVisible()
+    host.close()
+
+
+def test_settings_prewarm_and_logo_cache(qapp):
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtWidgets import QWidget
+
+    from core.constants import APP_SETTINGS, ORG_NAME
+    from core.i18n import I18n
+    from ui.about_dialog import _APP_LOGO_CACHE, AboutWidget
+    from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+
+    w = AboutWidget()
+    assert _APP_LOGO_CACHE is not None
+    assert not _APP_LOGO_CACHE.isNull()
+    w.close()
+
+    class DummyPlayer(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.i18n = I18n("it")
+            self.player = None
+            self.settings = QSettings(ORG_NAME, APP_SETTINGS)
+            self._view_stack = SlidingStackedWidget(self)
+            self._settings_dlg = None
+
+        def _prewarm_settings(self):
+            if self._settings_dlg is not None:
+                return
+            dlg = SettingsDialog(self, embedded=True)
+            self._settings_dlg = dlg
+            self._view_stack.addWidget(dlg)
+            self._view_stack._render_snapshot(dlg)
+
+    p = DummyPlayer()
+    p._prewarm_settings()
+    assert p._settings_dlg is not None
+    assert p._view_stack.count() == 1
+    p._prewarm_settings()
+    p.close()
+
+
+def test_close_confirm_dialog(qapp):
+    """Verify CloseConfirmDialog triggers correct actions, remember flags, and styling."""
+    from ui.close_dialog import CloseConfirmDialog
+
+    # 1. Tray selection
+    dlg = CloseConfirmDialog()
+    try:
+        dlg.cb_remember.setChecked(True)
+        dlg._on_tray()
+        assert dlg.action == "tray"
+        assert dlg.remember is True
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+
+    # 2. Quit selection
+    dlg2 = CloseConfirmDialog()
+    try:
+        dlg2.cb_remember.setChecked(False)
+        dlg2._on_quit()
+        assert dlg2.action == "quit"
+        assert dlg2.remember is False
+    finally:
+        dlg2.close()
+        dlg2.deleteLater()
+
+    # 3. Cancel selection
+    dlg3 = CloseConfirmDialog()
+    try:
+        dlg3._on_cancel()
+        assert dlg3.action == "cancel"
+    finally:
+        dlg3.close()
+        dlg3.deleteLater()
+
+    # 4. Entrance animation
+    dlg_anim = CloseConfirmDialog()
+    try:
+        dlg_anim.show()
+        assert dlg_anim._entrance_animated is True
+        assert dlg_anim._anim_group is not None
+    finally:
+        dlg_anim.close()
+        dlg_anim.deleteLater()
+        qapp.processEvents()
+
+
+def test_close_dialog_remember_checkbox_alignment_and_animation(qapp):
+    from PyQt6.QtCore import QPoint, Qt
+
+    from ui.close_dialog import CloseConfirmDialog
+
+    dlg = CloseConfirmDialog()
+    try:
+        dlg.show()
+        qapp.processEvents()
+        assert dlg.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        checkbox_x = dlg.cb_remember.mapTo(dlg, QPoint(0, 0)).x()
+        prompt_x = dlg.prompt_label.mapTo(dlg, QPoint(0, 0)).x()
+        assert checkbox_x == prompt_x
+        dlg.cb_remember.click()
+        assert dlg.cb_remember.isChecked()
+        assert dlg.cb_remember._animation.endValue() == 1.0
+        dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
+        assert dlg.cb_remember._progress == 1.0
+        pixmap = QPixmap(dlg.cb_remember.size())
+        pixmap.fill(Qt.GlobalColor.transparent)
+        dlg.cb_remember.render(pixmap)
+        image = pixmap.toImage()
+        check_color = image.pixelColor(8, image.height() // 2)
+        assert check_color.red() > check_color.green()
+        dlg.cb_remember.click()
+        assert not dlg.cb_remember.isChecked()
+        dlg.cb_remember._animation.setCurrentTime(dlg.cb_remember._animation.duration())
+        assert dlg.cb_remember._progress == 0.0
+        dlg._on_cancel()
+    finally:
+        dlg.close()
+        dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_sleep_timer_no_extra_window_spawn(qapp, monkeypatch):
+    """Verify starting sleep timer does not spawn detached top-level labels or windows."""
+    from ui.main_window import ListenMoePlayer
+
+    monkeypatch.setattr(ListenMoePlayer, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
+    monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
+
+    player = ListenMoePlayer()
+    try:
+        top_levels_before = [w for w in QApplication.topLevelWidgets() if w.isVisible()]
+
+        # Start sleep timer
+        player._on_sleep_start_requested(15)
+        assert player._sleep_remaining_sec == 15 * 60
+
+        top_levels_after = [w for w in QApplication.topLevelWidgets() if w.isVisible()]
+        # Verify no new detached top-level windows were opened
+        assert len(top_levels_after) == len(top_levels_before)
+        assert player.sleep_label.isVisible() is False
+        assert player.sleep_label.isWindow() is False
+    finally:
+        player.deleteLater()
+
+
+def test_main_window_minimum_size_keeps_track_below_cover(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint, QSettings
+
+    from ui import main_window
+    from ui.main_window import ListenMoePlayer
+
+    settings = QSettings(str(tmp_path / "min_size.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(ListenMoePlayer, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(ListenMoePlayer, "_init_tray", lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
+    monkeypatch.setattr(ListenMoePlayer, "_init_extra_logic", lambda self: None)
+    player = ListenMoePlayer()
+    player.resize(200, 200)
+    player.show()
+    qapp.processEvents()
+    assert player.width() >= 380
+    assert player.height() >= 700
+    cover_bottom = player.ambient_cover.mapTo(player, QPoint(0, player.ambient_cover.height())).y()
+    title_top = player.now_playing_title.mapTo(player, QPoint(0, 0)).y()
+    assert title_top >= cover_bottom
+    player.deleteLater()
+
+
+def test_closing_sleep_timer_shrinks_main_window_without_empty_gap(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint, QSettings
+
+    from ui import main_window
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(main_window.ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        main_window.ListenMoePlayer,
+        "_init_system_media",
+        lambda self: setattr(self, "system_media", None),
+    )
+
+    player = main_window.ListenMoePlayer()
+    try:
+        player.show()
+        qapp.processEvents()
+        open_height = player.height()
+        assert open_height >= 700
+        assert player.sleep_timer_widget.isVisible() is True
+
+        player.sleep_timer_widget.btn_close.click()
+        qapp.processEvents()
+
+        assert player.sleep_timer_widget.isVisible() is False
+        assert settings.value("show_sleep_timer") == "false"
+        assert player.height() <= open_height - 90
+        controls_bottom = player.playback_controls.mapTo(
+            player, QPoint(0, player.playback_controls.height())
+        ).y()
+        footer_top = player.status_footer.mapTo(player, QPoint(0, 0)).y()
+        assert footer_top - controls_bottom <= 16
+
+        # Restoring visibility from settings brings height back cleanly
+        settings.setValue("show_sleep_timer", "true")
+        player._sync_sleep_timer_visibility()
+        qapp.processEvents()
+        assert player.sleep_timer_widget.isVisible() is True
+        assert player.height() >= 700
+    finally:
+        player.deleteLater()
+
+
+def test_set_album_cover_updates_full_bleed_ambient_backdrop(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QSettings
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from ui import main_window
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(main_window.ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        main_window.ListenMoePlayer,
+        "_init_system_media",
+        lambda self: setattr(self, "system_media", None),
+    )
+
+    player = main_window.ListenMoePlayer()
+    try:
+        player.apply_theme(force=True)
+        player.show()
+        qapp.processEvents()
+        neutral_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+
+        cover = QPixmap(160, 160)
+        cover.fill(QColor(255, 210, 40))
+        player._set_album_cover_pixmap(cover)
+        player._content_widget._fade_progress = 1.0
+        player._content_widget._invalidate_cache()
+        qapp.processEvents()
+
+        assert player._content_widget._blurred_source is not None
+        assert not player._content_widget._blurred_source.isNull()
+        assert not player.mini_hud.cover.pixmap().isNull()
+
+        bg_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+        assert bg_pixel.red() > neutral_pixel.red() + 40
+        assert bg_pixel.green() > neutral_pixel.green() + 40
+
+        # Disabling Ambient Mode switches backdrop back to neutral theme background
+        player._content_widget.set_ambient_enabled(False)
+        qapp.processEvents()
+        disabled_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+        assert disabled_pixel.red() == neutral_pixel.red()
+        assert disabled_pixel.green() == neutral_pixel.green()
+
+        # Re-enabling restores blurred cover backdrop immediately without re-setting cover
+        player._content_widget.set_ambient_enabled(True)
+        qapp.processEvents()
+        restored_pixel = player._content_widget.grab().toImage().pixelColor(8, 60)
+        assert restored_pixel.red() > neutral_pixel.red() + 40
+
+        player._set_album_cover_pixmap(None)
+        assert player._content_widget._blurred_source is None
+    finally:
+        player.deleteLater()
+
+
+def test_fullscreen_centered_responsive_stage(qapp, tmp_path, monkeypatch):
+    from PyQt6.QtCore import QPoint, QSettings
+
+    from ui import main_window
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(main_window.ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        main_window.ListenMoePlayer,
+        "_init_system_media",
+        lambda self: setattr(self, "system_media", None),
+    )
+
+    player = main_window.ListenMoePlayer()
+    try:
+        player.show()
+        player.resize(405, 700)
+        qapp.processEvents()
+
+        assert player._album_cover_size == 180
+        assert player._stage_column.width() == player._player_stage.width()
+
+        # Simulate widescreen / 1080p fullscreen geometry
+        player.resize(1920, 1080)
+        qapp.processEvents()
+
+        assert player._album_cover_size == 300
+        assert player.now_playing_title._font_px >= 20
+        assert player._stage_column.width() == 760
+        stage_center = player._stage_column.mapTo(
+            player, QPoint(player._stage_column.width() // 2, 0)
+        ).x()
+        assert abs(stage_center - player.width() // 2) <= 2
+
+        stage_top = player._stage_column.mapTo(player, QPoint(0, 0)).y()
+        stage_bottom = player._stage_column.mapTo(
+            player, QPoint(0, player._stage_column.height())
+        ).y()
+        assert stage_top > 60
+        assert player.height() - stage_bottom > 20
+
+        # Opening lyrics in widescreen smoothly animates the centered stage container 760 -> 980
+        from PyQt6.QtTest import QTest
+
+        monkeypatch.setattr(player.lyrics_provider, "search", lambda *args: None)
+        player.lyrics_button.click()
+        qapp.processEvents()
+        player._animate_lyrics_transition(0.5)
+        qapp.processEvents()
+        assert 760 < player._stage_column.width() < 980
+        QTest.qWait(350)
+        assert player._stage_column.width() == 980
+
+        # Closing lyrics smoothly contracts back 980 -> 760
+        player.lyrics_button.click()
+        qapp.processEvents()
+        player._animate_lyrics_transition(0.5)
+        qapp.processEvents()
+        assert 760 < player._stage_column.width() < 980
+        QTest.qWait(350)
+        assert player._stage_column.width() == 760
+
+        # Restoring compact size reverts cover & typography back cleanly
+        player.resize(405, 700)
+        qapp.processEvents()
+        assert player._album_cover_size == 180
+        assert player.now_playing_title._font_px == 16
+        assert player._stage_column.width() == player._player_stage.width()
+    finally:
+        player.deleteLater()
+
+
+def test_lyrics_opens_next_to_cover_and_updates_on_track_change(qapp, monkeypatch):
+    from PyQt6.QtTest import QTest
+
+    from ui.main_window import ListenMoePlayer
+
+    for name in (
+        "_sync_clock_with_server",
+        "_init_audio_backend",
+        "_init_websocket",
+        "_init_tray",
+        "_init_extra_logic",
+    ):
+        monkeypatch.setattr(ListenMoePlayer, name, lambda self: None)
+    monkeypatch.setattr(
+        ListenMoePlayer, "_init_system_media", lambda self: setattr(self, "system_media", None)
+    )
+    window = ListenMoePlayer()
+    calls = []
+    monkeypatch.setattr(window.lyrics_provider, "search", lambda *args: calls.append(args))
+    window._current_title, window._current_artist = "Song", "Artist"
+    window._current_duration_seconds = 120
+    window._current_start_epoch = 1000
+    window.resize(380, 720)
+    window.show()
+    qapp.processEvents()
+    assert window.lyrics_button.parentWidget() is window.history_button.parentWidget()
+    assert window.lyrics_button.size() == window.history_button.size()
+    assert window.lyrics_button.geometry().right() < window.history_button.geometry().left()
+    assert window.station_pill.mapTo(window, window.station_pill.rect().topRight()).x() < (
+        window.lyrics_button.mapTo(window, window.lyrics_button.rect().topLeft()).x()
+    )
+    window.lyrics_button.click()
+    qapp.processEvents()
+    assert window._lyrics_transition.state() == window._lyrics_transition.State.Running
+    assert window.lyrics_panel.stack.currentWidget() is window.lyrics_panel.skeleton
+    QTest.qWait(350)
+    assert window.width() >= 650
+    assert window.lyrics_panel.isVisible()
+    assert window.lyrics_button.isCheckable()
+    assert window.lyrics_button.toolTip() == window.i18n.t("lyrics_button")
+    assert not window.lyrics_button.text()
+    assert window.ambient_cover.width() == window._album_cover_size + 84
+    assert window.lyrics_panel.x() > window.ambient_cover.x()
+    assert calls == [("Song", "Artist", 120)]
+    assert window.lyrics_panel.skeleton.timer.isActive()
+    window.lyrics_provider.finished.emit({"syncedLyrics": "[00:01.00]Hello"}, "ok")
+    assert not window.lyrics_panel.skeleton.timer.isActive()
+    assert window.lyrics_panel.labels[0].text() == "Hello"
+    window._current_title = "Next"
+    window._refresh_lyrics()
+    assert calls[-1] == ("Next", "Artist", 120)
+    window.lyrics_button.click()
+    QTest.qWait(350)
+    assert window.lyrics_panel.isHidden()
+    assert not window.lyrics_panel.skeleton.timer.isActive()
+    assert window.width() == 380
+    window.lyrics_button.click()
+    QTest.qWait(80)
+    window.lyrics_button.click()
+    QTest.qWait(350)
+    assert window.lyrics_panel.isHidden()
+    assert window.width() == 380
+    lyrics = "\n".join(f"[00:{n:02}.00]Line {n}" for n in range(1, 51))
+    monkeypatch.setattr(
+        window.lyrics_provider,
+        "search",
+        lambda *args: window.lyrics_provider.finished.emit({"syncedLyrics": lyrics}, "ok"),
+    )
+    window._current_start_epoch = time.time() + 90
+    window.lyrics_button.click()
+    QTest.qWait(800)
+    panel = window.lyrics_panel
+    assert panel.active == 29
+    line = panel.labels[panel.active]
+    assert (
+        abs(
+            line.mapTo(panel.scroll_area.viewport(), line.rect().center()).y()
+            - panel.scroll_area.viewport().height() // 2
+        )
+        < 5
+    )
+    window.hide()
+    window.deleteLater()
+
+
+@pytest.mark.parametrize("linux", [False, True])
+def test_mini_hud_switches_geometry_and_shares_controls(qapp, monkeypatch, tmp_path, linux):
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSettings, Qt
+    from PyQt6.QtWidgets import QWidget
+
+    from core.constants import KEY_MINI_ALWAYS_ON_TOP, KEY_MINI_GEOMETRY, KEY_WINDOW_GEOMETRY
+    from ui import main_window
+
+    cls = main_window.ListenMoePlayer
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    old_mini = QWidget()
+    old_mini.resize(360, 88)
+    settings.setValue(KEY_MINI_GEOMETRY, old_mini.saveGeometry())
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(main_window, "_IS_LINUX", linux)
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+    calls = []
+    monkeypatch.setattr(cls, "_tray_toggle_play_pause", lambda self: calls.append("play"))
+    window = cls()
+    window.player = SimpleNamespace(is_playing=lambda: True)
+    window._current_title = "A long song title"
+    window._current_artist = "Artist"
+    window.show()
+    qapp.processEvents()
+    window.resize(405, 720)
+    window.toggle_mini_hud()
+    qapp.processEvents()
+    assert window._mini_mode and window.mini_hud.isVisible()
+    assert 400 <= window.width() and 104 <= window.height() <= 140
+    assert window.mini_button.toolTip() == window.i18n.t("mini_mode")
+    assert "Ctrl+," in window.settings_button.toolTip()
+    assert window._settings_shortcut.key().toString() == "Ctrl+,"
+    if linux:
+        window.resize(2000, 500)
+        assert window.width() == 420 and window.height() == 112
+        window.showMaximized()
+        qapp.processEvents()
+        qapp.processEvents()
+        assert not window.isMaximized()
+    assert window.mini_hud.cover.width() == 68
+    assert window.mini_hud.track_progress.width() > 40
+    assert window.mini_hud.title._text == "A long song title"
+    assert window.mini_hud.artist._text == "Artist"
+    assert window.mini_hud.play_button.kind == "pause"
+    monkeypatch.setattr(main_window.time, "time", lambda: 900.0)
+    window._clock_sync_offset = 0
+    window._current_start_epoch = 1000
+    window._current_duration_seconds = 200
+    window._sync_mini_hud()
+    assert window.mini_hud.elapsed_label.text() == "1:40"
+    assert window.mini_hud.duration_label.text() == "3:20"
+    assert window.mini_hud.track_progress.value() == 500
+    window._current_duration_seconds = 0
+    window._current_start_epoch = 840
+    window._sync_mini_hud()
+    assert window.mini_hud.elapsed_label.text() == "1:00"
+    assert window.mini_hud.duration_label.text() == "LIVE"
+    assert window.mini_hud.track_progress.value() == 0
+    window._current_duration_seconds = 180
+    window._current_start_epoch = None
+    window._sync_mini_hud()
+    assert window.mini_hud.elapsed_label.text() == "--:--"
+    assert window.mini_hud.duration_label.text() == "3:00"
+    window.mini_hud.volume.setValue(37)
+    assert window.volume_slider.value() == 37
+    assert window.mini_hud.volume_popup.isVisible()
+    assert window.mini_hud.volume_popup.text() == "37%"
+    first_x = window.mini_hud.volume_popup.x()
+    window.volume_slider.setValue(55)
+    assert window.mini_hud.volume.value() == 55
+    assert window.mini_hud.volume_popup.text() == "55%"
+    assert window.mini_hud.volume_popup.x() > first_x
+    assert window.mini_hud._volume_timer.isActive()
+    window.mini_hud.play_button.click()
+    assert calls == ["play"]
+    window.mini_hud.pin_button.setChecked(True)
+    assert bool(window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+    assert settings.value(KEY_MINI_ALWAYS_ON_TOP) == "true"
+    window.move(80, 90)
+    window.toggle_mini_hud()
+    qapp.processEvents()
+    assert not window._mini_mode and window.height() >= 700
+    assert window.mini_hud.volume_popup.isHidden()
+    assert not window.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+    assert settings.value(KEY_WINDOW_GEOMETRY) is not None
+    assert settings.value(KEY_MINI_GEOMETRY) is not None
+    window.toggle_mini_hud()
+    qapp.processEvents()
+    assert window.x() == 80 and window.y() == 90
+    assert window.mini_hud.pin_button.isChecked()
+    from PyQt6.QtGui import QCloseEvent
+
+    normal_geometry = settings.value(KEY_WINDOW_GEOMETRY)
+    monkeypatch.setattr(window, "_get_bool", lambda key, default: False)
+    monkeypatch.setattr(window, "_cleanup_before_close", lambda: None)
+    close_event = QCloseEvent()
+    window.closeEvent(close_event)
+    assert close_event.isAccepted()
+    assert settings.value(KEY_WINDOW_GEOMETRY) == normal_geometry
+    opened_settings = []
+    monkeypatch.setattr(window, "open_settings", lambda: opened_settings.append(True))
+    window._settings_shortcut.activated.emit()
+    assert not window._mini_mode and opened_settings == [True]
+    window.hide()
+    window.deleteLater()
+
+
+def test_mini_hud_marquee_and_paused_playback(qapp):
+    from types import SimpleNamespace
+
+    from ui.main_window import ListenMoePlayer
+    from ui.widgets.mini_hud import MarqueeLabel
+
+    label = MarqueeLabel("#ffffff")
+    label.resize(70, 18)
+    label.set_text("A long title that must scroll in the mini player")
+    label.show()
+    qapp.processEvents()
+    label._pause = 0
+    label._tick()
+    assert label._offset > 0
+    label.set_text("Short")
+    label._tick()
+    assert label._offset == 0
+    assert not label._timer.isActive()
+    label.close()
+
+    actions = []
+    window = SimpleNamespace(
+        player=SimpleNamespace(is_playing=lambda: False),
+        _ui_paused=True,
+        pause_resume=lambda: actions.append("resume"),
+        play_stream=lambda: actions.append("play"),
+    )
+    ListenMoePlayer._tray_toggle_play_pause(window)
+    assert actions == ["resume"]
+
+
+def test_mini_hud_cover_is_rounded_and_clears(qapp):
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from ui.widgets.mini_hud import MiniHud
+
+    hud = MiniHud()
+    cover = QPixmap(90, 60)
+    cover.fill(QColor("red"))
+    hud.set_cover(cover)
+    pixmap = hud.cover.pixmap()
+    assert pixmap is not None
+    image = pixmap.toImage()
+    assert image.pixelColor(0, 0).alpha() == 0
+    assert image.pixelColor(image.width() // 2, image.height() // 2).red() == 255
+    assert image.pixelColor(image.width() // 2, image.height() // 2).alpha() == 255
+    hud.set_cover(None)
+    assert hud.cover.pixmap() is None or hud.cover.pixmap().isNull()
+    hud.close()
+
+
+def test_apply_settings_preserves_station_including_local_and_avoids_duplicate_restarts(
+    qapp, monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSettings
+
+    from core.constants import KEY_FORMAT, KEY_STATION, STATION_LOCAL, STATION_TRUCKERSFM
+    from ui import main_window, settings_dialog
+
+    cls = main_window.ListenMoePlayer
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_STATION, STATION_LOCAL)
+    settings.setValue(KEY_FORMAT, "Originale")
+
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(settings_dialog, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(
+        settings_dialog.SettingsDialog, "_ensure_devices_populated", lambda self: None
+    )
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_websocket", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+
+    window = cls()
+    window.player = SimpleNamespace(
+        is_ready=lambda: True,
+        is_playing=lambda: True,
+        is_paused=lambda: False,
+        get_mute=lambda: False,
+        set_mute=lambda _m: None,
+        stop=lambda: None,
+        get_version=lambda: "test",
+    )
+
+    station_switches = []
+    stream_restarts = []
+    ws_restarts = []
+    monkeypatch.setattr(
+        window,
+        "set_radio_provider",
+        lambda st, ch=None: (
+            station_switches.append((st, ch)),
+            settings.setValue(KEY_STATION, st),
+        ),
+    )
+    monkeypatch.setattr(
+        window,
+        "_restart_stream_after_channel_format_change",
+        lambda: stream_restarts.append(settings.value(KEY_STATION)),
+    )
+    monkeypatch.setattr(
+        window,
+        "_restart_ws_for_channel",
+        lambda ch: ws_restarts.append(ch),
+    )
+
+    try:
+        window.open_settings()
+        dlg = window._settings_dlg
+        assert dlg is not None
+        assert dlg.cmb_station.currentData() == STATION_LOCAL
+
+        # Change an unrelated toggle and click Apply then OK: station must remain Local Music
+        dlg.chk_autoplay.setChecked(True)
+        dlg.btn_apply.click()
+        qapp.processEvents()
+        assert settings.value(KEY_STATION) == STATION_LOCAL
+        assert station_switches == []
+        assert stream_restarts == []
+        assert ws_restarts == []
+
+        dlg.btn_ok.click()
+        qapp.processEvents()
+        assert settings.value(KEY_STATION) == STATION_LOCAL
+        assert station_switches == []
+
+        # Re-open settings, switch station via Apply, then click OK: switch must happen once
+        window.open_settings()
+        qapp.processEvents()
+        idx_truckers = dlg.cmb_station.findData(STATION_TRUCKERSFM)
+        assert idx_truckers >= 0
+        dlg.cmb_station.setCurrentIndex(idx_truckers)
+        dlg.btn_apply.click()
+        qapp.processEvents()
+        assert station_switches == [(STATION_TRUCKERSFM, None)]
+        assert stream_restarts == []
+
+        dlg.btn_ok.click()
+        qapp.processEvents()
+        assert station_switches == [(STATION_TRUCKERSFM, None)]
+
+        # Switch back on Apply then switch again before OK: mutable baseline tracks both transitions
+        window.open_settings()
+        qapp.processEvents()
+        idx_local = dlg.cmb_station.findData(STATION_LOCAL)
+        dlg.cmb_station.setCurrentIndex(idx_local)
+        dlg.btn_apply.click()
+        qapp.processEvents()
+        assert station_switches[-1] == (STATION_LOCAL, None)
+        assert len(station_switches) == 2
+    finally:
+        window.deleteLater()
+
+
+def test_switch_network_to_local_with_existing_playlist_and_lyrics(qapp, monkeypatch, tmp_path):
+    """Switching from a network station to Local Music renders local LRC lyrics without crashing."""
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QBuffer, QIODevice, QSettings
+    from PyQt6.QtGui import QImage
+
+    from core.constants import KEY_STATION, STATION_LISTENMOE, STATION_LOCAL, STATION_TRUCKERSFM
+    from core.local_metadata import LocalTrackInfo
+    from network.providers.listenmoe_provider import ListenMoeProvider
+    from network.providers.truckersfm_provider import TruckersFMProvider
+    from ui import main_window, settings_dialog
+
+    track_path = tmp_path / "song (1)!.mp3"
+    track_path.write_bytes(b"")
+
+    img = QImage(16, 16, QImage.Format.Format_RGBA8888)
+    img.fill(0xFF00AAFF)
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    png_bytes = bytes(buf.data())
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_STATION, STATION_LISTENMOE)
+
+    cls = main_window.ListenMoePlayer
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(settings_dialog, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(
+        settings_dialog.SettingsDialog, "_ensure_devices_populated", lambda self: None
+    )
+    monkeypatch.setattr(ListenMoeProvider, "start", lambda self: setattr(self, "_is_running", True))
+    monkeypatch.setattr(ListenMoeProvider, "stop", lambda self: setattr(self, "_is_running", False))
+    monkeypatch.setattr(
+        TruckersFMProvider, "start", lambda self: setattr(self, "_is_running", True)
+    )
+    monkeypatch.setattr(
+        TruckersFMProvider, "stop", lambda self: setattr(self, "_is_running", False)
+    )
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+
+    window = cls()
+    played_urls: list[str] = []
+    window.player = SimpleNamespace(
+        is_ready=lambda: True,
+        is_playing=lambda: True,
+        is_paused=lambda: False,
+        get_mute=lambda: False,
+        set_mute=lambda _m: None,
+        play_url=lambda u: (played_urls.append(u), True)[1],
+        stop=lambda: None,
+        get_time=lambda: 0.0,
+        get_version=lambda: "test",
+    )
+    window.local_playlist._tracks = [
+        LocalTrackInfo(
+            file_path=str(track_path),
+            title="Test Local Song",
+            artist="Test Artist",
+            duration_seconds=120.0,
+            cover_bytes=png_bytes,
+            cover_mime="image/png",
+            lyrics="[00:01.00]Line One\n[00:03.50]Line Two",
+        )
+    ]
+    window.local_playlist._current_index = 0
+
+    lrclib_calls: list[tuple] = []
+    monkeypatch.setattr(
+        window.lyrics_provider,
+        "search",
+        lambda *args: lrclib_calls.append(args),
+    )
+
+    try:
+        window.lyrics_button.setChecked(True)
+        qapp.processEvents()
+        lrclib_calls.clear()
+
+        # Switch via StationGlassPopover from active network station -> local
+        window.station_pill._show_station_menu()
+        qapp.processEvents()
+        pop = window.station_pill._popover
+        assert pop is not None
+        pop._on_select(STATION_LOCAL, "")
+        qapp.processEvents()
+
+        assert window.station_mgr.current_station_id == STATION_LOCAL
+        assert window.lyrics_panel.lines == [(1.0, "Line One"), (3.5, "Line Two")]
+        assert played_urls[-1] == str(track_path)
+        assert lrclib_calls == []
+
+        # Switch to a network station, then switch back to local via Settings Apply (#87 + #88)
+        window.set_radio_provider(STATION_TRUCKERSFM)
+        qapp.processEvents()
+        lrclib_calls.clear()
+        window.open_settings()
+        dlg = window._settings_dlg
+        assert dlg is not None
+        dlg.cmb_station.setCurrentIndex(dlg.cmb_station.findData(STATION_LOCAL))
+        dlg.btn_apply.click()
+        qapp.processEvents()
+
+        assert window.station_mgr.current_station_id == STATION_LOCAL
+        assert window.lyrics_panel.lines == [(1.0, "Line One"), (3.5, "Line Two")]
+        assert played_urls[-1] == str(track_path)
+        assert lrclib_calls == []
+    finally:
+        window._closing = True
+        window.station_mgr.stop()
+        window.deleteLater()
+
+
+def test_local_music_autoswitch_on_ended_modes(qapp, monkeypatch, tmp_path):
+    """Ended events advance local queue in REPEAT_ALL/REPEAT_ONE and stop once in REPEAT_OFF."""
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QSettings
+
+    from core.constants import (
+        KEY_STATION,
+        REPEAT_ALL,
+        REPEAT_OFF,
+        REPEAT_ONE,
+        STATION_LOCAL,
+    )
+    from core.local_metadata import LocalTrackInfo
+    from ui import main_window
+
+    t1 = tmp_path / "one.mp3"
+    t2 = tmp_path / "two.mp3"
+    t1.write_bytes(b"")
+    t2.write_bytes(b"")
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    settings.setValue(KEY_STATION, STATION_LOCAL)
+
+    cls = main_window.ListenMoePlayer
+    monkeypatch.setattr(main_window, "QSettings", lambda *args: settings)
+    monkeypatch.setattr(cls, "_sync_clock_with_server", lambda self: None)
+    monkeypatch.setattr(cls, "_init_audio_backend", lambda self: None)
+    monkeypatch.setattr(cls, "_init_tray", lambda self: None)
+    monkeypatch.setattr(cls, "_init_system_media", lambda self: setattr(self, "system_media", None))
+    monkeypatch.setattr(cls, "_init_extra_logic", lambda self: None)
+
+    window = cls()
+    played_urls: list[str] = []
+    stop_calls: list[bool] = []
+    window.player = SimpleNamespace(
+        is_ready=lambda: True,
+        is_playing=lambda: True,
+        is_paused=lambda: False,
+        get_mute=lambda: False,
+        set_mute=lambda _m: None,
+        play_url=lambda u: (played_urls.append(u), True)[1],
+        stop=lambda: stop_calls.append(True),
+        get_time=lambda: 0.0,
+        get_version=lambda: "test",
+    )
+    window.local_playlist._tracks = [
+        LocalTrackInfo(file_path=str(t1), title="One", artist="A", duration_seconds=10.0),
+        LocalTrackInfo(file_path=str(t2), title="Two", artist="B", duration_seconds=12.0),
+    ]
+    window.local_playlist.set_repeat_mode(REPEAT_ALL)
+    window.local_playlist.play_index(0)
+    qapp.processEvents()
+
+    try:
+        # REPEAT_ALL: 0 -> 1 -> 0
+        window._on_player_event("ended", None)
+        assert window.local_playlist.current_index == 1
+        assert played_urls[-1] == str(t2)
+
+        window._on_player_event("ended", None)
+        assert window.local_playlist.current_index == 0
+        assert played_urls[-1] == str(t1)
+
+        # REPEAT_ONE: replays track 0
+        window.local_playlist.set_repeat_mode(REPEAT_ONE)
+        window._on_player_event("ended", None)
+        assert window.local_playlist.current_index == 0
+        assert played_urls[-1] == str(t1)
+
+        # REPEAT_OFF on last track: stops cleanly once (no duplicate stop_stream)
+        window.local_playlist.set_repeat_mode(REPEAT_OFF)
+        window.local_playlist.play_index(1)
+        stop_calls.clear()
+        window._on_player_event("ended", None)
+        assert len(stop_calls) == 1
+    finally:
+        window._closing = True
+        window.station_mgr.stop()
+        window.deleteLater()

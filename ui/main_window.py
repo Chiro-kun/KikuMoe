@@ -1,4 +1,5 @@
 import email.utils
+import hashlib
 import os
 import re
 import sys
@@ -7,83 +8,271 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
-from typing import Dict, Optional, Set
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
-from PyQt6.QtCore import QEvent, QSettings, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QImage, QKeySequence, QPainter, QPixmap, QShortcut
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QSettings,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    QVariantAnimation,
+    pyqtSignal,
+)
+from PyQt6.QtGui import (
+    QColor,
+    QCursor,
+    QIcon,
+    QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
+    QDialog,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QProgressBar,
-    QPushButton,
+    QSizeGrip,
     QSizePolicy,
-    QSlider,
-    QSpinBox,
-    QStackedLayout,
+    QSpacerItem,
     QStyle,
     QVBoxLayout,
     QWidget,
 )
 
-from audio.player_ffmpeg import PlayerFFmpeg
-from audio.player_mpv import PlayerMPV
-from audio.player_vlc import PlayerVLC
-from core.config import STREAMS
+from audio.equalizer import (
+    EQ_PRESET_CUSTOM,
+    EQ_PRESET_ORDER,
+    EQ_PRESETS,
+    clamp_eq_db,
+    normalize_eq_bands,
+    parse_eq_bands,
+    serialize_eq_bands,
+)
+
+if TYPE_CHECKING:
+    from audio.player_ffmpeg import PlayerFFmpeg
+    from audio.player_mpv import PlayerMPV
+    from audio.player_vlc import PlayerVLC
+    from core.mpris import MprisBridge
+    from core.windows_media import WindowsMediaBridge
+from core.config import (
+    STATIONS,
+    STREAMS,
+    get_station_config,
+    get_station_display_name,
+    get_station_stream_url,
+)
 from core.constants import (
     APP_SETTINGS,
     APP_TITLE,
+    APP_VERSION,
+    DEFAULT_AMBIENT_MODE_ENABLED,
+    DEFAULT_DISCORD_CLIENT_ID,
+    DEFAULT_DYNAMIC_VOLUME_APPS,
+    DEFAULT_DYNAMIC_VOLUME_ENABLED,
+    DEFAULT_DYNAMIC_VOLUME_LEVEL,
+    DEFAULT_DYNAMIC_VOLUME_MODE,
+    DEFAULT_EQ_ENABLED,
+    DEFAULT_EQ_PREAMP,
+    DEFAULT_EQ_PRESET,
+    DEFAULT_LYRICS_PROVIDER,
+    DEFAULT_STATION,
+    DEFAULT_THEME,
+    DEFAULT_VISUALIZER_ENABLED,
+    KEY_AMBIENT_MODE_ENABLED,
     KEY_AUDIO_BACKEND,
     KEY_AUDIO_DEVICE_INDEX,
     KEY_AUTOPLAY,
+    KEY_BETTERLYRICS_API_KEY,
     KEY_CHANNEL,
     KEY_CLOSE_TO_TRAY,
+    KEY_CUSTOM_ACCENT,
+    KEY_CUSTOM_ACCENT_ENABLED,
     KEY_DEV_CONSOLE_ENABLED,
     KEY_DEV_CONSOLE_SHOW_DEV,
+    KEY_DISCORD_CLIENT_ID,
+    KEY_DISCORD_RPC_ENABLED,
     KEY_DONT_ASK_ON_CLOSE,
+    KEY_DYNAMIC_VOLUME_APPS,
+    KEY_DYNAMIC_VOLUME_ENABLED,
+    KEY_DYNAMIC_VOLUME_LEVEL,
+    KEY_DYNAMIC_VOLUME_MODE,
+    KEY_EQ_BANDS,
+    KEY_EQ_CUSTOM_BANDS,
+    KEY_EQ_CUSTOM_PREAMP,
+    KEY_EQ_ENABLED,
+    KEY_EQ_PREAMP,
+    KEY_EQ_PRESET,
     KEY_FORMAT,
     KEY_LANG,
     KEY_LIBVLC_PATH,
+    KEY_LYRICS_PROVIDER,
+    KEY_MINI_ALWAYS_ON_TOP,
+    KEY_MINI_GEOMETRY,
     KEY_MUTE,
     KEY_NETWORK_CACHING,
     KEY_SESSION_TIMER_ENABLED,
+    KEY_SHOW_SLEEP_TIMER,
     KEY_SLEEP_MINUTES,
     KEY_SLEEP_STOP_ON_END,
+    KEY_STATION,
+    KEY_THEME,
     KEY_TRAY_ENABLED,
     KEY_TRAY_HIDE_ON_MINIMIZE,
     KEY_TRAY_NOTIFICATIONS,
+    KEY_UPDATE_CHANNEL,
+    KEY_UPDATE_CHECK_ON_STARTUP,
+    KEY_UPDATE_IGNORED_VERSION,
+    KEY_UPDATE_LAST_CHECK,
+    KEY_VISUALIZER_ENABLED,
     KEY_VOLUME,
     KEY_WINDOW_GEOMETRY,
     ORG_NAME,
+    STATION_LISTENMOE,
+    STATION_LOCAL,
+    SUPPORTED_AUDIO_EXTENSIONS,
+    UPDATE_CHANNEL_BETA,
+    UPDATE_CHANNEL_STABLE,
 )
-from core.i18n import I18n
+from core.discord_presence import DiscordPresence, activity_payload
+from core.dynamic_volume import DynamicVolumeController
+from core.i18n import I18n, install_qt_translator
+from core.local_metadata import LocalTrackInfo
+from core.local_playlist import LocalPlaylistManager
 from core.logger import get_logger
+from core.lyrics import LyricsProvider, parse_lrc
+from core.media_state import MediaState
+from core.quick_search import (
+    copy_to_clipboard,
+    search_apple_music,
+    search_spotify,
+    search_youtube,
+)
+from core.song_history import SongHistoryManager
 from core.ssl_compat import get_ssl_context
+from core.updater import UpdateCheckWorker
+from core.wayland_window import (
+    apply_wayland_pin,
+    detect_wayland_compositor,
+    is_wayland_session,
+    supports_wayland_pin,
+)
+from network.image_cache import (
+    ALLOWED_COVER_HOSTS,
+    get_cached_cover_file_uri,
+    get_cached_pixmap,
+    normalize_cover_url,
+    store_cached_pixmap,
+    store_cover_file,
+)
+from network.station_manager import StationManager
 from network.ws_client import NowPlayingWS
+from ui.about_dialog import AboutDialog
+from ui.close_dialog import CloseConfirmDialog
 from ui.custom_titlebar import CustomTitleBar, install_size_grip
 from ui.dev_console import DevConsole
-from ui.settings_dialog import SettingsDialog
+from ui.equalizer_popover import EqualizerPopover
+from ui.history_popover import SongHistoryPopover
+from ui.local_queue_dialog import LocalQueueDialog
+from ui.settings_dialog import SettingsDialog, SlidingStackedWidget
+from ui.themes.cyber_moe import (
+    PALETTE,
+    apply_theme_palette,
+    derive_accent_tokens,
+    get_cyber_moe_stylesheet,
+    resolve_theme_and_accent,
+)
 from ui.tray_manager import TrayManager
+from ui.update_dialog import UpdateDialog
+from ui.vector_icons import (
+    get_apple_music_icon,
+    get_copy_icon,
+    get_history_icon,
+    get_spotify_icon,
+    get_youtube_icon,
+)
+from ui.widgets.ambient_cover import (
+    AmbientCoverCard,
+    AnimatedTrackLabel,
+    FullBleedCanvas,
+    LiveEqualizerBadge,
+    TrackHoverGroup,
+)
+from ui.widgets.history_button import HistoryIconButton, LyricsButton, SleepIconButton
+from ui.widgets.lyrics_panel import LyricsPanel
+from ui.widgets.mini_hud import MINI_COVER_SIZE, MiniHud, MiniHudWindow, MiniIconButton
+from ui.widgets.playback_controls import PlaybackControls
+from ui.widgets.segmented_switch import SettingsIconButton
+from ui.widgets.sleep_timer_widget import SleepTimerWidget
+from ui.widgets.station_pill import StationPillButton
+from ui.widgets.status_footer import StatusFooter
+from ui.widgets.track_menu_button import TrackMenuChevronButton
 from ui.windows_titlebar import apply_windows_titlebar_dark_mode
 
 _IS_WIN32 = sys.platform == "win32"
+_IS_LINUX = sys.platform.startswith("linux")
+_MIN_WINDOW_HEIGHT = 700
+_MIN_WINDOW_HEIGHT_COMPACT = 592
 
 
-# Custom Progress Bar for Pixel-Perfect Fluidity
+# Custom Progress Bar with Scrubber Playhead, Gradient Fill & 60 FPS Play/Buffer Animation
 class SmoothProgressBar(QWidget):
+    seek_requested = pyqtSignal(float)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._value = 0
         self._max = 100
-        self._accent_color = QColor("#c2185b")  # Match app default accent color
-        self.setFixedHeight(4)
+        self._accent_color = QColor(PALETTE["accent"])
+        self._buffering_active = False
+        self._buffering_indeterminate = False
+        self._buffering_percent = 0
+        self._live_mode = False
+        self._seekable = False
+        self._is_dragging = False
+        self._press_ratio = 0.0
+        self._launch_progress = 1.0
+        self._pulse_ring = 1.0
+        self._shimmer_phase = 0.0
+        self._display_ratio: Optional[float] = None
+
+        self.setFixedHeight(16)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self._anim_timer = QTimer(self)
+        self._anim_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._anim_timer.setInterval(16)
+        self._anim_timer.timeout.connect(self._tick_anim)
 
     def setAccentColor(self, color_str):
         self._accent_color = QColor(color_str)
         self.update()
+
+    def refresh_theme(self) -> None:
+        self._accent_color = QColor(PALETTE["accent"])
+        self.update()
+
+    def _resolve_gradient_shades(self):
+        if self._accent_color.name().lower() == PALETTE["accent"].lower():
+            return QColor(PALETTE["accent_hover"]), QColor(PALETTE["accent_shimmer"])
+        derived = derive_accent_tokens(self._accent_color.name())
+        return QColor(derived["accent_hover"]), QColor(derived["accent_shimmer"])
 
     def setMaximum(self, val):
         self._max = max(1, val)
@@ -91,28 +280,278 @@ class SmoothProgressBar(QWidget):
 
     def setValue(self, val):
         if self._value != val:
+            old_ratio = max(0.0, min(1.0, self._value / max(1, self._max)))
             self._value = val
+            new_ratio = max(0.0, min(1.0, self._value / max(1, self._max)))
+            # Smoothly glide when the track position jumps (e.g. song or channel change)
+            if abs(new_ratio - old_ratio) > 0.03 and self.isVisible():
+                if self._display_ratio is None:
+                    self._display_ratio = old_ratio
+                if not self._anim_timer.isActive():
+                    self._anim_timer.start()
+            else:
+                self._display_ratio = new_ratio
             self.update()
 
     def value(self):
         return self._value
 
+    def trigger_play_launch(self) -> None:
+        """Trigger a 60 FPS sweep & glow pulse when Play is clicked."""
+        self._launch_progress = 0.0
+        self._pulse_ring = 0.0
+        if not self._anim_timer.isActive():
+            self._anim_timer.start()
+        self.update()
+
+    def set_buffering_active(self, active: bool) -> None:
+        self._buffering_active = bool(active)
+        if self._buffering_active:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+        self.update()
+
+    def set_buffering_indeterminate(self, indeterminate: bool) -> None:
+        self._buffering_indeterminate = bool(indeterminate)
+        if self._buffering_indeterminate and self._buffering_active:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+        self.update()
+
+    def set_buffering_percent(self, percent: int) -> None:
+        self._buffering_percent = max(0, min(100, int(percent)))
+        self.update()
+
+    def set_live_mode(self, live: bool) -> None:
+        self._live_mode = bool(live)
+        if self._live_mode:
+            if not self._anim_timer.isActive():
+                self._anim_timer.start()
+        self.update()
+
+    def is_live_mode(self) -> bool:
+        return bool(self._live_mode)
+
+    def set_seekable(self, seekable: bool) -> None:
+        self._seekable = bool(seekable)
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor if self._seekable else Qt.CursorShape.ArrowCursor
+        )
+        self.update()
+
+    def _ratio_from_x(self, x: float) -> float:
+        margin_x = 7.0
+        usable_w = max(1.0, float(self.width()) - 2 * margin_x)
+        return max(0.0, min(1.0, (x - margin_x) / usable_w))
+
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and a0.button() == Qt.MouseButton.LeftButton:
+            ratio = self._ratio_from_x(float(a0.position().x()))
+            self._press_ratio = ratio
+            self._is_dragging = True
+            self._display_ratio = ratio
+            self.setValue(int(ratio * self._max))
+            self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mousePressEvent(a0)
+
+    def mouseMoveEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and self._is_dragging:
+            ratio = self._ratio_from_x(float(a0.position().x()))
+            self._display_ratio = ratio
+            self.setValue(int(ratio * self._max))
+            self.update()
+            return
+        super().mouseMoveEvent(a0)
+
+    def mouseReleaseEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and self._seekable
+            and self._is_dragging
+            and a0.button() == Qt.MouseButton.LeftButton
+        ):
+            self._is_dragging = False
+            ratio = self._ratio_from_x(float(a0.position().x()))
+            if abs(ratio - self._press_ratio) > 0.002:
+                self._display_ratio = ratio
+                self.setValue(int(ratio * self._max))
+                self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mouseReleaseEvent(a0)
+
+    def _tick_anim(self) -> None:
+        still_running = False
+        if self._launch_progress < 1.0:
+            self._launch_progress = min(1.0, self._launch_progress + 0.055)
+            still_running = True
+        if self._pulse_ring < 1.0:
+            self._pulse_ring = min(1.0, self._pulse_ring + 0.045)
+            still_running = True
+        if self._buffering_active or self._live_mode:
+            phase_step = 0.016 if self._live_mode else 0.032
+            self._shimmer_phase = (self._shimmer_phase + phase_step) % 1.0
+            still_running = True
+        if self._display_ratio is not None:
+            target_r = max(0.0, min(1.0, self._value / max(1, self._max)))
+            diff_r = target_r - self._display_ratio
+            if abs(diff_r) > 0.004:
+                self._display_ratio += diff_r * 0.26
+                still_running = True
+            else:
+                self._display_ratio = target_r
+
+        if not still_running:
+            self._anim_timer.stop()
+        self.update()
+
     def paintEvent(self, a0):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Background track
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(200, 200, 200, 40))  # Translucent track
-        painter.drawRoundedRect(self.rect(), 2, 2)
+        w = float(self.width())
+        h = float(self.height())
+        track_h = 6.5
+        track_r = track_h / 2.0
+        track_y = (h - track_h) / 2.0
+        margin_x = 7.0
+        usable_w = max(1.0, w - 2 * margin_x)
 
-        # Progress chunk
+        # 1. Background track (slightly larger dark glass groove with subtle border)
+        track_rect = QRectF(margin_x, track_y, usable_w, track_h)
+        painter.setBrush(QColor(255, 255, 255, 36))
+        painter.setPen(QPen(QColor(255, 255, 255, 22), 0.8))
+        painter.drawRoundedRect(track_rect, track_r, track_r)
+
+        # Cubic-out easing for Play launch animation
+        launch_ease = 1.0 - ((1.0 - self._launch_progress) ** 3)
+        hover_col, shimmer_col = self._resolve_gradient_shades()
+
+        # 2. Buffering / Opening Shimmer Wave inside the main progress bar
+        if self._buffering_active and (
+            self._buffering_indeterminate or self._buffering_percent <= 0
+        ):
+            comet_w = max(44.0, usable_w * 0.34)
+            travel = usable_w + comet_w
+            cx = margin_x - comet_w + (self._shimmer_phase * travel)
+
+            painter.save()
+            clip_path = QPainterPath()
+            clip_path.addRoundedRect(track_rect, track_r, track_r)
+            painter.setClipPath(clip_path)
+
+            grad = QLinearGradient(cx, 0.0, cx + comet_w, 0.0)
+            c0 = QColor(self._accent_color)
+            c0.setAlpha(0)
+            c1 = QColor(hover_col)
+            c1.setAlpha(235)
+            c2 = QColor(self._accent_color)
+            c2.setAlpha(0)
+            grad.setColorAt(0.0, c0)
+            grad.setColorAt(0.5, c1)
+            grad.setColorAt(1.0, c2)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(grad)
+            painter.drawRect(QRectF(cx, track_y, comet_w, track_h))
+            painter.restore()
+            painter.end()
+            return
+
+        # 2b. Live Stream Ambient Wave (when duration is unknown / 0)
+        if self._live_mode and not self._buffering_active:
+            wave_w = max(55.0, usable_w * 0.40)
+            travel = usable_w + wave_w
+            cx = margin_x - wave_w + (self._shimmer_phase * travel)
+
+            painter.save()
+            clip_path = QPainterPath()
+            clip_path.addRoundedRect(track_rect, track_r, track_r)
+            painter.setClipPath(clip_path)
+
+            grad = QLinearGradient(cx, 0.0, cx + wave_w, 0.0)
+            c0 = QColor(self._accent_color)
+            c0.setAlpha(0)
+            c1 = QColor(self._accent_color)
+            c1.setAlpha(170)
+            c2 = QColor(shimmer_col)
+            c2.setAlpha(220)
+            c3 = QColor(self._accent_color)
+            c3.setAlpha(0)
+            grad.setColorAt(0.0, c0)
+            grad.setColorAt(0.35, c1)
+            grad.setColorAt(0.65, c2)
+            grad.setColorAt(1.0, c3)
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(grad)
+            painter.drawRect(QRectF(cx, track_y, wave_w, track_h))
+            painter.restore()
+            painter.end()
+            return
+
+        # 3. Determinate Progress Fill & Scrubber Playhead Dot
         if self._max > 0:
-            w = (self._value / self._max) * self.width()
-            if w > 0:
-                painter.setBrush(self._accent_color)
-                # Clamp width to widget width
-                painter.drawRoundedRect(0, 0, int(min(w, self.width())), self.height(), 2, 2)
+            if self._buffering_active and self._buffering_percent > 0:
+                raw_ratio = max(0.0, min(1.0, self._buffering_percent / 100.0))
+            elif self._display_ratio is not None:
+                raw_ratio = max(0.0, min(1.0, self._display_ratio))
+            else:
+                raw_ratio = max(0.0, min(1.0, self._value / self._max))
+
+            ratio = raw_ratio * launch_ease
+            fill_w = ratio * usable_w
+            if fill_w > 0:
+                grad = QLinearGradient(margin_x, 0, margin_x + fill_w, 0)
+                grad.setColorAt(0.0, self._accent_color)
+                grad.setColorAt(0.7, hover_col)
+                grad.setColorAt(1.0, shimmer_col)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(grad)
+                painter.drawRoundedRect(
+                    QRectF(margin_x, track_y, fill_w, track_h), track_r, track_r
+                )
+
+                # Launch shimmer highlight sweeping along the filled bar
+                if self._launch_progress < 1.0:
+                    sheen_x = margin_x + fill_w * launch_ease
+                    sheen_grad = QLinearGradient(sheen_x - 28.0, 0, sheen_x + 8.0, 0)
+                    sheen_grad.setColorAt(0.0, QColor(255, 255, 255, 0))
+                    sheen_grad.setColorAt(
+                        0.7, QColor(255, 255, 255, int(140 * (1.0 - self._launch_progress)))
+                    )
+                    sheen_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+                    painter.setBrush(sheen_grad)
+                    painter.drawRoundedRect(
+                        QRectF(margin_x, track_y, fill_w, track_h), track_r, track_r
+                    )
+
+            dot_x = margin_x + fill_w
+            dot_y = h / 2.0
+
+            # Expanding pulse ring when Play is clicked
+            if self._pulse_ring < 1.0:
+                ring_r = 5.4 + 7.5 * self._pulse_ring
+                ring_col = QColor(self._accent_color)
+                ring_col.setAlpha(int(170 * (1.0 - self._pulse_ring)))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(ring_col, 1.8))
+                painter.drawEllipse(QPointF(dot_x, dot_y), ring_r, ring_r)
+
+            # Soft ambient halo around playhead dot
+            halo_col = QColor(self._accent_color)
+            halo_col.setAlpha(68)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(halo_col)
+            painter.drawEllipse(QPointF(dot_x, dot_y), 7.2, 7.2)
+
+            # Scrubber playhead dot
+            painter.setBrush(QColor("#ffffff"))
+            painter.setPen(QPen(self._accent_color, 2.2))
+            painter.drawEllipse(QPointF(dot_x, dot_y), 5.2, 5.2)
+        painter.end()
 
 
 class ListenMoePlayer(QWidget):
@@ -133,6 +572,8 @@ class ListenMoePlayer(QWidget):
     cover_data_ready = pyqtSignal(str, bytes)
     # Marshal websocket metadata updates to the UI thread
     now_playing_event = pyqtSignal(str, str, object, object, object)
+    # Marshal audio backend player events to the UI thread
+    player_event = pyqtSignal(str, object)
 
     def __init__(self) -> None:
         super().__init__()
@@ -141,10 +582,14 @@ class ListenMoePlayer(QWidget):
         self._ui_paused: bool = False
         self._current_title: Optional[str] = None
         self._current_artist: Optional[str] = None
+        self._last_notified_track: Optional[str] = None
         self._current_duration_seconds: Optional[int] = None
         self._current_start_epoch: Optional[float] = None
         self._current_cover_ref: Optional[str] = None
         self._current_cover_url: Optional[str] = None
+        self._current_cover_bytes_digest: Optional[bytes] = None
+        self._current_local_cover_sig: Optional[tuple[str, str, int, int]] = None
+        self._current_cover_pixmap: Optional[QPixmap] = None
         self._cover_cache: Dict[str, QPixmap] = {}
         self._cover_download_lock = threading.Lock()
         self._cover_download_inflight: Set[str] = set()
@@ -152,10 +597,33 @@ class ListenMoePlayer(QWidget):
         self._sleep_remaining_sec = 0
         self._sleep_fadeout_sec = 15
         self._sleep_saved_volume: Optional[int] = None
+        self._dynamic_volume_factor: float = 1.0
+        self._dynamic_volume_app: str = ""
+        self.dynamic_volume: Optional[DynamicVolumeController] = None
+        self._from_tray_quit: bool = False
         self._clock_sync_offset = 0.0  # Difference between server time and local CPU clock
         self._retry_count = 0
         self._max_retries = 10
         self._retry_pending = False
+        self._closing: bool = False
+        self._station_switch_seq: int = 0
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self._on_retry_timer)
+        self._local_prompt_timer = QTimer(self)
+        self._local_prompt_timer.setSingleShot(True)
+        self._local_prompt_timer.timeout.connect(self._prompt_local_music_if_needed)
+        self._settings_dlg: Optional[SettingsDialog] = None
+        self._about_dialog: Optional[AboutDialog] = None
+        self.history_mgr = SongHistoryManager(max_entries=100, parent=self)
+        self._history_popover: Optional[SongHistoryPopover] = None
+        self._eq_popover: Optional[EqualizerPopover] = None
+        self.local_playlist = LocalPlaylistManager(self)
+        self._queue_dialog: Optional[LocalQueueDialog] = None
+        self._local_prompt_dialog: Optional[QDialog] = None
+        self.local_playlist.track_changed.connect(self._on_local_track_changed)
+        self.local_playlist.playback_ended.connect(self._on_local_playback_ended)
+        self.setAcceptDrops(True)
 
         # 1. Start initialization sequence
         self._init_settings_and_i18n()
@@ -169,8 +637,11 @@ class ListenMoePlayer(QWidget):
         self._init_footer_section()
         self._init_audio_backend()
         self._init_timers_and_console()
+        self._init_discord_presence()
         self._init_websocket()
         self._init_tray()
+        self._init_mini_hud()
+        self._init_system_media()
         self._init_extra_logic()
 
     # ------------------- Initialization Helpers -------------------
@@ -181,15 +652,41 @@ class ListenMoePlayer(QWidget):
         Sets up the language based on stored settings and initializes the logger.
         """
         self.settings = QSettings(ORG_NAME, APP_SETTINGS)
-        saved_lang = self.settings.value(KEY_LANG, "it")
-        self.i18n = I18n(saved_lang if saved_lang in ("it", "en") else "it")
+        saved_theme = str(self.settings.value(KEY_THEME, DEFAULT_THEME) or DEFAULT_THEME)
+        custom_on = self._get_bool(KEY_CUSTOM_ACCENT_ENABLED, False)
+        saved_accent = str(self.settings.value(KEY_CUSTOM_ACCENT, "") or "").strip()
+        apply_theme_palette(
+            saved_theme,
+            custom_accent=saved_accent if (custom_on and saved_accent) else None,
+        )
+        saved_lang = self.settings.value(KEY_LANG, None)
+        if saved_lang not in ("it", "en"):
+            from PyQt6.QtCore import QLocale
+
+            sys_lang = QLocale.system().name().lower()
+            saved_lang = "it" if sys_lang.startswith("it") else "en"
+        self.i18n = I18n(saved_lang)
+        install_qt_translator(QApplication.instance(), self.i18n.lang)
         self._lang_map = {"Italiano": "it", "English": "en"}
         self.log = get_logger("KikuMoe")
         self._sync_clock_with_server()
 
-    def _sync_clock_with_server(self):
+    def _sync_clock_with_server(self) -> None:
+        """Schedule asynchronous clock skew sync with LISTEN.moe off the UI thread."""
+        try:
+            threading.Thread(
+                target=self._sync_clock_worker,
+                name="ClockSyncWorker",
+                daemon=True,
+            ).start()
+        except Exception:
+            self._clock_sync_offset = 0.0
+
+    def _sync_clock_worker(self) -> None:
         """Fetches the current server time from LISTEN.moe to calculate clock skew."""
         try:
+            if getattr(self, "_closing", False):
+                return
             # We use a HEAD request to the main page which is faster
             # and guaranteed to have a Date header
             req = urllib.request.Request("https://listen.moe/", method="HEAD")
@@ -199,6 +696,8 @@ class ListenMoePlayer(QWidget):
             except Exception:
                 pass
             with urllib.request.urlopen(req, timeout=5, context=ssl_ctx) as res:
+                if getattr(self, "_closing", False):
+                    return
                 server_date_str = res.headers.get("Date")
                 if server_date_str:
                     server_dt = email.utils.parsedate_to_datetime(server_date_str)
@@ -214,13 +713,15 @@ class ListenMoePlayer(QWidget):
                         f"[UI] Clock sync performed. Server offset: {self._clock_sync_offset:+.2f}s"
                     )
         except Exception as e:
-            self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
+            if not getattr(self, "_closing", False):
+                self.log.warning(f"[UI] Clock sync failed: {str(e)}. Using local clock.")
             self._clock_sync_offset = 0.0
 
     def _init_icons(self):
         """Load and prepare application icons for window and tray."""
         try:
             icon_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icons")
+            self._icon_dir = icon_dir
             style = self.style() or QApplication.style()
             sp = QStyle.StandardPixmap
 
@@ -255,7 +756,7 @@ class ListenMoePlayer(QWidget):
             self._icon_channel = self._icon_channel_raw
             self._icon_codec = self._icon_codec_raw
             self._icon_quit = self._icon_quit_raw
-            self._icon_app = self._icon_app_raw
+            self._icon_app = self._make_icon_square(self._icon_app_raw)
             self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
 
         except Exception as e:
@@ -291,20 +792,27 @@ class ListenMoePlayer(QWidget):
             )
             self._icon_app_tray = self._icon_app
 
+    def _effective_min_window_height(self) -> int:
+        sleep_w = getattr(self, "sleep_timer_widget", None)
+        is_visible = (
+            not sleep_w.isHidden()
+            if sleep_w is not None
+            else self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
+        )
+        return _MIN_WINDOW_HEIGHT if is_visible else _MIN_WINDOW_HEIGHT_COMPACT
+
     def _init_ui_base(self):
         """
         Sets up the basic window properties such as title, icon, geometry, and main layout.
         Also initializes the custom title bar behavior (if applicable).
         """
-        # Keep Windows' native frame/title bar; retain custom chrome on Linux.
-        if _IS_WIN32:
-            self.setWindowFlags(Qt.WindowType.Window)
-        else:
-            self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        # Use custom Cyber-Moe title bar with logo on all platforms (Windows & Linux)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
-        fixed_w, fixed_h = 500, 620 + (0 if _IS_WIN32 else CustomTitleBar.HEIGHT)
-        self.setMinimumSize(fixed_w, fixed_h)
+        fixed_w, fixed_h = 420, self._effective_min_window_height()
+        self.setMinimumSize(380, fixed_h)
         self.resize(fixed_w, fixed_h)
+        self.setObjectName("mainWindowRoot")
         self._apply_window_title("")
         try:
             if hasattr(self, "_icon_app") and not self._icon_app.isNull():
@@ -315,11 +823,13 @@ class ListenMoePlayer(QWidget):
             geom = self.settings.value(KEY_WINDOW_GEOMETRY)
             if geom:
                 self.restoreGeometry(geom)
+                if self.height() < fixed_h:
+                    self.resize(self.width(), fixed_h)
             else:
                 self.resize(fixed_w, fixed_h)
 
             # --- Branding Colors ---
-            self.COLOR_ACCENT = "#c2185b"  # Magenta from KikuMoe Logo
+            self.COLOR_ACCENT = PALETTE["accent"]
         except Exception:
             self.resize(fixed_w, fixed_h)
 
@@ -329,132 +839,300 @@ class ListenMoePlayer(QWidget):
         self._root_layout.setSpacing(0)
         self.setLayout(self._root_layout)
 
-        # Windows uses the native title bar and resize frame.
-        self._title_bar = None
-        if not _IS_WIN32:
-            self._title_bar = CustomTitleBar(self, icon=getattr(self, "_icon_app", None))
-            self._root_layout.addWidget(self._title_bar)
-            install_size_grip(self)
+        # Full-bleed dynamic blurred cover canvas (covers the entire window including title bar)
+        self._content_widget = FullBleedCanvas()
+        self._content_widget.setObjectName("mainWindowRoot")
+        self._content_widget.set_ambient_enabled(
+            self._get_bool(KEY_AMBIENT_MODE_ENABLED, DEFAULT_AMBIENT_MODE_ENABLED)
+        )
+        self._canvas_outer_layout = QVBoxLayout(self._content_widget)
+        self._canvas_outer_layout.setContentsMargins(0, 0, 0, 0)
+        self._canvas_outer_layout.setSpacing(0)
 
-        # Content layout: regular inner spacing for the rest of the UI
-        self._content_widget = QWidget()
-        self._layout = QVBoxLayout(self._content_widget)
-        self._layout.setContentsMargins(8, 8, 8, 16)
-        self._layout.setSpacing(8)
+        # Custom Cyber-Moe Translucent Title Bar inside the blurred canvas
+        self._title_bar = CustomTitleBar(
+            self, icon=getattr(self, "_icon_app", None), i18n=self.i18n
+        )
+        self._canvas_outer_layout.addWidget(self._title_bar)
+
+        self._body_container = QWidget()
+        self._outer_body_layout = QVBoxLayout(self._body_container)
+        self._outer_body_layout.setContentsMargins(16, 10, 16, 10)
+        self._outer_body_layout.setSpacing(7)
+
+        self._view_stack = SlidingStackedWidget()
+        self._player_stage = QWidget()
+        self._player_stage_outer = QVBoxLayout(self._player_stage)
+        self._player_stage_outer.setContentsMargins(0, 0, 0, 0)
+        self._player_stage_outer.setSpacing(0)
+        self._stage_outer_top_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
+        )
+        self._player_stage_outer.addSpacerItem(self._stage_outer_top_spacer)
+
+        self._stage_column = QWidget()
+        self._stage_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._layout = QVBoxLayout(self._stage_column)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(7)
+        self._player_stage_outer.addWidget(self._stage_column)
+        self._stage_outer_bottom_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
+        )
+        self._player_stage_outer.addSpacerItem(self._stage_outer_bottom_spacer)
+        self._footer_dock_spacer: QSpacerItem | None = None
+        self._stage_mode_hero: bool | None = None
+        self._stage_hero_blend = 0.0
+        self._stage_hero_anim = QVariantAnimation(self)
+        self._stage_hero_anim.setDuration(220)
+        self._stage_hero_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._stage_hero_anim.valueChanged.connect(self._on_stage_hero_anim_changed)
+        self._stage_hero_anim.finished.connect(self._on_stage_hero_anim_finished)
+        self._player_stage.installEventFilter(self)
+        self._stage_column.installEventFilter(self)
+        self._view_stack.addWidget(self._player_stage)
+
+        self._canvas_outer_layout.addWidget(self._body_container, 1)
+
         self._root_layout.addWidget(self._content_widget)
+        install_size_grip(self)
 
     def _init_header_section(self):
         """
-        Creates and adds the header section components to the UI, including
-        the channel logo, source indicators, and current broadcast information.
+        Creates and adds the station sub-header, framed artwork showcase, and track stage.
+        The J-POP / K-POP switch is only visible when the active station is 'listenmoe'.
         """
-        self.settings_header_bar = QWidget()
-        self.settings_header_bar.setObjectName("settingsHeaderBar")
-        self.settings_header_bar.setFixedHeight(30)
-        self.menu_bar_layout = QHBoxLayout(self.settings_header_bar)
-        self.menu_bar_layout.setContentsMargins(3, 2, 10, 2)
-        self.menu_bar_layout.setSpacing(6)
+        self._current_radio_provider = "listenmoe"
 
-        # Settings button in menu style at the very top (under the app bar)
-        self.settings_button = QPushButton(self.i18n.t("settings_button"))
-        self.settings_button.setObjectName("menuButton")
-        self.settings_button.setFixedHeight(24)
+        # 1. Sub-Header HUD: [LIVE Badge] <-> [Station Cyber-Pill] <-> [Settings]
+        top_bar = QWidget()
+        top_bar_layout = QHBoxLayout(top_bar)
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        top_bar_layout.setSpacing(6)
+
+        left_wing = QWidget()
+        left_wing.setFixedWidth(108)
+        left_wing_layout = QHBoxLayout(left_wing)
+        left_wing_layout.setContentsMargins(0, 0, 0, 0)
+        left_wing_layout.setSpacing(6)
+
+        self.live_badge = LiveEqualizerBadge()
+        self.sleep_button = SleepIconButton()
+        self.sleep_button.setObjectName("sleepToggleButton")
+        self.sleep_button.setToolTip(self.i18n.t("tt_sleep_timer"))
+        self.sleep_button.setAccessibleName(self.i18n.t("sleep_timer"))
+        self.sleep_button.clicked.connect(self._on_sleep_toggle_clicked)
+        left_wing_layout.addWidget(self.live_badge)
+        left_wing_layout.addWidget(self.sleep_button)
+        left_wing_layout.addStretch(1)
+
+        # Keep brand_label attribute for backward compatibility (displayed in CustomTitleBar)
+        self.brand_label = QLabel("KIKUMOE")
+        self.brand_label.setVisible(False)
+
+        # Center HUD: Centered Cyber-Pill Station Selector
+        center_hud = QWidget()
+        center_hud_layout = QHBoxLayout(center_hud)
+        center_hud_layout.setContentsMargins(0, 0, 0, 0)
+        center_hud_layout.setSpacing(0)
+
+        saved_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        saved_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+        self._current_radio_provider = saved_station
+
+        self.station_pill = StationPillButton(
+            parent=self,
+            initial_station=saved_station,
+            initial_channel=saved_channel,
+            icon_dir=getattr(self, "_icon_dir", None),
+            i18n=self.i18n,
+        )
+        self.station_pill.station_selected.connect(self._on_station_pill_selected)
+        self.channel_switch = None
+
+        center_hud_layout.addStretch(1)
+        center_hud_layout.addWidget(self.station_pill)
+        center_hud_layout.addStretch(1)
+
+        right_wing = QWidget()
+        right_wing.setFixedWidth(108)
+        right_wing_layout = QHBoxLayout(right_wing)
+        right_wing_layout.setContentsMargins(0, 0, 0, 0)
+        right_wing_layout.setSpacing(6)
+
+        self.history_button = HistoryIconButton(self)
+        self.history_button.setToolTip(self.i18n.t("history_button"))
+        self.history_button.clicked.connect(self.toggle_history_popover)
+
+        self.lyrics_button = LyricsButton()
+        self.lyrics_button.setObjectName("lyricsButton")
+        self.lyrics_button.setToolTip(self.i18n.t("lyrics_button"))
+        self.lyrics_button.setAccessibleName(self.i18n.t("lyrics_button"))
+        self.lyrics_button.toggled.connect(self._toggle_lyrics)
+
+        self.settings_button = SettingsIconButton()
+        self.settings_button.setToolTip(f"{self.i18n.t('settings_button')} (Ctrl+,)")
         self.settings_button.clicked.connect(self.open_settings)
 
-        self.menu_bar_layout.addWidget(self.settings_button)
-        self.menu_bar_layout.addStretch(1)
-        # 1. Settings header at the very top (under the Windows title bar)
-        if hasattr(self, "_root_layout"):
-            # The custom title bar occupies index 0 only on Linux.
-            self._root_layout.insertWidget(0 if _IS_WIN32 else 1, self.settings_header_bar)
-        else:
-            self._layout.addWidget(self.settings_header_bar)
+        right_wing_layout.addStretch(1)
+        right_wing_layout.addWidget(self.lyrics_button)
+        right_wing_layout.addWidget(self.history_button)
+        right_wing_layout.addWidget(self.settings_button)
 
-        # 2. Header Label (Title)
-        self.label = QLabel(self.i18n.t("header").format(channel="J-POP", format="Vorbis"))
-        self.label.setObjectName("headerLabel")
-        self.label.setStyleSheet("font-size: 16px; font-weight: 600;")
-        # Hidden in main UI: channel/format are already shown in the metadata row below.
+        top_bar_layout.addWidget(left_wing)
+        top_bar_layout.addWidget(center_hud, 1)
+        top_bar_layout.addWidget(right_wing)
+        self._outer_body_layout.addWidget(top_bar)
+        self._outer_body_layout.addWidget(self._view_stack, 1)
+
+        # Backward compatibility placeholders
+        self.settings_header_bar = top_bar
+        self.label = QLabel(self.i18n.t("header").format(channel="J-POP", format="Vorbis"), self)
         self.label.setVisible(False)
-
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("status_label_val")
+        self.status_label = QLabel("", self)
         self.status_label.setVisible(False)
-
-        self.session_label = QLabel("")
-        self.session_label.setObjectName("sessionLabel")
-        self.session_label.setVisible(False)
-
-        self.sleep_label = QLabel("")
-        self.sleep_label.setObjectName("sleepLabel")
+        self.sleep_label = QLabel("", self)
         self.sleep_label.setVisible(False)
-        self._layout.addWidget(self.sleep_label)
 
-        self.media_ambient_block = QWidget()
-        self.media_ambient_block.setObjectName("mediaAmbientBlock")
-        self.media_ambient_block.setMinimumHeight(240)
-        self.media_stack = QStackedLayout(self.media_ambient_block)
-        self.media_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        self.media_stack.setContentsMargins(0, 0, 0, 0)
+        # 2. Central Artwork Hero Showcase
+        self._album_cover_size = 180
+        self.ambient_cover = AmbientCoverCard(cover_size=self._album_cover_size)
+        viz_enabled = self._get_bool(KEY_VISUALIZER_ENABLED, DEFAULT_VISUALIZER_ENABLED)
+        self.ambient_cover.set_visualizer_enabled(viz_enabled)
+        self.ambient_cover.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.ambient_cover.customContextMenuRequested.connect(self._show_track_context_menu)
+        self._artwork_row = QHBoxLayout()
+        self._artwork_row.setSpacing(10)
+        self._artwork_row.addWidget(self.ambient_cover, 1)
+        self.lyrics_panel = LyricsPanel()
+        self.lyrics_panel.hide()
+        self._artwork_row.addWidget(self.lyrics_panel, 1)
+        self._layout.addLayout(self._artwork_row)
+        self.lyrics_provider = LyricsProvider(self)
+        self.lyrics_provider.finished.connect(self._on_lyrics_result)
+        self._lyrics_track = None
+        self._sync_lyrics_settings()
+        self._lyrics_original_width = None
+        self._lyrics_effect = QGraphicsOpacityEffect(self.lyrics_panel)
+        self.lyrics_panel.setGraphicsEffect(self._lyrics_effect)
+        self._lyrics_effect.setOpacity(0.0)
+        self._lyrics_transition = QVariantAnimation(self)
+        self._lyrics_transition.setDuration(280)
+        self._lyrics_transition.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._lyrics_transition.valueChanged.connect(self._animate_lyrics_transition)
+        self._lyrics_transition.finished.connect(self._finish_lyrics_transition)
+        self._lyrics_transition_values = None
 
-        self.media_ambient_bg = QLabel("")
-        self.media_ambient_bg.setObjectName("mediaAmbientBackground")
-        self.media_ambient_bg.setScaledContents(True)
-        self.media_stack.addWidget(self.media_ambient_bg)
-
-        self.media_foreground = QWidget()
-        self.media_foreground.setObjectName("mediaForeground")
-        media_block = QVBoxLayout(self.media_foreground)
-        media_block.setContentsMargins(8, 8, 8, 8)
-        media_block.setSpacing(2)
-        self.media_stack.addWidget(self.media_foreground)
-        self.media_stack.setCurrentWidget(self.media_foreground)
-
-        self._album_cover_size = 190
-        cover_row = QHBoxLayout()
-        cover_row.setContentsMargins(0, 0, 0, 0)
-        cover_row.addStretch(1)
+        # Hidden legacy compatibility labels
+        self.hero_card = QWidget()
+        self.hero_card.setVisible(False)
         self.album_cover_label = QLabel("")
-        self.album_cover_label.setObjectName("albumCoverLabel")
-        self.album_cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.album_cover_label.setFixedSize(self._album_cover_size, self._album_cover_size)
-        cover_row.addWidget(self.album_cover_label)
-        cover_row.addStretch(1)
-        media_block.addLayout(cover_row)
+        self.album_cover_label.setVisible(False)
+        self.media_ambient_block = QWidget()
+        self.media_ambient_block.setVisible(False)
+        self.media_ambient_bg = QLabel("")
+        self.media_ambient_bg.setVisible(False)
 
-        song_info_row = QHBoxLayout()
-        song_info_row.setContentsMargins(0, 0, 0, 0)
-        song_info_row.setSpacing(6)
-        self.song_time_left_spacer = QLabel("")
-        self.song_time_left_spacer.setFixedWidth(68)
-        self.song_time_left_spacer.setStyleSheet("background: transparent;")
-        self.song_time_label = QLabel("--:--")
-        self.song_time_label.setObjectName("songTimeLabel")
-        self.song_time_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+        # 3. Track Info (Title & Artist with fixed vertical policy so no vertical stretch)
+        track_box = QVBoxLayout()
+        track_box.setContentsMargins(6, 2, 6, 0)
+        track_box.setSpacing(0)
+
+        self.now_playing_title = AnimatedTrackLabel(
+            "–",
+            font_px=16,
+            font_weight=800,
+            text_color=PALETTE["text_primary"],
+            interactive=True,
         )
-        self.song_time_label.setContentsMargins(0, 8, 0, 0)
-        self.song_time_label.setFixedWidth(68)
-        self.now_playing_label = QLabel("–")
-        self.now_playing_label.setObjectName("nowPlayingLabel")
-        self.now_playing_label.setStyleSheet("font-size: 14px; font-weight: 500;")
-        self.now_playing_label.setWordWrap(True)
-        self.now_playing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        song_info_row.addWidget(self.song_time_left_spacer)
-        song_info_row.addWidget(self.now_playing_label, 1)
-        song_info_row.addWidget(self.song_time_label)
-        media_block.addLayout(song_info_row)
-        self._layout.addWidget(self.media_ambient_block)
+        self.now_playing_title.setObjectName("songTitleLabel")
+        self.now_playing_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.now_playing_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        # Song Progress Bar (Dynamic custom widget for smoothness)
+        self.track_menu_btn = TrackMenuChevronButton(self.now_playing_title)
+        self.track_menu_btn.setToolTip(self.i18n.t("search_menu_tooltip"))
+        self.track_menu_btn.clicked.connect(self._on_track_labels_clicked)
+        self.now_playing_title.attach_chevron_button(self.track_menu_btn)
+        self.now_playing_title.clicked.connect(self._on_track_labels_clicked)
+
+        self.now_playing_title.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.now_playing_title.customContextMenuRequested.connect(self._show_track_context_menu)
+
+        self.now_playing_artist = AnimatedTrackLabel(
+            "",
+            font_px=13,
+            font_weight=600,
+            text_color=PALETTE["text_secondary"],
+            interactive=True,
+        )
+        self.now_playing_artist.setObjectName("songArtistLabel")
+        self.now_playing_artist.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.now_playing_artist.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.now_playing_artist.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.now_playing_artist.customContextMenuRequested.connect(self._show_track_context_menu)
+        self.now_playing_artist.clicked.connect(self._on_track_labels_clicked)
+
+        self.track_hover_group = TrackHoverGroup(self.now_playing_title, self.now_playing_artist)
+        self.track_hover_group.clicked.connect(self._on_track_labels_clicked)
+        self.track_menu_btn.pressed.connect(self.track_hover_group.animate_click)
+        track_box.addWidget(self.track_hover_group)
+        self._layout.addLayout(track_box)
+
+        # Legacy label
+        self.now_playing_label = QLabel("–")
+        self.now_playing_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.now_playing_label.setVisible(False)
+
+        # 4. Scrubber Progress bar & dual-timestamp HUD row
+        prog_box = QVBoxLayout()
+        prog_box.setContentsMargins(6, 2, 6, 2)
+        prog_box.setSpacing(1)
+
         self.song_progress = SmoothProgressBar()
-        self.song_progress.setVisible(False)
+        self.song_progress.setVisible(True)
         self.song_progress.setObjectName("songProgressBar")
-        self._layout.addWidget(self.song_progress)
+        self.song_progress.seek_requested.connect(self._on_seek_requested)
+        prog_box.addWidget(self.song_progress)
+
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(4, 0, 4, 0)
+        self.song_time_left_spacer = QLabel("")
+        self.song_time_left_spacer.setVisible(False)
+
+        self.song_elapsed_label = QLabel("0:00")
+        self.song_elapsed_label.setObjectName("timeDisplayLabel")
+        self.song_elapsed_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed
+        )
+
+        initial_st = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        cfg_st = get_station_config(initial_st)
+        initial_tag = f"{str(cfg_st.get('name', 'LISTEN.MOE')).upper()} · STREAM"
+        self.stream_tag_label = QLabel(initial_tag)
+        self.stream_tag_label.setObjectName("sectionTitleLabel")
+        self.stream_tag_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.stream_tag_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.song_time_label = QLabel("--:--")
+        self.song_time_label.setObjectName("timeDisplayLabel")
+        self.song_time_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.song_time_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self._refresh_time_row_styles()
+
+        time_row.addWidget(self.song_elapsed_label)
+        time_row.addWidget(self.stream_tag_label, 1)
+        time_row.addWidget(self.song_time_label)
+        prog_box.addLayout(time_row)
+
+        self._layout.addLayout(prog_box)
 
         # Connections for signals that update these labels
         try:
-            self.now_playing_changed.connect(self.now_playing_label.setText)
+            self.now_playing_changed.connect(self._on_now_playing_text_changed)
             self.status_changed.connect(self._set_status_text)
             self.label_refresh.connect(self.update_now_playing_label)
             self.cover_data_ready.connect(self._on_album_cover_data_ready)
@@ -463,208 +1141,356 @@ class ListenMoePlayer(QWidget):
             pass
         self._set_album_cover_pixmap(None)
 
+    def _refresh_time_row_styles(self) -> None:
+        if hasattr(self, "song_elapsed_label") and self.song_elapsed_label is not None:
+            self.song_elapsed_label.setStyleSheet(
+                f"color: {PALETTE['accent_hover']}; font-size: 11px; font-weight: 700;"
+            )
+        if hasattr(self, "stream_tag_label") and self.stream_tag_label is not None:
+            self.stream_tag_label.setStyleSheet(
+                f"font-size: 9px; letter-spacing: 1.5px; color: {PALETTE['text_muted']};"
+            )
+        if hasattr(self, "song_time_label") and self.song_time_label is not None:
+            self.song_time_label.setStyleSheet(
+                f"color: {PALETTE['text_secondary']}; font-size: 11px; font-weight: 700;"
+            )
+
+    def _toggle_lyrics(self, enabled):
+        was_running = self._lyrics_transition.state() == QVariantAnimation.State.Running
+        self._lyrics_transition.stop()
+        start_width = self.width()
+        start_cover = self.ambient_cover.width()
+        start_panel = self.lyrics_panel.width() if not self.lyrics_panel.isHidden() else 0
+        target_width = start_width
+        if enabled:
+            if self._lyrics_original_width is None and start_width < 650 and not self.isMaximized():
+                self._lyrics_original_width = start_width
+            if self._lyrics_original_width is not None:
+                target_width = max(start_width, 650)
+            self.ambient_cover.setMinimumWidth(0)
+            self.lyrics_panel.setMinimumWidth(0)
+            self.lyrics_panel.setMaximumWidth(start_panel)
+            self.lyrics_panel.show()
+            self._refresh_lyrics(force=True)
+        else:
+            self.lyrics_provider.cancel()
+            self._lyrics_track = None
+            if self._lyrics_original_width is not None and (start_width == 650 or was_running):
+                target_width = self._lyrics_original_width
+            self.lyrics_panel.skeleton.timer.stop()
+            self.ambient_cover.setMinimumWidth(0)
+            self.lyrics_panel.setMinimumWidth(0)
+
+        stage_max_w = 980 if enabled else 760
+        stage_avail_w = min(target_width - 32, stage_max_w)
+        start_stage_w = (
+            self._stage_column.width()
+            if hasattr(self, "_stage_column") and self._stage_column.width() > 0
+            else min(start_width - 32, 760 if enabled else 980)
+        )
+        end_stage_w = stage_avail_w
+        target_cover = self._album_cover_size + 84 if enabled else max(222, stage_avail_w)
+        target_panel = max(190, stage_avail_w - target_cover - 10) if enabled else 0
+        self._lyrics_transition_values = (
+            start_width,
+            target_width,
+            start_stage_w,
+            end_stage_w,
+            start_cover,
+            target_cover,
+            start_panel,
+            target_panel,
+            self._lyrics_effect.opacity(),
+            1.0 if enabled else 0.0,
+            enabled,
+        )
+        self._lyrics_transition.setStartValue(0.0)
+        self._lyrics_transition.setEndValue(1.0)
+        self._lyrics_transition.start()
+
+    def _animate_lyrics_transition(self, progress):
+        values = self._lyrics_transition_values
+        if not values:
+            return
+        (
+            start_width,
+            end_width,
+            start_stage_w,
+            end_stage_w,
+            start_cover,
+            end_cover,
+            start_panel,
+            end_panel,
+            start_op,
+            end_op,
+            _,
+        ) = values
+        cur_win_w = (
+            round(start_width + (end_width - start_width) * progress)
+            if start_width != end_width
+            else self.width()
+        )
+        cur_stage_w = round(start_stage_w + (end_stage_w - start_stage_w) * progress)
+        outer = getattr(self, "_player_stage_outer", None)
+        if outer is not None:
+            avail_w = max(340, cur_win_w - 32)
+            side_pad = max(0, (avail_w - cur_stage_w) // 2)
+            _, _, _, cur_bottom = outer.getContentsMargins()
+            outer.setContentsMargins(side_pad, 0, side_pad, cur_bottom)
+        self.ambient_cover.setMaximumWidth(
+            round(start_cover + (end_cover - start_cover) * progress)
+        )
+        self.lyrics_panel.setMaximumWidth(round(start_panel + (end_panel - start_panel) * progress))
+        self._lyrics_effect.setOpacity(start_op + (end_op - start_op) * progress)
+        if start_width != end_width:
+            self.resize(cur_win_w, self.height())
+        self._sync_status_footer_geometry()
+
+    def _finish_lyrics_transition(self):
+        if not self._lyrics_transition_values:
+            return
+        enabled = self._lyrics_transition_values[-1]
+        self._lyrics_transition_values = None
+        if not enabled:
+            self.lyrics_panel.hide()
+            self.ambient_cover.setMinimumWidth(0)
+            self.ambient_cover.setMaximumWidth(16777215)
+            self._lyrics_original_width = None
+        else:
+            cover_w = self._album_cover_size + 84
+            self.ambient_cover.setMinimumWidth(cover_w)
+            self.ambient_cover.setMaximumWidth(cover_w)
+        self.lyrics_panel.setMaximumWidth(16777215)
+        self.lyrics_panel.setMinimumWidth(190)
+        if enabled:
+            self.lyrics_panel._schedule_recenter()
+        self._update_responsive_stage()
+
+    def _show_local_track_lyrics(self, track: Optional[LocalTrackInfo]) -> bool:
+        """Render embedded or sidecar local track lyrics; return False if none exist."""
+        if not track or not track.lyrics:
+            return False
+        self.lyrics_provider.cancel()
+        parsed = parse_lrc(track.lyrics)
+        badge = "LOCAL LRC" if parsed else self.i18n.t("lyrics_plain")
+        rec = {
+            "trackName": track.title,
+            "artistName": track.artist,
+            "albumName": track.album,
+            "duration": track.duration_seconds,
+            "instrumental": False,
+            "plainLyrics": track.lyrics,
+            "syncedLyrics": track.lyrics if parsed else "",
+        }
+        self._lyrics_track = (
+            track.title,
+            track.artist,
+            self._current_duration_seconds or 0,
+        )
+        self.lyrics_panel.show_record(rec, badge, "")
+        pos = (
+            self._get_local_playback_seconds()
+            if hasattr(self, "player") and self.player and self.player.is_playing()
+            else 0.0
+        )
+        self.lyrics_panel.set_position(pos)
+        return True
+
+    def _sync_lyrics_settings(self) -> None:
+        provider = getattr(self, "lyrics_provider", None)
+        if provider is None or not hasattr(self, "settings") or self.settings is None:
+            return
+        mode = str(
+            self.settings.value(KEY_LYRICS_PROVIDER, DEFAULT_LYRICS_PROVIDER)
+            or DEFAULT_LYRICS_PROVIDER
+        )
+        api_key = str(self.settings.value(KEY_BETTERLYRICS_API_KEY, "") or "").strip()
+        changed = provider.configure(mode, api_key)
+        if (
+            changed
+            and hasattr(self, "lyrics_button")
+            and self.lyrics_button is not None
+            and self.lyrics_button.isChecked()
+        ):
+            self._lyrics_track = None
+            self._refresh_lyrics(force=True)
+
+    def _refresh_lyrics(self, force=False):
+        if not self.lyrics_button.isChecked():
+            return
+        album = ""
+        if self._is_local_mode() and hasattr(self, "local_playlist"):
+            curr = self.local_playlist.get_current_track()
+            if self._show_local_track_lyrics(curr):
+                return
+            if curr is not None:
+                album = str(getattr(curr, "album", "") or "").strip()
+        title = self._current_title or ""
+        artist = self._current_artist or ""
+        if title == self.i18n.t("unknown"):
+            title = ""
+        key = (title, artist, self._current_duration_seconds or 0, album)
+        if not force and key == self._lyrics_track:
+            return
+        self._lyrics_track = key
+        self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
+        if album:
+            self.lyrics_provider.search(title, artist, self._current_duration_seconds or 0, album)
+        else:
+            self.lyrics_provider.search(title, artist, self._current_duration_seconds or 0)
+
+    def _on_lyrics_result(self, record, status):
+        try:
+            if not self.lyrics_button.isChecked():
+                return
+            if status == "error":
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_error"))
+            elif not record:
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+            elif record.get("instrumental"):
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_instrumental"))
+            elif record.get("syncedLyrics") or record.get("plainLyrics"):
+                no_timing = (
+                    self._current_start_epoch is None or self._current_duration_seconds is None
+                )
+                note = self.i18n.t("lyrics_no_timing") if no_timing else ""
+                self.lyrics_panel.show_record(record, self.i18n.t("lyrics_plain"), note)
+                self._update_lyrics_position()
+            else:
+                self.lyrics_panel.show_message(self.i18n.t("lyrics_missing"))
+        except Exception as e:
+            self.log.debug(f"[UI] _on_lyrics_result failed: {e}")
+
+    def _update_lyrics_position(self):
+        if not self.lyrics_button.isChecked() or self._ui_paused:
+            return
+        if self._is_local_mode():
+            self.lyrics_panel.set_position(self._get_local_playback_seconds())
+            return
+        epoch = self._current_start_epoch
+        duration = self._current_duration_seconds
+        if epoch is None or duration is None:
+            return
+        now = time.time() + self._clock_sync_offset
+        elapsed = duration - (epoch - now) if duration > 0 else now - epoch
+        self.lyrics_panel.set_position(max(0.0, elapsed))
+
     def _init_meta_section(self):
-        """Restore Channel and Format information row."""
-        meta_row = QHBoxLayout()
-        meta_row.setContentsMargins(0, 0, 0, 0)
-        meta_row.setSpacing(8)
-
+        """Preserves channel and format attributes for backwards compatibility."""
         self.channel_label = QLabel(self.i18n.t("channel_label"))
-        if hasattr(self, "_icon_channel"):
-            self.channel_icon_label = QLabel()
-            self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
-
-        self.channel_value = QLabel(self.settings.value(KEY_CHANNEL, "J-POP"))
-        self.channel_value.setStyleSheet("font-weight: bold;")
-
+        self.channel_label.setVisible(False)
+        self.channel_value = QLabel(str(self.settings.value(KEY_CHANNEL, "J-POP")))
+        self.channel_value.setVisible(False)
         self.format_label = QLabel(self.i18n.t("format_label"))
-        if hasattr(self, "_icon_codec"):
-            self.format_icon_label = QLabel()
-            self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
-
-        self.format_value = QLabel(self.settings.value(KEY_FORMAT, "Vorbis"))
-        self.format_value.setStyleSheet("font-weight: bold;")
-
-        # Pack elements tightly: [Icon][Label][Value]
-        if hasattr(self, "channel_icon_label"):
-            meta_row.addWidget(self.channel_icon_label)
-        meta_row.addWidget(self.channel_label)
-        meta_row.addWidget(self.channel_value)
-
-        meta_row.addStretch(1)
-
-        if hasattr(self, "format_icon_label"):
-            meta_row.addWidget(self.format_icon_label)
-        meta_row.addWidget(self.format_label)
-        meta_row.addWidget(self.format_value)
-
-        # Set a small spacing specifically for this row to keep icons close to labels
-        meta_row.setSpacing(4)
-        self._layout.addLayout(meta_row)
+        self.format_label.setVisible(False)
+        self.format_value = QLabel(str(self.settings.value(KEY_FORMAT, "Vorbis")))
+        self.format_value.setVisible(False)
 
     def _init_controls_section(self):
         """
-        Sets up the primary playback controls (Play, Pause, Stop) and the
-        volume/mute management widgets.
+        Sets up modern Cyber-Moe PlaybackControls with hero circular play button,
+        stop, force stop, volume slider, dynamic speaker icon and autoplay.
         """
+        self.playback_controls = PlaybackControls(i18n=self.i18n)
 
-        # Main Playback Controls
-        # Row 1: Play (Priority 1)
-        play_row = QHBoxLayout()
-        self.play_button = QPushButton(self.i18n.t("play"))
-        self.play_button.setFixedHeight(40)
-        if hasattr(self, "_icon_play"):
-            self.play_button.setIcon(self._icon_play)
-        self.play_button.setIconSize(QSize(20, 20))
-        self.play_button.clicked.connect(self.play_stream)
-        play_row.addWidget(self.play_button)
-        self._layout.addLayout(play_row)
+        # Wire PlaybackControls signals
+        self.playback_controls.play_clicked.connect(self.play_stream)
+        self.playback_controls.pause_resume_clicked.connect(self.pause_resume)
+        self.playback_controls.stop_clicked.connect(self.stop_stream)
+        self.playback_controls.prev_clicked.connect(self.play_previous_track)
+        self.playback_controls.next_clicked.connect(self.play_next_track)
+        self.playback_controls.queue_clicked.connect(self.show_local_queue_dialog)
+        self.playback_controls.force_stop_clicked.connect(self.force_stop_all)
+        self.playback_controls.volume_changed.connect(self.change_volume)
+        self.playback_controls.mute_toggled.connect(self.toggle_mute)
+        self.playback_controls.autoplay_toggled.connect(self._on_autoplay_toggled)
+        self.playback_controls.eq_clicked.connect(self.toggle_eq_popover)
 
-        # Row 2: Pause and Stop (Priority 2)
-        secondary_controls_layout = QHBoxLayout()
-        secondary_controls_layout.setSpacing(12)
+        # Backward compatibility references
+        self.play_button = self.playback_controls.hero_play
+        self.pause_button = self.playback_controls.hero_play
+        self.stop_button = self.playback_controls.btn_stop
+        self.volume_slider = self.playback_controls.volume_slider
+        self.mute_button = self.playback_controls.speaker_btn
+        self.eq_button = self.playback_controls.eq_button
+        self.volume_value_label = self.playback_controls.volume_label
+        self.volume_label = QLabel("")
+        self.volume_label.setVisible(False)
+        self.autoplay_checkbox = self.playback_controls.chk_autoplay
 
-        self.pause_button = QPushButton(self.i18n.t("pause"))
-        self.pause_button.setFixedHeight(40)
-        if hasattr(self, "_icon_pause"):
-            self.pause_button.setIcon(self._icon_pause)
-        self.pause_button.setIconSize(QSize(20, 20))
-        self.pause_button.clicked.connect(self.pause_resume)
-
-        self.stop_button = QPushButton(self.i18n.t("stop"))
-        self.stop_button.setFixedHeight(40)
-        if hasattr(self, "_icon_stop"):
-            self.stop_button.setIcon(self._icon_stop)
-        self.stop_button.setIconSize(QSize(20, 20))
-        self.stop_button.clicked.connect(self.stop_stream)
-
-        secondary_controls_layout.addWidget(self.pause_button)
-        secondary_controls_layout.addWidget(self.stop_button)
-        self._layout.addLayout(secondary_controls_layout)
-
-        # Emergency "FORCE STOP" button under Pause/Stop row
-        self.force_stop_button = QPushButton("FORCE STOP")
-        if hasattr(self, "_icon_force_stop"):
-            self.force_stop_button.setIcon(self._icon_force_stop)
-            self.force_stop_button.setIconSize(QSize(16, 16))
-            # Spacing between icon and text (at least 2px)
-            self.force_stop_button.setStyleSheet(
-                "QPushButton { text-align: center; padding-left: 4px; }"
-            )
-        self.force_stop_button.clicked.connect(self.force_stop_all)
-        self._layout.addWidget(self.force_stop_button)
-
-        # Volume Controls
-        vol_row = QHBoxLayout()
-        self.volume_label = QLabel(self.i18n.t("volume"))
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
-
+        # Load initial values
         saved_vol = self.settings.value(KEY_VOLUME, 60)
         try:
-            self.volume_slider.setValue(int(saved_vol))
+            self.playback_controls.set_volume(int(saved_vol))
         except Exception:
-            self.volume_slider.setValue(60)
+            self.playback_controls.set_volume(60)
 
-        self.volume_slider.valueChanged.connect(self.change_volume)
+        self.playback_controls.set_autoplay(self._get_bool(KEY_AUTOPLAY, False))
+        self.playback_controls.set_autoplay_text(self.i18n.t("settings_autoplay"))
+        self.eq_button.set_eq_enabled(self._get_bool(KEY_EQ_ENABLED, DEFAULT_EQ_ENABLED))
 
-        self.mute_button = QPushButton(self.i18n.t("mute"))
-        self.mute_button.setCheckable(True)
-        self.mute_button.setFixedHeight(30)
-        self.mute_button.setIcon(self._icon_unmute)
-        self.mute_button.clicked.connect(self.toggle_mute)
-
-        self.volume_value_label = QLabel(f"{saved_vol}%")
-        self.volume_value_label.setFixedWidth(40)
-
-        # Autoplay Toggle (on main UI)
-        self.autoplay_checkbox = QCheckBox(self.i18n.t("settings_autoplay"))
-        self.autoplay_checkbox.setChecked(self._get_bool(KEY_AUTOPLAY, False))
-        self.autoplay_checkbox.toggled.connect(self._on_autoplay_toggled)
-
-        vol_row.addWidget(self.volume_label)
-        vol_row.addWidget(self.volume_slider)
-        vol_row.addWidget(self.volume_value_label)
-        vol_row.addWidget(self.mute_button)
-        vol_row.addWidget(self.autoplay_checkbox)
-        self._layout.addLayout(vol_row)
+        self._layout.addWidget(self.playback_controls)
 
     def _init_progress_section(self):
         """
-        Initializes the buffering progress bar and connects visual feedback signals
-        from the playback system to UI updates.
+        Routes buffering and opening visual feedback directly to SmoothProgressBar
+        (self.song_progress), keeping self.buffer_bar hidden off-layout only for
+        backward attribute compatibility.
         """
         self.buffer_bar = QProgressBar()
         self.buffer_bar.setRange(0, 100)
         self.buffer_bar.setVisible(False)
-        self._layout.addWidget(self.buffer_bar)
 
         try:
-            self.buffering_progress.connect(self.buffer_bar.setValue)
-            self.buffering_visible.connect(self.buffer_bar.setVisible)
-            self.buffering_indeterminate.connect(self._set_buffer_bar_indeterminate)
+            self.buffering_progress.connect(self.song_progress.set_buffering_percent)
+            self.buffering_visible.connect(self.song_progress.set_buffering_active)
+            self.buffering_indeterminate.connect(self.song_progress.set_buffering_indeterminate)
         except Exception:
             pass
 
     def _init_sleep_timer_section(self):
-        """Restore Sleep Timer UI controls."""
-        sleep_group_layout = QVBoxLayout()
-        sleep_group_layout.setSpacing(4)
+        """Initializes modern SleepTimerWidget with chip presets and live countdown."""
+        self.sleep_timer_widget = SleepTimerWidget(i18n=self.i18n)
+        self.sleep_timer_widget.start_requested.connect(self._on_sleep_start_requested)
+        self.sleep_timer_widget.cancel_requested.connect(self.sleep_cancel_clicked)
+        self.sleep_timer_widget.drawer_toggled.connect(self._on_sleep_drawer_toggled)
+        show_sleep = self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
+        self.sleep_timer_widget.setVisible(show_sleep)
+        if hasattr(self, "sleep_button"):
+            self.sleep_button.blockSignals(True)
+            self.sleep_button.setChecked(show_sleep)
+            self.sleep_button.blockSignals(False)
 
-        title_row = QHBoxLayout()
-        self.sleep_title = QLabel(self.i18n.t("sleep_timer"))
-        self.sleep_title.setStyleSheet("font-weight: bold; margin-top: 8px;")
-        title_row.addWidget(self.sleep_title)
-        title_row.addStretch(1)
-        sleep_group_layout.addLayout(title_row)
+        # Backward compatibility attributes
+        self.spin_sleep = self.sleep_timer_widget.spin_minutes
+        self.btn_sleep_start = self.sleep_timer_widget.btn_start
+        self.btn_sleep_cancel = self.sleep_timer_widget.btn_cancel
+        self.sleep_title = self.sleep_timer_widget.title_label
+        self.sleep_minutes_label = QLabel("")
+        self.sleep_minutes_label.setVisible(False)
 
-        controls_row = QHBoxLayout()
-        self.sleep_minutes_label = QLabel(self.i18n.t("sleep_minutes"))
-        self.spin_sleep = QSpinBox()
-        self.spin_sleep.setRange(1, 480)
         try:
-            self.spin_sleep.setValue(int(self.settings.value(KEY_SLEEP_MINUTES, 30)))
+            self.sleep_timer_widget.set_minutes(int(self.settings.value(KEY_SLEEP_MINUTES, 30)))
         except Exception:
-            self.spin_sleep.setValue(30)
+            self.sleep_timer_widget.set_minutes(30)
 
-        self.btn_sleep_start = QPushButton(self.i18n.t("sleep_start"))
-        self.btn_sleep_start.clicked.connect(self.sleep_start_clicked)
-
-        self.btn_sleep_cancel = QPushButton(self.i18n.t("sleep_cancel"))
-        self.btn_sleep_cancel.clicked.connect(self.sleep_cancel_clicked)
-
-        controls_row.addWidget(self.sleep_minutes_label)
-        controls_row.addWidget(self.spin_sleep)
-        controls_row.addWidget(self.btn_sleep_start)
-        controls_row.addWidget(self.btn_sleep_cancel)
-
-        # Ensure consistent heights for sleeper controls
-        for w in (self.spin_sleep, self.btn_sleep_start, self.btn_sleep_cancel):
-            w.setFixedHeight(30)
-
-        sleep_group_layout.addLayout(controls_row)
-
-        self._layout.addLayout(sleep_group_layout)
+        self._layout.addWidget(self.sleep_timer_widget)
+        self._footer_dock_spacer = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+        )
+        self._layout.addSpacerItem(self._footer_dock_spacer)
 
     def _init_footer_section(self):
-        """Add a bottom footer bar with the session timer."""
-        self.footer_bar = QWidget()
-        self.footer_bar.setObjectName("footerBar")
-        self.footer_bar.setFixedHeight(30)
+        """Initializes the StatusFooter showing audio backend, codec, and session timer."""
+        self.status_footer = StatusFooter(self._player_stage)
+        self.status_footer.raise_()
+        self.footer_bar = self.status_footer
+        self.session_label = self.status_footer.session_label
+        self.session_label.setText(self.i18n.t("session_timer", time="00:00"))
 
-        footer_layout = QHBoxLayout(self.footer_bar)
-        footer_layout.setContentsMargins(10, 2, 10, 2)
-        footer_layout.setSpacing(6)
-        footer_layout.addStretch(1)
-        if hasattr(self, "session_label"):
-            self.session_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.session_label.setText(self.i18n.t("session_timer", time="00:00"))
-            self.session_label.setVisible(True)
-            footer_layout.addWidget(self.session_label)
-        footer_layout.addStretch(1)
-
-        self._layout.addWidget(self.footer_bar)
-        self._layout.addStretch(1)
+        fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+        self.status_footer.set_format(fmt)
+        self._sync_status_footer_geometry()
 
     def _create_player(self, on_event):
         """
@@ -682,18 +1508,24 @@ class ListenMoePlayer(QWidget):
         except Exception:
             network_caching = 1000
 
+        player: Union[PlayerFFmpeg, PlayerMPV, PlayerVLC]
         if backend == "ffmpeg":
+            from audio.player_ffmpeg import PlayerFFmpeg as _PlayerFFmpeg
+
             self.log.info("[BACKEND] Using FFmpeg (user setting).")
-            player = PlayerFFmpeg(on_event=on_event)
+            player = _PlayerFFmpeg(on_event=on_event)
             if not player.is_ready():
                 self.log.error(
                     "[BACKEND] FFmpeg selected but unavailable: %s",
                     player.get_init_error() or "pyaudio / ffmpeg not ready",
                 )
+            self._sync_audio_tap(player)
             return player
         if backend == "mpv":
+            from audio.player_mpv import PlayerMPV as _PlayerMPV
+
             self.log.info("[BACKEND] Using MPV (user setting).")
-            player = PlayerMPV(on_event=on_event)
+            player = _PlayerMPV(on_event=on_event)
             if player.is_ready():
                 self.log.info("[BACKEND] MPV backend ready.")
             else:
@@ -701,10 +1533,13 @@ class ListenMoePlayer(QWidget):
                     "[BACKEND] MPV selected but unavailable: %s",
                     player.get_init_error() or "libmpv did not initialize",
                 )
+            self._sync_audio_tap(player)
             return player
         if backend == "vlc":
+            from audio.player_vlc import PlayerVLC as _PlayerVLC
+
             self.log.info("[BACKEND] Using VLC (user setting).")
-            player = PlayerVLC(
+            player = _PlayerVLC(
                 on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching
             )
             if not player.is_ready():
@@ -712,20 +1547,27 @@ class ListenMoePlayer(QWidget):
                     "[BACKEND] VLC selected but unavailable: %s",
                     player.get_init_error() or "libvlc not ready",
                 )
+            self._sync_audio_tap(player)
             return player
 
-        # 'auto': FFmpeg → MPV → VLC
-        player = PlayerFFmpeg(on_event=on_event)
+        # 'auto': lazy-load FFmpeg → MPV → VLC so unused native libs (libmpv/libvlc) stay unloaded
+        from audio.player_ffmpeg import PlayerFFmpeg as _PlayerFFmpeg
+
+        player = _PlayerFFmpeg(on_event=on_event)
         ffmpeg_err = None
         if not player.is_ready():
             ffmpeg_err = getattr(player, "get_init_error", lambda: None)()
             self.log.info(f"[BACKEND] FFmpeg not available ({ffmpeg_err}), trying MPV.")
-            player = PlayerMPV(on_event=on_event)
+            from audio.player_mpv import PlayerMPV as _PlayerMPV
+
+            player = _PlayerMPV(on_event=on_event)
         mpv_err = None
         if not player.is_ready():
             mpv_err = getattr(player, "get_init_error", lambda: None)()
             self.log.info(f"[BACKEND] MPV not available ({mpv_err}), using VLC fallback.")
-            player = PlayerVLC(
+            from audio.player_vlc import PlayerVLC as _PlayerVLC
+
+            player = _PlayerVLC(
                 on_event=on_event, libvlc_path=libvlc_path, network_caching_ms=network_caching
             )
         if not player.is_ready():
@@ -736,6 +1578,7 @@ class ListenMoePlayer(QWidget):
                 mpv_err or "unavailable",
                 vlc_err or "unavailable",
             )
+        self._sync_audio_tap(player)
         return player
 
     def _init_audio_backend(self):
@@ -744,6 +1587,14 @@ class ListenMoePlayer(QWidget):
         Respects the KEY_AUDIO_BACKEND setting; defaults to auto (FFmpeg → MPV → VLC).
         Also synchronizes initial volume and mute states.
         """
+        if not _IS_WIN32:
+            try:
+                from audio.diagnostics import log_audio_diagnostics
+
+                log_audio_diagnostics(self.log)
+            except Exception as diag_err:
+                self.log.debug("[STARTUP] Audio diagnostics error: %s", diag_err)
+
         self.player = self._create_player(on_event=self._on_player_event)
 
         if not getattr(self.player, "is_ready", lambda: False)():
@@ -753,11 +1604,15 @@ class ListenMoePlayer(QWidget):
 
         # Set initial audio state
         try:
-            self.player.set_volume(self.volume_slider.value())
+            self._apply_effective_volume(self.volume_slider.value())
             is_muted = self._get_bool(KEY_MUTE, False)
-            self.mute_button.setChecked(is_muted)
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_muted(is_muted)
+            else:
+                self.mute_button.setChecked(is_muted)
             self.player.set_mute(is_muted)
             self.mute_button.setText(self.i18n.t("unmute") if is_muted else self.i18n.t("mute"))
+            self._apply_equalizer_to_player()
         except Exception:
             pass
 
@@ -792,14 +1647,24 @@ class ListenMoePlayer(QWidget):
         self._progress_timer.timeout.connect(self.update_now_playing_label)
         self._progress_timer.start()
 
+        # Dynamic Volume (automatic audio ducking)
+        try:
+            self.dynamic_volume = DynamicVolumeController(self)
+            self.dynamic_volume.factor_changed.connect(self._on_dynamic_volume_factor_changed)
+            self._sync_dynamic_volume_settings()
+        except Exception:
+            self.dynamic_volume = None
+
         # Connections for UI signals
         try:
             self.schedule_play.connect(self._schedule_play_stream)
             self.notify_tray.connect(self._notify_tray)
+            self.player_event.connect(self._on_player_event)
         except Exception:
             pass
 
         # Dev Console
+        self.dev_console: Optional[DevConsole] = None
         try:
             self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
             if self._get_bool(KEY_DEV_CONSOLE_ENABLED, False):
@@ -808,15 +1673,126 @@ class ListenMoePlayer(QWidget):
             self.dev_console = None
 
     def _init_websocket(self):
-        """Configura la connessione WebSocket."""
-        init_channel = self.settings.value(KEY_CHANNEL, "J-POP")
-        self.ws = NowPlayingWS(
+        """Configura StationManager e metadata provider."""
+        init_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+        init_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+        self.station_mgr = StationManager(
             on_now_playing=self._on_now_playing,
             on_error_text=self._on_ws_error_text,
-            on_closed_text=self._on_ws_closed_text,
-            ws_url=self._get_ws_url_for_channel(init_channel),
+            on_status_text=self._on_ws_closed_text,
+            initial_station=init_station,
+            initial_channel=init_channel,
+            playlist_manager=self.local_playlist,
         )
-        self.ws.start()
+        self.ws = getattr(self.station_mgr, "_active_provider", None)
+        self.station_mgr.start()
+
+    def _init_discord_presence(self):
+        self.discord_presence = DiscordPresence(self)
+        self._discord_timer = QTimer(self)
+        self._discord_timer.setInterval(1000)
+        self._discord_timer.timeout.connect(self._on_discord_timer_tick)
+        self._sync_discord_settings()
+
+    def _on_discord_timer_tick(self) -> None:
+        self._sync_discord_presence(refresh_settings=False)
+
+    def _sync_discord_settings(self) -> None:
+        """Reload Discord RPC settings once and start/stop the 1s polling timer accordingly."""
+        rpc = getattr(self, "discord_presence", None)
+        if rpc is None:
+            return
+        client_id = str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
+        client_id = (
+            client_id
+            or os.environ.get("KIKUMOE_DISCORD_CLIENT_ID", "").strip()
+            or DEFAULT_DISCORD_CLIENT_ID
+        )
+        enabled = self._get_bool(KEY_DISCORD_RPC_ENABLED, False)
+        rpc.configure(enabled, client_id)
+        timer = getattr(self, "_discord_timer", None)
+        if rpc.enabled:
+            if timer is not None and not timer.isActive():
+                timer.start()
+            self._sync_discord_presence(refresh_settings=False)
+        else:
+            if timer is not None and timer.isActive():
+                timer.stop()
+
+    def _sync_discord_presence(self, refresh_settings: bool = True):
+        rpc = self.discord_presence
+        if refresh_settings:
+            client_id = str(self.settings.value(KEY_DISCORD_CLIENT_ID, "") or "").strip()
+            client_id = (
+                client_id
+                or os.environ.get("KIKUMOE_DISCORD_CLIENT_ID", "").strip()
+                or DEFAULT_DISCORD_CLIENT_ID
+            )
+            rpc.configure(self._get_bool(KEY_DISCORD_RPC_ENABLED, False), client_id)
+        if not rpc.enabled:
+            timer = getattr(self, "_discord_timer", None)
+            if timer is not None and timer.isActive():
+                timer.stop()
+            return
+        try:
+            paused = bool(self._ui_paused or getattr(self.player, "is_paused", lambda: False)())
+            playing = bool(self.player.is_playing())
+        except Exception:
+            playing, paused = False, False
+        if not playing and not paused:
+            self._discord_live_start = None
+            self._discord_live_key = None
+            rpc.set_activity(None)
+            return
+        title = self._current_title or ""
+        if title == self.i18n.t("unknown"):
+            title = ""
+        station_id = getattr(self, "_current_radio_provider", DEFAULT_STATION)
+        station = get_station_display_name(station_id, self.i18n)
+        end = self._current_start_epoch
+        if end and self._current_duration_seconds:
+            end -= self._clock_sync_offset
+        cover = self._normalize_album_cover_url(self._current_cover_ref)
+        activity = activity_payload(
+            title,
+            self._current_artist,
+            station,
+            cover,
+            end,
+            self._current_duration_seconds,
+            paused,
+            self.i18n.t("discord_open_kikumoe"),
+        )
+        if activity and paused:
+            activity["state"] = (activity["state"] + " · " + self.i18n.t("pause"))[:128]
+        icon = os.environ.get("KIKUMOE_DISCORD_ICON", "").strip()
+        if activity and icon:
+            activity.setdefault("assets", {})["small_image"] = icon[:300]
+            activity["assets"]["small_text"] = "KikuMoe"
+        if activity and not paused and not self._current_duration_seconds:
+            live_key = (station_id, title, self._current_artist)
+            if getattr(self, "_discord_live_key", None) != live_key:
+                self._discord_live_start = int(time.time())
+                self._discord_live_key = live_key
+            activity["timestamps"] = {"start": self._discord_live_start}
+        else:
+            self._discord_live_start = None
+            self._discord_live_key = None
+        rpc.set_activity(activity)
+
+    def _show_window_from_tray(self) -> None:
+        """Restores, raises, and activates the active window (main or detached Mini-HUD)."""
+        try:
+            mini_win = getattr(self, "_mini_window", None)
+            target = (
+                mini_win if (getattr(self, "_mini_mode", False) and mini_win is not None) else self
+            )
+            if not target.isVisible() or target.isMinimized():
+                target.showNormal()
+            target.raise_()
+            target.activateWindow()
+        except Exception:
+            pass
 
     def _init_tray(self):
         """Initialize system tray manager."""
@@ -825,43 +1801,555 @@ class ListenMoePlayer(QWidget):
             self.tray_mgr = TrayManager(
                 self,
                 self.i18n,
-                on_show_window=self.showNormal,
+                on_show_window=self._show_window_from_tray,
                 on_open_settings=self.open_settings,
+                on_change_station=self.set_radio_provider,
                 on_change_channel=self._tray_change_channel,
                 on_change_format=self._tray_change_format,
                 on_toggle_play_pause=self._tray_toggle_play_pause,
                 on_stop_stream=self.stop_stream,
                 on_force_stop=self.force_stop_all,
                 on_toggle_mute=self.toggle_mute_shortcut,
+                on_quit=self._on_tray_quit,
+                on_about=self.open_about,
             )
-            self.tray_mgr.ensure_tray_enabled(self._tray_enabled, window_icon=self._get_tray_icon())
+            self.tray_mgr.ensure_tray_enabled(
+                self._tray_enabled,
+                window_icon=self._get_tray_icon(),
+                tooltip=self._get_tray_tooltip(),
+            )
+            self.update_tray_texts()
             self.tray_icon_refresh.connect(self.update_tray_icon)
         except Exception:
             pass
+
+    def _init_mini_hud(self):
+        self._mini_mode = False
+        self._mini_window: Optional[MiniHudWindow] = None
+        self._mini_window_shortcut: Optional[QShortcut] = None
+        self._normal_geometry = None
+        self._normal_always_on_top = False
+        self._mini_cover_key = object()
+        self.mini_hud = MiniHud(self)
+        self._root_layout.addWidget(self.mini_hud)
+        self.mini_hud.hide()
+        self.mini_hud.restore_requested.connect(self.toggle_mini_hud)
+        self.mini_hud.play_requested.connect(self._tray_toggle_play_pause)
+        self.mini_hud.pin_changed.connect(self._set_mini_always_on_top)
+        self.mini_hud.track_progress.seek_requested.connect(self._on_seek_requested)
+        self.mini_hud.volume.setValue(self.volume_slider.value())
+        self.mini_hud.volume.valueChanged.connect(self.volume_slider.setValue)
+        self.volume_slider.valueChanged.connect(self.mini_hud.volume.setValue)
+        self.mini_hud.pin_button.blockSignals(True)
+        default_pin = bool(
+            _IS_LINUX and is_wayland_session() and detect_wayland_compositor() == "niri"
+        )
+        self.mini_hud.pin_button.setChecked(self._get_bool(KEY_MINI_ALWAYS_ON_TOP, default_pin))
+        self.mini_hud.pin_button.blockSignals(False)
+        self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
+        self._update_mini_pin_ui()
+        self.mini_hud.volume.setToolTip(self.t("mini_volume"))
+        self.mini_hud.close_button.setToolTip(self.t("tray_quit"))
+        self._mini_timer = QTimer(self)
+        self._mini_timer.setInterval(500)
+        self._mini_timer.timeout.connect(self._sync_mini_hud)
+        self._mini_shortcut = self._register_shortcut("F9", self.toggle_mini_hud)
+        self._settings_shortcut = self._register_shortcut(
+            "Ctrl+,",
+            self._shortcut_settings,
+            button_getter=lambda: getattr(self, "settings_button", None),
+        )
+
+        self.mini_button = MiniIconButton("mini", self._title_bar)
+        self.mini_button.setFixedSize(28, 28)
+        self.mini_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mini_button.setToolTip(self.t("mini_mode"))
+        title_layout = self._title_bar.layout()
+        if isinstance(title_layout, QHBoxLayout):
+            title_layout.insertWidget(title_layout.count() - 3, self.mini_button)
+        self.mini_button.clicked.connect(self.toggle_mini_hud)
+
+    def _use_detached_mini_window(self) -> bool:
+        """On Linux Wayland, host Mini-HUD in a dedicated fixed-size top-level window
+        so tiling compositors (niri, Sway, Hyprland) open it as floating automatically."""
+        return bool(_IS_LINUX and is_wayland_session())
+
+    def _update_mini_pin_ui(self) -> None:
+        if not hasattr(self, "mini_hud"):
+            return
+        if not (_IS_LINUX and is_wayland_session()):
+            self.mini_hud.pin_button.setEnabled(True)
+            self.mini_hud.pin_button.setToolTip(self.t("mini_pin"))
+            return
+        compositor = detect_wayland_compositor()
+        if supports_wayland_pin(compositor):
+            self.mini_hud.pin_button.setEnabled(True)
+            tip_key = "mini_pin_niri" if compositor == "niri" else "mini_pin"
+            self.mini_hud.pin_button.setToolTip(self.t(tip_key))
+        else:
+            self.mini_hud.pin_button.setEnabled(False)
+            self.mini_hud.pin_button.setToolTip(self.t("mini_pin_wayland_unsupported"))
+
+    def _ensure_mini_window(self) -> MiniHudWindow:
+        if self._mini_window is None:
+            win = MiniHudWindow(
+                on_close_requested=lambda: self.close(),
+                on_visibility_changed=self._sync_ui_timers_for_visibility,
+            )
+            if not self.windowIcon().isNull():
+                win.setWindowIcon(self.windowIcon())
+            sc = QShortcut(QKeySequence("F9"), win)
+            sc.activated.connect(self.toggle_mini_hud)
+            self._mini_window_shortcut = sc
+            self._mini_window = win
+        return self._mini_window
+
+    def _apply_wayland_pin_async(self, enabled: bool) -> None:
+        if not (_IS_LINUX and is_wayland_session()):
+            return
+        compositor = detect_wayland_compositor()
+        if not supports_wayland_pin(compositor):
+            return
+        threading.Thread(
+            target=apply_wayland_pin,
+            args=(bool(enabled), "KikuMoe Mini-HUD", compositor),
+            daemon=True,
+        ).start()
+
+    def _set_window_on_top(self, enabled: bool) -> None:
+        visible = self.isVisible()
+        geometry = self.geometry()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+        if visible:
+            self.show()
+            self.setGeometry(geometry)
+
+    def _set_mini_always_on_top(self, enabled: bool) -> None:
+        self.settings.setValue(KEY_MINI_ALWAYS_ON_TOP, "true" if enabled else "false")
+        if self._mini_mode:
+            if _IS_LINUX and is_wayland_session():
+                self._apply_wayland_pin_async(enabled)
+            else:
+                self._set_window_on_top(enabled)
+
+    def _sync_mini_hud(self) -> None:
+        try:
+            if not self._mini_mode:
+                return
+            self.mini_hud.title.set_text(self._current_title or "–")
+            self.mini_hud.artist.set_text(self._current_artist or "")
+            duration = self._current_duration_seconds
+            if self._is_local_mode():
+                elapsed = self._get_local_playback_seconds()
+                self.mini_hud.track_progress.set_seekable(True)
+            else:
+                self.mini_hud.track_progress.set_seekable(False)
+                epoch = self._current_start_epoch
+                elapsed = None
+                if epoch is not None and duration is not None:
+                    now_synced = time.time() + self._clock_sync_offset
+                    elapsed = (
+                        (duration - (epoch - now_synced)) if duration > 0 else (now_synced - epoch)
+                    )
+            title = (self._current_title or "").strip()
+            live = (duration is None or duration <= 0) and title not in (
+                "",
+                "–",
+                "-",
+                self.i18n.t("unknown"),
+            )
+            self.mini_hud.set_track_progress(elapsed, duration, live=live)
+            try:
+                playing = bool(self.player and self.player.is_playing() and not self._ui_paused)
+            except Exception:
+                playing = False
+            self.mini_hud.play_button.kind = "pause" if playing else "play"
+            self.mini_hud.play_button.setToolTip(
+                self.t("tt_pause") if playing else self.t("tt_play")
+            )
+            self.mini_hud.play_button.update()
+            cover = getattr(self.ambient_cover, "_cover_pixmap", None)
+            key = cover.cacheKey() if cover is not None and not cover.isNull() else None
+            if key != self._mini_cover_key:
+                self._mini_cover_key = key
+                if cover is not None and not cover.isNull():
+                    self.mini_hud.set_cover(cover)
+                else:
+                    self.mini_hud.set_cover(self._icon_app.pixmap(MINI_COVER_SIZE, MINI_COVER_SIZE))
+        except Exception as e:
+            self.log.debug(f"[UI] _sync_mini_hud failed: {e}")
+
+    def toggle_mini_hud(self) -> None:
+        if self._lyrics_transition.state() == QVariantAnimation.State.Running:
+            self._lyrics_transition.setCurrentTime(self._lyrics_transition.duration())
+        if not self._mini_mode:
+            self._normal_geometry = self.saveGeometry()
+            self.settings.setValue(KEY_WINDOW_GEOMETRY, self._normal_geometry)
+            self._normal_always_on_top = bool(
+                self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+            )
+            self._mini_mode = True
+            self._update_mini_pin_ui()
+            if self._use_detached_mini_window():
+                mini_win = self._ensure_mini_window()
+                self._root_layout.removeWidget(self.mini_hud)
+                mini_win.attach_hud(self.mini_hud)
+                geometry = self.settings.value(KEY_MINI_GEOMETRY)
+                if geometry:
+                    mini_win.restoreGeometry(geometry)
+                mini_win.setFixedSize(MiniHudWindow.MINI_WIDTH, MiniHudWindow.MINI_HEIGHT)
+                self.hide()
+                mini_win.show()
+                mini_win.raise_()
+                mini_win.activateWindow()
+                self._sync_mini_hud()
+                self._mini_timer.start()
+                self._sync_ui_timers_for_visibility()
+                if self.mini_hud.pin_button.isEnabled() and self.mini_hud.pin_button.isChecked():
+                    QTimer.singleShot(80, lambda: self._apply_wayland_pin_async(True))
+                return
+            if self.isMaximized() or self.isFullScreen():
+                self.showNormal()
+            self._content_widget.hide()
+            grip = self.findChild(QSizeGrip)
+            if grip is not None:
+                grip.hide()
+            if _IS_LINUX:
+                self.setFixedSize(420, 112)
+            else:
+                self.setMinimumSize(400, 104)
+                self.setMaximumSize(16777215, 140)
+            self.mini_hud.show()
+            self.resize(420, 112)
+            geometry = self.settings.value(KEY_MINI_GEOMETRY)
+            if geometry:
+                self.restoreGeometry(geometry)
+            self._set_window_on_top(self.mini_hud.pin_button.isChecked())
+            self._sync_mini_hud()
+            self._mini_timer.start()
+            self._sync_ui_timers_for_visibility()
+        else:
+            if self._mini_window is not None and self.mini_hud.parent() is self._mini_window:
+                self.settings.setValue(KEY_MINI_GEOMETRY, self._mini_window.saveGeometry())
+                self._mini_timer.stop()
+                self._mini_mode = False
+                self._mini_window.hide()
+                self.mini_hud.hide()
+                self.mini_hud.setParent(self)
+                self._root_layout.addWidget(self.mini_hud)
+                self.show()
+                if self._normal_geometry:
+                    self.restoreGeometry(self._normal_geometry)
+                self.raise_()
+                self.activateWindow()
+                self._sync_ui_timers_for_visibility()
+                return
+            self.settings.setValue(KEY_MINI_GEOMETRY, self.saveGeometry())
+            self._mini_timer.stop()
+            self._mini_mode = False
+            self.mini_hud.hide()
+            self.setMaximumSize(16777215, 16777215)
+            self.setMinimumSize(380, self._effective_min_window_height())
+            self._content_widget.show()
+            grip = self.findChild(QSizeGrip)
+            if grip is not None:
+                grip.show()
+            self._set_window_on_top(self._normal_always_on_top)
+            if self._normal_geometry:
+                self.restoreGeometry(self._normal_geometry)
+            self._sync_ui_timers_for_visibility()
+
+    def _shortcut_settings(self) -> None:
+        if self._mini_mode:
+            self.toggle_mini_hud()
+        self.open_settings()
+
+    def _init_system_media(self) -> None:
+        self.system_media: Optional[Union[MprisBridge, WindowsMediaBridge]] = None
+        self._media_last_state = MediaState()
+        try:
+            if _IS_LINUX:
+                from core.mpris import MprisBridge as _MprisBridge
+
+                mpris = _MprisBridge(self.log, self)
+                mpris.volume.connect(self._set_system_media_volume)
+                self.system_media = mpris
+            elif _IS_WIN32:
+                from core.windows_media import WindowsMediaBridge as _WindowsMediaBridge
+
+                self.system_media = _WindowsMediaBridge(self.log, self)
+            if self.system_media is not None:
+                bridge = self.system_media
+                self.destroyed.connect(lambda *_: bridge.stop())
+                self.system_media.command.connect(self._on_system_media_command)
+                self._media_timer = QTimer(self)
+                self._media_timer.setInterval(1000)
+                self._media_timer.timeout.connect(self._sync_system_media)
+                self._media_timer.start()
+                self._sync_system_media()
+        except Exception as exc:
+            self.log.warning("[MEDIA] System media controls unavailable: %s", exc)
+
+    def _sync_system_media(self) -> None:
+        bridge = self.system_media
+        if bridge is None:
+            return
+        try:
+            if _IS_WIN32:
+                bind_fn = getattr(bridge, "bind", None)
+                if callable(bind_fn):
+                    bind_fn(int(self.winId()))
+            player = getattr(self, "player", None)
+            playing = bool(player and player.is_playing())
+            paused = bool(
+                player and (self._ui_paused or getattr(player, "is_paused", lambda: False)())
+            )
+            status = "Paused" if paused else ("Playing" if playing else "Stopped")
+            title = (self._current_title or "").strip()
+            if title in ("–", "-", self.i18n.t("unknown")):
+                title = ""
+            artist = (self._current_artist or "").strip()
+            station_id = getattr(self, "_current_radio_provider", DEFAULT_STATION)
+            station = get_station_display_name(station_id, self.i18n)
+            duration = max(0, self._current_duration_seconds or 0)
+            epoch = self._current_start_epoch
+            position = 0.0
+            if getattr(self, "_is_local_mode", lambda: False)():
+                curr_t = 0.0
+                if player:
+                    t = getattr(player, "get_time", lambda: 0.0)()
+                    if t is not None:
+                        curr_t = float(t)
+                position = curr_t
+            elif epoch is not None and duration > 0:
+                position = max(
+                    0.0,
+                    min(
+                        float(duration), duration - (epoch - time.time() - self._clock_sync_offset)
+                    ),
+                )
+            track_id = "/org/mpris/MediaPlayer2/TrackList/NoTrack"
+            if title:
+                identity = f"{station_id}\0{title}\0{artist}\0{epoch}"
+                track_id = (
+                    "/me/chiro/kikumoe/track/t"
+                    + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+                )
+            previous = self._media_last_state
+            if (
+                status == "Paused"
+                and previous.status in ("Playing", "Paused")
+                and previous.track_id == track_id
+            ):
+                position = previous.position_us / 1000000
+            muted = bool(player and getattr(player, "get_mute", lambda: False)())
+            resolver = getattr(self, "_resolve_system_media_cover_url", None)
+            cover_url = (
+                str(resolver(self._current_cover_ref) or "")
+                if callable(resolver)
+                else (self._normalize_album_cover_url(self._current_cover_ref) or "")
+            )
+            state = MediaState(
+                status=status,
+                title=title,
+                artist=artist,
+                station=station,
+                cover_url=cover_url,
+                track_id=track_id,
+                duration_us=int(duration * 1000000),
+                position_us=int(position * 1000000),
+                volume=0.0 if muted else self.volume_slider.value() / 100.0,
+            )
+            self._media_last_state = state
+            bridge.update(state)
+        except Exception as exc:
+            self.log.debug("[MEDIA] Could not update system media state: %s", exc)
+
+    def _on_system_media_command(self, command: str) -> None:
+        if command == "raise":
+            self._show_window_from_tray()
+            return
+        if command == "toggle":
+            self._tray_toggle_play_pause()
+        elif command == "stop":
+            self.stop_stream()
+        elif command == "next":
+            self.play_next_track()
+        elif command == "previous":
+            self.play_previous_track()
+        elif command == "mute":
+            self.toggle_mute_shortcut()
+        elif command == "volume_up":
+            self._vol_up()
+        elif command == "volume_down":
+            self._vol_down()
+        elif command in ("play", "pause"):
+            player = getattr(self, "player", None)
+            playing = bool(player and player.is_playing())
+            paused = bool(
+                player and (self._ui_paused or getattr(player, "is_paused", lambda: False)())
+            )
+            if command == "play":
+                if paused:
+                    self.pause_resume()
+                elif not playing:
+                    self.play_stream()
+            elif playing and not paused:
+                self.pause_resume()
+        self._sync_system_media()
+
+    def _set_system_media_volume(self, value: float) -> None:
+        value = max(0.0, min(1.0, value))
+        player = getattr(self, "player", None)
+        if value > 0 and player and getattr(player, "get_mute", lambda: False)():
+            self.toggle_mute_shortcut()
+        self.volume_slider.setValue(round(value * 100))
+        self._sync_system_media()
 
     def _init_extra_logic(self):
         """Final UI polish and logic hooks (Theme, Autoplay, Global Shortcuts)."""
         try:
             self.apply_theme()
+            self.apply_translations()
+            effective_min_h = self._effective_min_window_height()
+            self.setMinimumSize(380, effective_min_h)
+            min_h = max(effective_min_h, self.minimumSizeHint().height())
+            if self.height() < min_h:
+                self.resize(max(380, self.width()), min_h)
+            self._update_responsive_stage()
             self.backend_status_refresh.connect(self.update_vlc_status_label)
 
             # Autoplay
             if self._get_bool(KEY_AUTOPLAY, False):
                 QTimer.singleShot(1000, self.play_stream)
 
-            # Global Keyboard Shortcuts (Class scope)
-            QShortcut(QKeySequence(Qt.Key.Key_Up), self).activated.connect(self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Down), self).activated.connect(self._vol_down)
-            QShortcut(QKeySequence(Qt.Key.Key_Plus), self).activated.connect(self._vol_up)
-            QShortcut(QKeySequence(Qt.Key.Key_Minus), self).activated.connect(self._vol_down)
-            QShortcut(QKeySequence("="), self).activated.connect(self._vol_up)
+            # Pre-warm embedded settings panel during idle so first-open is instant 60 FPS
+            QTimer.singleShot(150, self._prewarm_settings)
 
-            # Legacy/Specific Shortcuts
-            QShortcut(QKeySequence("Space"), self).activated.connect(self.pause_resume)
-            QShortcut(QKeySequence("S"), self).activated.connect(self.stop_stream)
-            QShortcut(QKeySequence("M"), self).activated.connect(self.toggle_mute_shortcut)
+            # Check for OTA updates in background after startup
+            QTimer.singleShot(3500, self._check_startup_updates)
+
+            # If starting in local mode with empty queue, set up empty state and prompt
+            if self._is_local_mode() and self.local_playlist.is_empty():
+                self._current_title = self.i18n.t("station_local")
+                self._current_artist = self.i18n.t("queue_empty_hint")
+                if hasattr(self, "now_playing_title"):
+                    self.now_playing_title.setText(self._current_title)
+                    self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+                if hasattr(self, "now_playing_artist"):
+                    self.now_playing_artist.setText(self._current_artist)
+                    self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                if hasattr(self, "ambient_cover"):
+                    self.ambient_cover.set_cover(None)
+                if hasattr(self, "song_progress"):
+                    self.song_progress.setValue(0)
+                    self.song_progress.set_seekable(True)
+                time_label = getattr(self, "time_label", None)
+                if time_label is not None:
+                    time_label.setText("00:00 / 00:00")
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_nav_enabled(False, False)
+                QTimer.singleShot(400, self.prompt_select_local_music)
+
+            # Global Keyboard Shortcuts (Class scope)
+            self._register_shortcut(Qt.Key.Key_Up, self._vol_up)
+            self._register_shortcut(Qt.Key.Key_Down, self._vol_down)
+            self._register_shortcut(Qt.Key.Key_Plus, self._vol_up)
+            self._register_shortcut(Qt.Key.Key_Minus, self._vol_down)
+            self._register_shortcut("=", self._vol_up)
+
+            # Playback & Navigation Shortcuts (trigger button animations just like clicks)
+            self._register_shortcut(
+                "Space",
+                self.pause_resume,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "hero_play", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "S",
+                self.stop_stream,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_stop", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "M",
+                self.toggle_mute_shortcut,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "speaker_btn", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                Qt.Key.Key_MediaNext,
+                self.play_next_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_next", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                Qt.Key.Key_MediaPrevious,
+                self.play_previous_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_prev", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "F6",
+                self.play_next_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_next", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "F5",
+                self.play_previous_track,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_prev", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
+            self._register_shortcut(
+                "Ctrl+L",
+                self.show_local_queue_dialog,
+                button_getter=lambda: (
+                    getattr(self.playback_controls, "btn_queue", None)
+                    if hasattr(self, "playback_controls")
+                    else None
+                ),
+            )
         except Exception:
             pass
+
+    def _register_shortcut(self, key: Any, handler: Any, button_getter: Any = None) -> QShortcut:
+        """Bind a window shortcut and animate the associated UI button if present."""
+        shortcut = QShortcut(QKeySequence(key), self)
+
+        def _on_activated() -> None:
+            if button_getter is not None:
+                try:
+                    btn = button_getter()
+                    if btn is not None and hasattr(btn, "trigger_click_animation"):
+                        btn.trigger_click_animation()
+                except Exception:
+                    pass
+            handler()
+
+        shortcut.activated.connect(_on_activated)
+        return shortcut
 
     # ------------------- Volume Helpers -------------------
 
@@ -903,95 +2391,219 @@ class ListenMoePlayer(QWidget):
 
     # 1. Qt Window & Lifecycle Events
     def closeEvent(self, a0) -> None:
-        event = a0
         """Gestisce la chiusura della finestra con l'opzione Tray vs Esci."""
+        if a0 is None:
+            return
+        event = a0
         try:
-            self.settings.setValue(KEY_WINDOW_GEOMETRY, self.saveGeometry())
+            mini_win = getattr(self, "_mini_window", None)
+            if self._mini_mode and mini_win is not None and mini_win.isVisible():
+                self.settings.setValue(KEY_MINI_GEOMETRY, mini_win.saveGeometry())
+            else:
+                geometry_key = KEY_MINI_GEOMETRY if self._mini_mode else KEY_WINDOW_GEOMETRY
+                self.settings.setValue(geometry_key, self.saveGeometry())
         except Exception:
             pass
 
         tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
         if not tray_enabled:
-            self._cleanup_before_close()
-            event.accept()
+            self._finalize_quit_close(event)
             return
 
         dont_ask = self._get_bool(KEY_DONT_ASK_ON_CLOSE, False)
         close_to_tray = self._get_bool(KEY_CLOSE_TO_TRAY, False)
+        from_tray = getattr(self, "_from_tray_quit", False)
+
+        def _hide_active_windows() -> None:
+            mini_w = getattr(self, "_mini_window", None)
+            if mini_w is not None and mini_w.isVisible():
+                mini_w.hide()
+            self.hide()
 
         if dont_ask:
-            if close_to_tray:
-                self.hide()
+            if close_to_tray and not from_tray:
+                _hide_active_windows()
                 event.ignore()
             else:
-                self._cleanup_before_close()
-                event.accept()
+                self._finalize_quit_close(event)
             return
 
         try:
-            msg = QMessageBox(self)
-            msg.setWindowTitle(self.i18n.t("close_dialog_title"))
-            msg.setText(self.i18n.t("close_dialog_text"))
-            msg.setIcon(QMessageBox.Icon.Question)
-
-            tray_btn = msg.addButton(
-                self.i18n.t("close_option_tray"), QMessageBox.ButtonRole.AcceptRole
+            mini_win = getattr(self, "_mini_window", None)
+            active_win: Optional[QWidget] = (
+                mini_win
+                if (self._mini_mode and mini_win is not None and mini_win.isVisible())
+                else (self if self.isVisible() else None)
             )
-            msg.addButton(self.i18n.t("close_option_quit"), QMessageBox.ButtonRole.DestructiveRole)
-            cancel_btn = msg.addButton(
-                self.i18n.t("settings_cancel"), QMessageBox.ButtonRole.RejectRole
+            dlg = CloseConfirmDialog(
+                parent=active_win,
+                i18n=self.i18n,
+                icon=getattr(self, "_icon_app", None),
             )
-            msg.setEscapeButton(cancel_btn)
-
-            cb = QCheckBox(self.i18n.t("close_remember"))
-            msg.setCheckBox(cb)
-
-            self._make_frameless_msg(msg)
+            if active_win is not None:
+                geo = active_win.geometry()
+                dlg.move(
+                    geo.x() + max(0, (geo.width() - dlg.width()) // 2),
+                    geo.y() + max(0, (geo.height() - dlg.height()) // 2),
+                )
             try:
-                apply_windows_titlebar_dark_mode(msg, True)
+                dlg.raise_()
+                dlg.activateWindow()
             except Exception:
                 pass
 
-            msg.exec()
-            clicked = msg.clickedButton()
-            if clicked is None or clicked == cancel_btn:
+            res = dlg.exec()
+            if res != QDialog.DialogCode.Accepted or dlg.action == "cancel":
                 # User cancelled close action (Cancel button, Esc, or window X on the dialog)
                 event.ignore()
                 return
 
-            remember = cb.isChecked()
-            choice_tray = clicked == tray_btn
+            remember = dlg.remember
+            choice_tray = dlg.action == "tray"
 
             if remember:
                 self.settings.setValue(KEY_DONT_ASK_ON_CLOSE, True)
                 self.settings.setValue(KEY_CLOSE_TO_TRAY, choice_tray)
 
             if choice_tray:
-                self.hide()
+                _hide_active_windows()
                 event.ignore()
             else:
-                self._cleanup_before_close()
-                event.accept()
+                self._finalize_quit_close(event)
         except Exception:
-            self._cleanup_before_close()
-            event.accept()
+            self._finalize_quit_close(event)
+
+    def _finalize_quit_close(self, event) -> None:
+        """Clean up resources, accept close event, and exit QApplication even if hidden."""
+        self._cleanup_before_close()
+        event.accept()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _cleanup_before_close(self) -> None:
         """Operazioni di pulizia prima dell'uscita definitiva."""
+        self._closing = True
         try:
+            eq_pop = getattr(self, "_eq_popover", None)
+            if eq_pop is not None:
+                eq_pop.hide()
+                eq_pop.close()
+            mini_win = getattr(self, "_mini_window", None)
+            if mini_win is not None:
+                mini_win.force_close()
+                mini_win.deleteLater()
+                self._mini_window = None
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.stop()
+            if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
+                self._local_prompt_timer.stop()
+            if hasattr(self, "lyrics_provider"):
+                self.lyrics_provider.cancel()
+            if self._media_timer is not None:
+                self._media_timer.stop()
+            if self.system_media is not None:
+                self.system_media.stop()
+            if hasattr(self, "discord_presence"):
+                self.discord_presence.stop()
+            if hasattr(self, "tray_mgr") and self.tray_mgr:
+                try:
+                    if hasattr(self.tray_mgr, "_tray") and self.tray_mgr._tray:
+                        self.tray_mgr._tray.hide()
+                except Exception:
+                    pass
             if hasattr(self, "dev_console") and self.dev_console:
                 self.dev_console.deactivate_logging()
                 self.dev_console.close()
             if hasattr(self, "_session_timer") and self._session_timer:
                 self._session_timer.stop()
+            if hasattr(self, "dynamic_volume") and self.dynamic_volume:
+                self.dynamic_volume.stop()
             if hasattr(self, "player") and self.player:
                 self.player.stop()
-            if hasattr(self, "ws") and self.ws:
+            if hasattr(self, "station_mgr") and self.station_mgr:
+                try:
+                    self.station_mgr.stop()
+                except Exception:
+                    pass
+            elif hasattr(self, "ws") and self.ws:
                 ws_stop = getattr(self.ws, "stop", None) or getattr(self.ws, "shutdown", None)
                 if callable(ws_stop):
                     ws_stop()
         except Exception:
             pass
+
+    def _is_any_ui_visible(self) -> bool:
+        """Return True when the main window or Mini-HUD is visible and not minimized."""
+        try:
+            mini_win = getattr(self, "_mini_window", None)
+            if getattr(self, "_mini_mode", False) and mini_win is not None:
+                return bool(mini_win.isVisible() and not mini_win.isMinimized())
+            return bool(self.isVisible() and not self.isMinimized())
+        except Exception:
+            return True
+
+    def _is_main_stage_visible(self) -> bool:
+        """Return True when the full player stage (cover, visualizer, LIVE badge) is visible."""
+        return self._is_any_ui_visible() and not bool(getattr(self, "_mini_mode", False))
+
+    def _sync_audio_tap(self, player: Any = None) -> None:
+        """Attach the PCM visualizer tap only when the visualizer is enabled and visible."""
+        target = player if player is not None else getattr(self, "player", None)
+        if target is None or not hasattr(target, "set_audio_tap"):
+            return
+        ambient = getattr(self, "ambient_cover", None)
+        viz_on = bool(
+            ambient is not None
+            and getattr(ambient, "is_visualizer_enabled", lambda: False)()
+            and self._is_main_stage_visible()
+        )
+        try:
+            target.set_audio_tap(ambient.feed_pcm if (viz_on and ambient is not None) else None)
+        except Exception:
+            pass
+
+    def _sync_ui_timers_for_visibility(self) -> None:
+        """Pause high-frequency visual timers while hidden in tray or minimized, resume on show."""
+        any_visible = self._is_any_ui_visible()
+        main_visible = self._is_main_stage_visible()
+
+        ambient = getattr(self, "ambient_cover", None)
+        if ambient is not None and hasattr(ambient, "set_ui_suspended"):
+            ambient.set_ui_suspended(not main_visible)
+        live_badge = getattr(self, "live_badge", None)
+        if live_badge is not None and hasattr(live_badge, "set_ui_suspended"):
+            live_badge.set_ui_suspended(not main_visible)
+
+        self._sync_audio_tap()
+
+        song_timer = getattr(self, "song_tick_timer", None)
+        prog_timer = getattr(self, "_progress_timer", None)
+        mini_timer = getattr(self, "_mini_timer", None)
+        mini_mode = bool(getattr(self, "_mini_mode", False))
+
+        if not any_visible:
+            if song_timer is not None and song_timer.isActive():
+                song_timer.stop()
+            if prog_timer is not None and prog_timer.isActive():
+                prog_timer.stop()
+            if mini_timer is not None and mini_timer.isActive():
+                mini_timer.stop()
+            return
+
+        if main_visible:
+            if song_timer is not None and not song_timer.isActive():
+                song_timer.start()
+            if prog_timer is not None and not prog_timer.isActive():
+                prog_timer.start()
+        else:
+            # Mini-HUD uses its own 500ms _mini_timer; pause main-stage 50ms/1s timers
+            if song_timer is not None and song_timer.isActive():
+                song_timer.stop()
+            if prog_timer is not None and prog_timer.isActive():
+                prog_timer.stop()
+            if mini_mode and mini_timer is not None and not mini_timer.isActive():
+                mini_timer.start()
 
     def showEvent(self, a0) -> None:
         event = a0
@@ -999,22 +2611,34 @@ class ListenMoePlayer(QWidget):
             super().showEvent(event)
             self._apply_windows_titlebar_dark_mode(True)
             self._apply_window_title(getattr(self, "_current_title", "") or "")
-            try:
-                current_pm = (
-                    self.album_cover_label.pixmap() if hasattr(self, "album_cover_label") else None
-                )
-                self._update_media_ambient_background(
-                    current_pm if isinstance(current_pm, QPixmap) else None
-                )
-            except Exception:
-                pass
+            self._sync_ui_timers_for_visibility()
+            if self._is_main_stage_visible():
+                self.update_now_playing_label()
+                self._on_song_tick()
+            elif getattr(self, "_mini_mode", False):
+                self._sync_mini_hud()
+        except Exception:
+            pass
+
+    def hideEvent(self, a0) -> None:
+        try:
+            super().hideEvent(a0)
+            self._sync_ui_timers_for_visibility()
         except Exception:
             pass
 
     def changeEvent(self, a0) -> None:
+        if a0 is None:
+            return
         event = a0
         try:
             if event.type() == QEvent.Type.WindowStateChange:
+                if (
+                    _IS_LINUX
+                    and getattr(self, "_mini_mode", False)
+                    and (self.isMaximized() or self.isFullScreen())
+                ):
+                    QTimer.singleShot(0, self._restore_mini_window_state)
                 title_bar = getattr(self, "_title_bar", None)
                 if title_bar is not None:
                     title_bar.sync_maximize_button()
@@ -1027,12 +2651,250 @@ class ListenMoePlayer(QWidget):
                     event.accept()
                     return
             super().changeEvent(event)
+            if event.type() == QEvent.Type.WindowStateChange:
+                self._update_responsive_stage()
+                self._sync_ui_timers_for_visibility()
         except Exception:
             pass
 
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._update_responsive_stage()
+
+    def eventFilter(self, a0, a1) -> bool:
+        try:
+            if (
+                a1 is not None
+                and a1.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.LayoutRequest)
+                and a0
+                in (getattr(self, "_player_stage", None), getattr(self, "_stage_column", None))
+            ):
+                self._sync_status_footer_geometry()
+        except Exception:
+            pass
+        return super().eventFilter(a0, a1)
+
+    def _on_stage_hero_anim_changed(self, value) -> None:
+        if getattr(self, "_mini_mode", False):
+            anim = getattr(self, "_stage_hero_anim", None)
+            if anim is not None:
+                anim.stop()
+            return
+        try:
+            self._stage_hero_blend = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return
+        self._sync_status_footer_geometry()
+
+    def _on_stage_hero_anim_finished(self) -> None:
+        if getattr(self, "_mini_mode", False):
+            return
+        is_hero = bool(getattr(self, "_stage_mode_hero", False))
+        self._stage_hero_blend = 1.0 if is_hero else 0.0
+        self._sync_status_footer_geometry()
+
+    def _sync_status_footer_geometry(self) -> None:
+        footer = getattr(self, "status_footer", None)
+        player_stage = getattr(self, "_player_stage", None)
+        stage_col = getattr(self, "_stage_column", None)
+        if (
+            footer is None
+            or player_stage is None
+            or stage_col is None
+            or getattr(self, "_mini_mode", False)
+        ):
+            return
+        stage_w = player_stage.width()
+        stage_h = player_stage.height()
+        if stage_w <= 0 or stage_h <= 0:
+            return
+        footer_h = max(
+            30,
+            footer.minimumHeight(),
+            footer.minimumSizeHint().height(),
+            footer.sizeHint().height(),
+        )
+
+        # Un-docked footer bar spans full stage width (aligned with top_bar wings)
+        footer_x = 0
+        footer_w = stage_w
+        footer_y = max(0, stage_h - footer_h)
+
+        # Hero docked slot aligns horizontally with player controls inside _stage_column
+        col_geo = stage_col.geometry()
+        if col_geo.width() > 0 and col_geo.height() > 0:
+            docked_x = col_geo.x()
+            docked_w = col_geo.width()
+            docked_y = max(0, col_geo.y() + col_geo.height() - footer_h)
+        else:
+            docked_x, docked_y, docked_w = footer_x, footer_y, footer_w
+
+        blend = max(0.0, min(1.0, float(getattr(self, "_stage_hero_blend", 0.0))))
+        target = QRect(
+            round(footer_x + (docked_x - footer_x) * blend),
+            round(footer_y + (docked_y - footer_y) * blend),
+            round(footer_w + (docked_w - footer_w) * blend),
+            footer_h,
+        )
+        if footer.geometry() != target:
+            footer.setGeometry(target)
+        footer.raise_()
+
+    def _apply_stage_hero_layout(self, side_pad: int) -> None:
+        outer = getattr(self, "_player_stage_outer", None)
+        if outer is None:
+            return
+        footer = getattr(self, "status_footer", None)
+        dock_sp = getattr(self, "_footer_dock_spacer", None)
+        layout = getattr(self, "_layout", None)
+
+        footer_h = (
+            max(
+                30,
+                footer.minimumHeight(),
+                footer.minimumSizeHint().height(),
+                footer.sizeHint().height(),
+            )
+            if footer is not None
+            else 30
+        )
+        gap = layout.spacing() if layout is not None else 7
+        is_hero = bool(getattr(self, "_stage_mode_hero", False))
+
+        changed = False
+        if dock_sp is not None:
+            want_dock_h = (footer_h + gap) if is_hero else 0
+            if dock_sp.sizeHint().height() != want_dock_h:
+                dock_sp.changeSize(
+                    0, want_dock_h, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
+                )
+                changed = True
+
+        want_bottom = 0 if is_hero else (footer_h + 7)
+        cur_left, _, cur_right, cur_bottom = outer.getContentsMargins()
+        if cur_left != side_pad or cur_right != side_pad or cur_bottom != want_bottom:
+            outer.setContentsMargins(side_pad, 0, side_pad, want_bottom)
+            changed = True
+
+        if changed:
+            outer.invalidate()
+            if layout is not None:
+                layout.invalidate()
+        self._sync_status_footer_geometry()
+
+    def _update_responsive_stage(self) -> None:
+        """Keep the player compact at default size and frame a centered hero stage in fullscreen."""
+        try:
+            if getattr(self, "_mini_mode", False):
+                return
+            if getattr(self, "_lyrics_transition_values", None) is not None:
+                return
+            outer = getattr(self, "_player_stage_outer", None)
+            if outer is None:
+                return
+
+            avail_w = max(340, self.width() - 32)
+            lyrics_panel = getattr(self, "lyrics_panel", None)
+            lyrics_open = lyrics_panel is not None and not lyrics_panel.isHidden()
+            max_col_w = 980 if lyrics_open else 760
+            side_pad = max(0, (avail_w - max_col_w) // 2)
+
+            if self.width() < 680 and self.height() < 780:
+                target_cover = 180
+            else:
+                avail_h = max(500, self.height() - CustomTitleBar.HEIGHT - 56)
+                sleep_w = getattr(self, "sleep_timer_widget", None)
+                sleep_open = sleep_w is not None and not sleep_w.isHidden()
+                reserved_v = 340 if sleep_open else 240
+                target_cover = max(
+                    180,
+                    min(
+                        300,
+                        round(min(avail_w * 0.24, max(180, avail_h - reserved_v) * 0.56)),
+                    ),
+                )
+
+            if hasattr(self, "_layout"):
+                target_spacing = 11 if target_cover >= 240 else 7
+                if self._layout.spacing() != target_spacing:
+                    self._layout.setSpacing(target_spacing)
+
+            if target_cover != getattr(self, "_album_cover_size", 180):
+                self._album_cover_size = target_cover
+                ambient = getattr(self, "ambient_cover", None)
+                if ambient is not None:
+                    ambient.set_cover_size(target_cover)
+                    transition = getattr(self, "_lyrics_transition", None)
+                    is_animating = (
+                        transition is not None
+                        and transition.state() == QVariantAnimation.State.Running
+                    )
+                    if lyrics_open and not is_animating:
+                        cover_w = target_cover + 84
+                        ambient.setMinimumWidth(cover_w)
+                        ambient.setMaximumWidth(cover_w)
+
+            t = max(0.0, min(1.0, (target_cover - 180) / 120.0))
+            title_lbl = getattr(self, "now_playing_title", None)
+            if title_lbl is not None and hasattr(title_lbl, "set_font_size"):
+                title_lbl.set_font_size(round(16 + 5 * t))
+            artist_lbl = getattr(self, "now_playing_artist", None)
+            if artist_lbl is not None and hasattr(artist_lbl, "set_font_size"):
+                artist_lbl.set_font_size(round(13 + 2 * t))
+            if lyrics_panel is not None and hasattr(lyrics_panel, "set_responsive_scale"):
+                lyrics_panel.set_responsive_scale(t)
+
+            is_hero_stage = (
+                self.isFullScreen()
+                or self.isMaximized()
+                or (self.width() >= 960 and self.height() >= 820)
+            )
+            prev_hero = getattr(self, "_stage_mode_hero", None)
+            anim = getattr(self, "_stage_hero_anim", None)
+
+            if prev_hero is None or not self.isVisible():
+                self._stage_mode_hero = is_hero_stage
+                self._stage_hero_blend = 1.0 if is_hero_stage else 0.0
+                if anim is not None and anim.state() == QVariantAnimation.State.Running:
+                    anim.stop()
+                self._apply_stage_hero_layout(side_pad)
+                return
+
+            if prev_hero != is_hero_stage:
+                self._stage_mode_hero = is_hero_stage
+                target_blend = 1.0 if is_hero_stage else 0.0
+                self._apply_stage_hero_layout(side_pad)
+                if anim is not None:
+                    if anim.state() == QVariantAnimation.State.Running:
+                        anim.stop()
+                    anim.setStartValue(float(getattr(self, "_stage_hero_blend", 0.0)))
+                    anim.setEndValue(target_blend)
+                    anim.start()
+                else:
+                    self._stage_hero_blend = target_blend
+                self._sync_status_footer_geometry()
+            else:
+                if anim is None or anim.state() != QVariantAnimation.State.Running:
+                    self._stage_hero_blend = 1.0 if is_hero_stage else 0.0
+                self._apply_stage_hero_layout(side_pad)
+        except Exception:
+            pass
+
+    def _restore_mini_window_state(self) -> None:
+        if self._mini_mode and (self.isMaximized() or self.isFullScreen()):
+            self.showNormal()
+
     # 2. Player Backend & Audio Events
     def _on_player_event(self, code: str, value: Optional[int] = None) -> None:
-        """Gestisce gli eventi del backend (FFmpeg/VLC) aggiornando lo stato UI."""
+        """Gestisce gli eventi del backend (FFmpeg/VLC/MPV) aggiornando lo stato UI."""
+        if getattr(self, "_closing", False):
+            return
+        try:
+            if QThread.currentThread() != self.thread():
+                self.player_event.emit("" if code is None else str(code), value)
+                return
+        except Exception:
+            pass
         try:
             c = str(code).lower() if code is not None else ""
             if c == "opening":
@@ -1082,14 +2944,14 @@ class ListenMoePlayer(QWidget):
                             )
                         except Exception:
                             pass
+                    elif self._is_local_mode():
+                        self.play_next_track()
                     elif not getattr(self, "_retry_pending", False):
                         self._retry_pending = True
                         self.schedule_play.emit(1000)
                         # Optionally only notify on unexpected end if not already retrying
                         if getattr(self, "_retry_count", 0) == 0:
-                            self.notify_tray.emit(
-                                "Listen.moe", "Audio riavviato: il timer di sessione continua"
-                            )
+                            self.notify_tray.emit("Listen.moe", self.t("tray_audio_restarted"))
                 else:
                     # Reset on explicit stop (unless skip flag is set)
                     if not getattr(self, "_skip_session_reset_once", False):
@@ -1103,6 +2965,12 @@ class ListenMoePlayer(QWidget):
                 self._ui_paused = False
                 self._update_tray_controls()
             elif c in ("error", "libvlc_init_failed"):
+                player_cls = (
+                    getattr(self.player, "__class__", type(self.player)).__name__
+                    if hasattr(self, "player")
+                    else "Unknown"
+                )
+                self.log.error("[UI] Playback event '%s' from player backend %s", code, player_cls)
                 # Se il backend audio non e' pronto, non e' un errore di rete transitorio:
                 # non ritentare.
                 if (
@@ -1139,19 +3007,33 @@ class ListenMoePlayer(QWidget):
                             f"[UI] Maximum retries ({self._retry_count}) reached. Giving up."
                         )
                         # Always notify when we stop permanently
-                        self.notify_tray.emit(
-                            "Listen.moe", "Errore persistente: ricarica interrotta."
-                        )
+                        self.notify_tray.emit("Listen.moe", self.t("tray_persistent_error"))
             self._refresh_play_button_text()
         except Exception:
             pass
 
     def _schedule_play_stream(self, delay_ms: int) -> None:
         """Slot per avviare lo stream dopo un delay (thread-safe UI call)."""
+        if getattr(self, "_closing", False):
+            return
         try:
-            QTimer.singleShot(int(delay_ms), lambda: self.play_stream(is_retry=True))
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.start(max(0, int(delay_ms)))
+            else:
+                QTimer.singleShot(max(0, int(delay_ms)), self._on_retry_timer)
         except Exception:
-            self.play_stream(is_retry=True)
+            self._on_retry_timer()
+
+    def _on_retry_timer(self) -> None:
+        if getattr(self, "_closing", False):
+            return
+        self.play_stream(is_retry=True)
+
+    def _prompt_local_music_if_needed(self) -> None:
+        if getattr(self, "_closing", False):
+            return
+        if self._is_local_mode() and self.local_playlist.is_empty():
+            self.prompt_select_local_music()
 
     # 3. WebSocket & Metadata Events
     def _on_now_playing(
@@ -1184,10 +3066,31 @@ class ListenMoePlayer(QWidget):
             self._current_duration_seconds = (
                 int(duration) if duration is not None and int(duration) >= 0 else None
             )
-            self._current_start_epoch = float(start_ts) if start_ts is not None else None
+
+            # Normalize track end epoch:
+            # LISTEN.moe provides expected track END epoch directly (start_ts > now).
+            # Other providers might provide track START timestamp (start_ts <= now).
+            if (
+                start_ts is not None
+                and self._current_duration_seconds is not None
+                and self._current_duration_seconds > 0
+            ):
+                import time
+
+                now_check = time.time() + getattr(self, "_clock_sync_offset", 0)
+                ts_val = float(start_ts)
+                if ts_val <= now_check and (now_check - ts_val) <= (
+                    self._current_duration_seconds + 60
+                ):
+                    self._current_start_epoch = ts_val + self._current_duration_seconds
+                else:
+                    self._current_start_epoch = ts_val
+            else:
+                self._current_start_epoch = float(start_ts) if start_ts is not None else None
             self._current_cover_ref = (
                 album_cover if isinstance(album_cover, str) and album_cover.strip() else None
             )
+            self._refresh_lyrics()
 
             # --- Song Progress Bar Sync ---
             if hasattr(self, "song_progress"):
@@ -1196,6 +3099,7 @@ class ListenMoePlayer(QWidget):
                     self._current_duration_seconds is not None
                     and self._current_duration_seconds > 0
                 ):
+                    self.song_progress.set_live_mode(False)
                     # Multiplier (1000) for sub-second smoothness
                     self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
 
@@ -1215,18 +3119,44 @@ class ListenMoePlayer(QWidget):
 
                     self.song_progress.show()
                 else:
-                    self.song_progress.hide()
+                    self.song_progress.setValue(0)
+                    self.song_progress.set_live_mode(True)
+                    self.song_progress.show()
 
             self.label_refresh.emit()
-            if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(
-                KEY_TRAY_ENABLED, True
+            track_sig = f"{self._current_title} — {self._current_artist}"
+            if (
+                self._current_title
+                and self._current_title != "–"
+                and self._current_title != self.i18n.t("unknown")
+                and track_sig != getattr(self, "_last_notified_track", None)
             ):
-                msg_title = self.i18n.t("now_playing_prefix")
-                body = f"{self._current_title}" + (
-                    f" — {self._current_artist}" if self._current_artist else ""
+                self._last_notified_track = track_sig
+
+                # Record into session song history
+                if self._current_cover_ref and QThread.currentThread() == self.thread():
+                    ListenMoePlayer._ensure_local_cover_cached(self, self._current_cover_ref)
+                current_st = getattr(self, "_current_radio_provider", "listenmoe")
+                st_name = get_station_display_name(current_st, self.i18n)
+                self.history_mgr.add_entry(
+                    title=self._current_title,
+                    artist=self._current_artist,
+                    station_id=current_st,
+                    station_name=st_name,
+                    art_url=self._current_cover_ref,
+                    duration=self._current_duration_seconds or 0,
                 )
-                self.notify_tray.emit(msg_title, body)
+
+                if self._get_bool(KEY_TRAY_NOTIFICATIONS, True) and self._get_bool(
+                    KEY_TRAY_ENABLED, True
+                ):
+                    msg_title = self.i18n.t("now_playing_prefix")
+                    body = f"{self._current_title}" + (
+                        f" — {self._current_artist}" if self._current_artist else ""
+                    )
+                    self.notify_tray.emit(msg_title, body)
             self.backend_status_refresh.emit()
+            self.update_tray_texts()
         except Exception:
             pass
 
@@ -1242,12 +3172,283 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _on_station_pill_selected(self, station_id: str, channel: str) -> None:
+        self.set_radio_provider(station_id, channel)
+
+    def set_radio_provider(self, provider: str, channel: Optional[str] = None) -> None:
+        """Switch active radio station and optional channel."""
+        if getattr(self, "_closing", False):
+            return
+        self._station_switch_seq += 1
+        self._retry_pending = False
+        self._retry_count = 0
+        if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+            self._retry_timer.stop()
+        if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
+            self._local_prompt_timer.stop()
+
+        clean_id = (provider or "").strip().lower()
+        if clean_id not in STATIONS:
+            clean_id = DEFAULT_STATION
+
+        old_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+        target_channel = channel or old_channel
+
+        self._current_radio_provider = clean_id
+        self._last_notified_track = None
+        self.settings.setValue(KEY_STATION, clean_id)
+        if clean_id == STATION_LISTENMOE and channel:
+            self.settings.setValue(KEY_CHANNEL, channel)
+
+        # Check and adapt format for the newly selected station
+        cfg = get_station_config(clean_id)
+        current_fmt = str(self.settings.value(KEY_FORMAT, ""))
+        formats = cfg.get("formats", [])
+        if formats and current_fmt not in formats:
+            new_fmt = str(cfg.get("default_format", formats[0]))
+            self.settings.setValue(KEY_FORMAT, new_fmt)
+            if hasattr(self, "format_value") and self.format_value:
+                self.format_value.setText(new_fmt)
+
+        # 1. Update station cyber-pill
+        if hasattr(self, "station_pill") and self.station_pill:
+            self.station_pill.update_state(clean_id, target_channel)
+
+        is_local = clean_id == STATION_LOCAL
+        if hasattr(self, "song_progress"):
+            self.song_progress.set_seekable(is_local)
+        if hasattr(self, "playback_controls"):
+            has_prev = is_local and (
+                self.local_playlist.current_index > 0 or self.local_playlist.repeat_mode == 1
+            )
+            has_next = is_local and (
+                self.local_playlist.current_index < len(self.local_playlist.tracks) - 1
+                or self.local_playlist.repeat_mode == 1
+            )
+            self.playback_controls.set_nav_enabled(has_prev, has_next)
+
+        # 2. Update station manager and switch playback if playing
+        if hasattr(self, "station_mgr"):
+            prev_station_id = getattr(self.station_mgr, "current_station_id", None)
+            is_empty_local = clean_id == STATION_LOCAL and self.local_playlist.is_empty()
+            will_change = (
+                clean_id != prev_station_id
+                or (clean_id == STATION_LISTENMOE and target_channel != old_channel)
+                or is_empty_local
+            )
+            if will_change:
+                # Clear cover refs before set_station so LocalProvider.start() is not clobbered.
+                self._current_cover_url = None
+                self._current_cover_ref = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+
+            changed = self.station_mgr.set_station(clean_id)
+            if clean_id == STATION_LISTENMOE:
+                self.station_mgr.set_channel(target_channel)
+            self.ws = getattr(self.station_mgr, "_active_provider", None)
+
+            station_or_chan_changed = changed or (
+                clean_id == STATION_LISTENMOE and target_channel != old_channel
+            )
+            if station_or_chan_changed or is_empty_local:
+                if self.lyrics_button.isChecked():
+                    self.lyrics_provider.cancel()
+                    self._lyrics_track = None
+                    self.lyrics_panel.show_loading(self.i18n.t("lyrics_loading"))
+                cfg = get_station_config(clean_id)
+                if hasattr(self, "stream_tag_label") and self.stream_tag_label:
+                    tag_suffix = "PLAYLIST" if clean_id == STATION_LOCAL else "STREAM"
+                    self.stream_tag_label.setText(
+                        f"{get_station_display_name(clean_id, self.i18n).upper()} · {tag_suffix}"
+                    )
+
+                if clean_id != STATION_LOCAL:
+                    icon_file = cfg.get("icon")
+                    if icon_file and hasattr(self, "ambient_cover") and hasattr(self, "_icon_dir"):
+                        icon_path = os.path.join(self._icon_dir, icon_file)
+                        if os.path.isfile(icon_path):
+                            self._set_album_cover_pixmap(QPixmap(icon_path))
+
+                if clean_id == STATION_LOCAL:
+                    curr_track = self.local_playlist.get_current_track()
+                    if curr_track:
+                        self._on_local_track_changed(curr_track)
+                        if self.player and self.player.is_playing():
+                            self.log.info(
+                                ListenMoePlayer._format_station_changed_log(
+                                    clean_id, target_channel, bool(cfg.get("has_channels"))
+                                )
+                            )
+                            self.play_stream(is_retry=False)
+                    else:
+                        # Queue is empty: stop previous radio stream immediately!
+                        if hasattr(self, "player") and self.player and self.player.is_playing():
+                            self.stop_stream(reset_session=False)
+                        self._current_title = self.i18n.t("station_local")
+                        self._current_artist = self.i18n.t("queue_empty_hint")
+                        if hasattr(self, "now_playing_title"):
+                            self.now_playing_title.setText(self._current_title)
+                            self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+                        if hasattr(self, "now_playing_artist"):
+                            self.now_playing_artist.setText(self._current_artist)
+                            self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                        self._set_album_cover_pixmap(None)
+                        self._current_start_epoch = None
+                        self._current_duration_seconds = 0
+                        if hasattr(self, "song_progress"):
+                            self.song_progress.setValue(0)
+                        time_label = getattr(self, "time_label", None)
+                        if time_label is not None:
+                            time_label.setText("00:00 / 00:00")
+                        self.status_changed.emit(self.i18n.t("station_local"))
+                        # Prompt the user to select local music!
+                        if (
+                            hasattr(self, "_local_prompt_timer")
+                            and self._local_prompt_timer is not None
+                        ):
+                            self._local_prompt_timer.start(100)
+                        else:
+                            QTimer.singleShot(100, self._prompt_local_music_if_needed)
+                else:
+                    if self.player and self.player.is_playing():
+                        self.log.info(
+                            ListenMoePlayer._format_station_changed_log(
+                                clean_id, target_channel, bool(cfg.get("has_channels"))
+                            )
+                        )
+                        self.play_stream(is_retry=False)
+
+        try:
+            self.update_tray_texts()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _format_station_changed_log(
+        station_id: str, channel: Optional[str], has_channels: bool
+    ) -> str:
+        """Format the station-switch log without attaching channels to single-feed/local sources."""
+        if has_channels and channel:
+            return f"[UI] Station changed to '{station_id}' ({channel})"
+        return f"[UI] Station changed to '{station_id}'"
+
+    def _on_channel_switch_changed(self, new_channel: str) -> None:
+        try:
+            self._apply_tray_stream_setting_change(KEY_CHANNEL, new_channel, ws_channel=new_channel)
+            if hasattr(self, "channel_value"):
+                self.channel_value.setText(new_channel)
+        except Exception:
+            pass
+
+    def _on_sleep_start_requested(self, minutes: int) -> None:
+        try:
+            if hasattr(self, "spin_sleep"):
+                self.spin_sleep.setValue(minutes)
+            self.sleep_start_clicked()
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
+        except Exception:
+            pass
+
+    def _sync_window_height_for_sleep_drawer(self) -> None:
+        try:
+            if hasattr(self, "sleep_timer_widget"):
+                effective_min_h = self._effective_min_window_height()
+                self.setMinimumSize(380, effective_min_h)
+                for wid in (
+                    self.sleep_timer_widget,
+                    getattr(self, "_stage_column", None),
+                    getattr(self, "_player_stage", None),
+                    getattr(self, "_view_stack", None),
+                    getattr(self, "_body_container", None),
+                    getattr(self, "_content_widget", None),
+                    self,
+                ):
+                    if wid is not None:
+                        wid_layout = wid.layout()
+                        if wid_layout is not None:
+                            wid_layout.activate()
+                        wid.updateGeometry()
+                if self.isMaximized() or self.isFullScreen():
+                    self._update_responsive_stage()
+                else:
+                    target_h = max(effective_min_h, self.minimumSizeHint().height())
+                    self.resize(self.width(), target_h)
+                    self._update_responsive_stage()
+        except Exception:
+            pass
+
+    def _on_sleep_drawer_toggled(self, visible: bool) -> None:
+        try:
+            self.settings.setValue(KEY_SHOW_SLEEP_TIMER, "true" if visible else "false")
+            if hasattr(self, "sleep_button"):
+                self.sleep_button.blockSignals(True)
+                self.sleep_button.setChecked(bool(visible))
+                self.sleep_button.blockSignals(False)
+            self._sync_window_height_for_sleep_drawer()
+        except Exception:
+            pass
+
+    def _sync_sleep_timer_visibility(self) -> None:
+        try:
+            if hasattr(self, "sleep_timer_widget"):
+                show_sleep = self._get_bool(KEY_SHOW_SLEEP_TIMER, True)
+                if (not self.sleep_timer_widget.isHidden()) != show_sleep:
+                    self.sleep_timer_widget.setVisible(show_sleep)
+                    self._sync_window_height_for_sleep_drawer()
+                if hasattr(self, "sleep_button"):
+                    self.sleep_button.blockSignals(True)
+                    self.sleep_button.setChecked(show_sleep)
+                    self.sleep_button.blockSignals(False)
+        except Exception:
+            pass
+
+    def _sync_ambient_mode(self) -> None:
+        try:
+            if hasattr(self, "_content_widget") and hasattr(
+                self._content_widget, "set_ambient_enabled"
+            ):
+                self._content_widget.set_ambient_enabled(
+                    self._get_bool(KEY_AMBIENT_MODE_ENABLED, DEFAULT_AMBIENT_MODE_ENABLED)
+                )
+            if hasattr(self, "ambient_cover") and hasattr(
+                self.ambient_cover, "set_visualizer_enabled"
+            ):
+                self.ambient_cover.set_visualizer_enabled(
+                    self._get_bool(KEY_VISUALIZER_ENABLED, DEFAULT_VISUALIZER_ENABLED)
+                )
+            self._sync_audio_tap()
+        except Exception:
+            pass
+
+    def _on_sleep_toggle_clicked(self) -> None:
+        try:
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.toggle_visible()
+        except Exception:
+            pass
+
+    def _on_now_playing_text_changed(self, text: str) -> None:
+        try:
+            if hasattr(self, "now_playing_label"):
+                self.now_playing_label.setText(text)
+            title = self._current_title or self.t("unknown")
+            artist = self._current_artist or ""
+            if hasattr(self, "now_playing_title"):
+                self.now_playing_title.setText(title)
+            if hasattr(self, "now_playing_artist"):
+                self.now_playing_artist.setText(artist)
+        except Exception as e:
+            self.log.debug(f"[UI] _on_now_playing_text_changed failed: {e}")
+
     # 4. Timer & Tray Action Events
     def _on_session_tick(self) -> None:
         try:
             self._session_seconds += 1
             self._update_session_label()
-            self.update_tray_texts()
+            if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
+                self.tray_mgr.update_tooltip(self._get_tray_tooltip())
         except Exception:
             pass
 
@@ -1287,6 +3488,19 @@ class ListenMoePlayer(QWidget):
         try:
             import time
 
+            self._update_lyrics_position()
+
+            if self._is_local_mode():
+                curr_t = self._get_local_playback_seconds()
+                dur = getattr(self, "_current_duration_seconds", None) or 0
+                if dur > 0 and not getattr(self.song_progress, "_is_dragging", False):
+                    self.song_progress.setValue(int(min(curr_t, dur) * 1000))
+                current_int_sec = int(curr_t)
+                if current_int_sec != getattr(self, "_last_integer_second", -1):
+                    self._last_integer_second = current_int_sec
+                    self.update_now_playing_label()
+                return
+
             now = time.time()
             epoch = getattr(self, "_current_start_epoch", None)
             dur = getattr(self, "_current_duration_seconds", None)
@@ -1295,11 +3509,19 @@ class ListenMoePlayer(QWidget):
                 return
 
             if dur <= 0:
-                # Live stream or unknown duration: ticker is alive but doesn't update bar
-                now_int = int(now)
-                if now_int != getattr(self, "_last_live_log", 0) and now_int % 30 == 0:
-                    self._last_live_log = now_int
-                    self.log.debug(f"[DEV] Song ticker: LIVE MODE (title={self._current_title})")
+                # Live stream or unknown duration: ticker is alive, count up elapsed seconds
+                now_synced = now + getattr(self, "_clock_sync_offset", 0)
+                elapsed_raw = max(0.0, now_synced - epoch)
+                current_int_sec = int(elapsed_raw)
+                if current_int_sec != getattr(self, "_last_integer_second", -1):
+                    self._last_integer_second = current_int_sec
+                    if current_int_sec % 30 == 0:
+                        self.log.debug(
+                            "[DEV] Song ticker: LIVE MODE (title=%s, elapsed=%ds)",
+                            self._current_title,
+                            current_int_sec,
+                        )
+                    self.update_now_playing_label()
                 return
 
             # Use synced clock: now + clock_sync_offset
@@ -1339,10 +3561,19 @@ class ListenMoePlayer(QWidget):
                 if hasattr(self, "sleep_label"):
                     self.sleep_label.setText("")
                     self.sleep_label.setVisible(False)
+                if hasattr(self, "sleep_timer_widget"):
+                    self.sleep_timer_widget.set_inactive()
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_sleep_active(False)
                 if self._get_bool(KEY_SLEEP_STOP_ON_END, True):
                     self.stop_stream()
                 return
             self._sleep_remaining_sec -= 1
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
+            if hasattr(self, "playback_controls"):
+                m, s = divmod(max(0, self._sleep_remaining_sec), 60)
+                self.playback_controls.set_sleep_active(True, f"{m:02d}:{s:02d}")
             if (
                 self._sleep_saved_volume is not None
                 and self._sleep_remaining_sec <= self._sleep_fadeout_sec
@@ -1361,7 +3592,6 @@ class ListenMoePlayer(QWidget):
                 self.sleep_label.setText(
                     self.t("sleep_remaining", time=self._format_mmss(self._sleep_remaining_sec))
                 )
-                self.sleep_label.setVisible(True)
         except Exception:
             pass
 
@@ -1373,6 +3603,7 @@ class ListenMoePlayer(QWidget):
             is_paused = (
                 bool(getattr(self.player, "is_paused", lambda: False)()) if has_player else False
             )
+            is_paused = is_paused or bool(getattr(self, "_ui_paused", False))
 
             if has_player and (is_playing or is_paused):
                 self.pause_resume()
@@ -1418,10 +3649,40 @@ class ListenMoePlayer(QWidget):
             self.play_button.setText(
                 self.i18n.t("play_active") if force_playing else self.i18n.t("play")
             )
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_playing_state(
+                    is_playing=force_playing,
+                    is_paused=bool(getattr(self, "_ui_paused", False)),
+                )
+            if hasattr(self, "live_badge"):
+                self.live_badge.set_playing(bool(force_playing))
+            if hasattr(self, "ambient_cover"):
+                self.ambient_cover.set_playing(bool(force_playing))
         except Exception:
             pass
 
     def apply_translations(self):
+        install_qt_translator(QApplication.instance(), self.i18n.lang)
+        if hasattr(self, "_title_bar"):
+            self._title_bar.retranslate(self.i18n)
+        if hasattr(self, "station_pill"):
+            self.station_pill.retranslate(self.i18n)
+        if hasattr(self, "history_button"):
+            self.history_button.setToolTip(self.i18n.t("history_button"))
+        if hasattr(self, "track_menu_btn"):
+            self.track_menu_btn.setToolTip(self.i18n.t("search_menu_tooltip"))
+        if hasattr(self, "lyrics_button"):
+            self.lyrics_button.setToolTip(self.t("lyrics_button"))
+            self.lyrics_button.setAccessibleName(self.t("lyrics_button"))
+        if hasattr(self, "sleep_button"):
+            self.sleep_button.setToolTip(self.t("tt_sleep_timer"))
+            self.sleep_button.setAccessibleName(self.t("sleep_timer"))
+        if hasattr(self, "mini_hud"):
+            self.mini_button.setToolTip(self.t("mini_mode"))
+            self.mini_hud.restore_button.setToolTip(self.t("mini_restore"))
+            self._update_mini_pin_ui()
+            self.mini_hud.volume.setToolTip(self.t("mini_volume"))
+            self.mini_hud.close_button.setToolTip(self.t("tray_quit"))
         # Mantieni o aggiorna titolo finestra in base al Now Playing
         try:
             title = getattr(self, "_current_title", "") or ""
@@ -1448,8 +3709,16 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         if hasattr(self, "settings_button"):
-            self.settings_button.setText(self.i18n.t("settings_button"))
+            self.settings_button.setToolTip(f"{self.i18n.t('settings_button')} (Ctrl+,)")
         # Sleep UI texts
+        if hasattr(self, "sleep_timer_widget"):
+            self.sleep_timer_widget.apply_translations(
+                title=self.i18n.t("sleep_timer"),
+                start_btn=self.i18n.t("sleep_start"),
+                cancel_btn=self.i18n.t("sleep_cancel"),
+                custom_minutes_tip=self.i18n.t("sleep_custom_minutes_tip"),
+                toggle_tip=self.i18n.t("tt_sleep_toggle_drawer"),
+            )
         if hasattr(self, "sleep_title"):
             self.sleep_title.setText(self.i18n.t("sleep_timer"))
         if hasattr(self, "sleep_minutes_label"):
@@ -1462,187 +3731,250 @@ class ListenMoePlayer(QWidget):
         self.update_now_playing_label()
         self.update_vlc_status_label()
         self._update_session_label()
+        if hasattr(self, "tray_mgr") and self.tray_mgr:
+            self.tray_mgr.retranslate(self.i18n)
         self.update_tray_texts()
         if hasattr(self, "autoplay_checkbox"):
             self.autoplay_checkbox.setText(self.i18n.t("settings_autoplay"))
-        # Update dev console dialog texts if open
+        if hasattr(self, "playback_controls"):
+            self.playback_controls.apply_translations(self.i18n)
+        queue_dialog = getattr(self, "_queue_dialog", None)
+        if queue_dialog is not None:
+            queue_dialog.retranslate(self.i18n)
+        eq_popover = getattr(self, "_eq_popover", None)
+        if eq_popover is not None:
+            eq_popover.retranslate(self.i18n)
+        # Update dev console translator and dialog texts if open
         try:
-            if hasattr(self, "dev_console") and self.dev_console and self.dev_console.is_open():
+            if hasattr(self, "dev_console") and self.dev_console:
                 try:
                     self.dev_console.set_translator(self.i18n)
-                    self.dev_console.refresh_texts()
+                    if self.dev_console.is_open():
+                        self.dev_console.refresh_texts()
                 except Exception:
                     pass
         except Exception:
             pass
 
-    def apply_theme(self) -> None:
+    def apply_theme(
+        self,
+        theme_id: Optional[str] = None,
+        custom_accent: Optional[str] = None,
+        use_custom_accent: Optional[bool] = None,
+        force: bool = False,
+    ) -> None:
         try:
             dark = True
-            accent = getattr(self, "COLOR_ACCENT", "#c2185b")
-            app = QApplication.instance()
-            if not isinstance(app, QApplication):
+            if theme_id is None or isinstance(theme_id, bool):
+                effective_theme = str(
+                    self.settings.value(KEY_THEME, DEFAULT_THEME) or DEFAULT_THEME
+                )
+                custom_on = self._get_bool(KEY_CUSTOM_ACCENT_ENABLED, False)
+                saved_accent = str(self.settings.value(KEY_CUSTOM_ACCENT, "") or "").strip()
+                effective_custom = saved_accent if (custom_on and saved_accent) else None
+            else:
+                effective_theme = str(theme_id).strip().lower() or DEFAULT_THEME
+                if use_custom_accent is False:
+                    effective_custom = None
+                else:
+                    effective_custom = str(custom_accent).strip() if custom_accent else None
+
+            target_state = resolve_theme_and_accent(effective_theme, effective_custom)
+            if (
+                not force
+                and getattr(self, "_applied_theme_state", None) == target_state
+                and PALETTE.get("theme_id") == target_state[0]
+                and PALETTE.get("accent") == target_state[1]
+            ):
                 return
-            app.setStyleSheet(
-                f"""
-                QWidget {{ background-color: #121212; color: #e0e0e0; }}
-                QLabel#headerLabel {{ font-size: 16px; font-weight: 600; color: #ffffff; }}
-                QWidget#mediaAmbientBlock {{
-                    background-color: #151515; border: 1px solid #232323; border-radius: 10px;
-                }}
-                QLabel#mediaAmbientBackground {{ background-color: #151515; border-radius: 10px; }}
-                QWidget#mediaForeground {{ background: transparent; border: none; }}
-                QLabel#nowPlayingLabel {{
-                    font-size: 14px; font-weight: 500; color: #e0e0e0; background: transparent;
-                }}
-                QLabel#songTimeLabel {{
-                    font-size: 12px; font-weight: 600; color: #cfcfcf; background: transparent;
-                }}
-                QLabel#albumCoverLabel {{
-                    background-color: #101010; border: 1px solid #2a2a2a; border-radius: 10px;
-                }}
-                QWidget#settingsHeaderBar {{
-                    background-color: #2a2a2a; border: none; border-bottom: 1px solid #3a3a3a;
-                    border-radius: 0px;
-                }}
-                QWidget#footerBar {{
-                    background-color: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 6px;
-                }}
-                QLabel#sessionLabel {{ color: #f0f0f0; font-weight: 600; background: transparent; }}
-                QPushButton {{
-                    background-color: #1e1e1e; color: #e0e0e0; border: 1px solid #333;
-                    padding: 6px 10px; border-radius: 4px;
-                }}
-                QPushButton:hover {{ background-color: #2a2a2a; }}
-                QPushButton#menuButton {{
-                    background-color: transparent; border: none; border-radius: 4px;
-                    padding: 4px 4px 4px 2px; margin-left: 0px; color: #ffffff;
-                    font-size: 12px; text-align: left;
-                }}
-                QPushButton#menuButton:hover {{ background-color: #444444; color: #ffffff; }}
-                QPushButton:disabled {{
-                    background-color: #1a1a1a; color: #777; border-color: #2a2a2a;
-                }}
-                QLineEdit, QSpinBox, QComboBox {{
-                    background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333;
-                    border-radius: 4px; padding: 4px;
-                }}
-                QMenu {{ background-color: #121212; color: #e0e0e0; border: 1px solid #333; }}
-                QToolTip {{ background-color: #2a2a2a; color: #ffffff; border: 1px solid #444; }}
-                QProgressBar {{
-                    background-color: #1a1a1a; border: 1px solid #333; color: #e0e0e0;
-                    border-radius: 4px; text-align: center;
-                }}
-                QProgressBar::chunk {{ background-color: {accent}; border-radius: 4px; }}
-                QProgressBar#songProgressBar {{
-                    background-color: #222; border: none; height: 4px; border-radius: 2px;
-                }}
-                QSlider::groove:horizontal {{ height: 6px; background: #333; border-radius: 3px; }}
-                QSlider::handle:horizontal {{
-                    background: {accent}; width: 14px; height: 14px; margin: -4px 0;
-                    border-radius: 7px;
-                }}
-                """
-            )
 
-            # --- Icon Dynamic Tinting ---
-            # All icons now use the accent color (Magenta) for consistent branding
-            icon_color = QColor(accent)
+            apply_theme_palette(effective_theme, custom_accent=effective_custom)
+            self._applied_theme_state = target_state
+            accent = PALETTE["accent"]
+            self.COLOR_ACCENT = accent
 
-            # Use smaller icons for the top menu to facilitate edge alignment
-            sz_small = QSize(18, 18)
-            sz_std = QSize(24, 24)
+            app = QApplication.instance()
+            if isinstance(app, QApplication):
+                new_qss = get_cyber_moe_stylesheet()
+                if app.styleSheet() != new_qss:
+                    app.setStyleSheet(new_qss)
 
-            self._icon_play = self._tint_icon(self._icon_play_raw, icon_color, sz_std)
-            self._icon_pause = self._tint_icon(self._icon_pause_raw, icon_color, sz_std)
-            self._icon_stop = self._tint_icon(self._icon_stop_raw, icon_color, sz_std)
-            self._icon_mute = self._tint_icon(self._icon_mute_raw, icon_color, sz_std)
-            self._icon_unmute = self._tint_icon(self._icon_unmute_raw, icon_color, sz_std)
-            self._icon_force_stop = self._tint_icon(self._icon_force_stop_raw, icon_color, sz_std)
-            self._icon_channel = self._tint_icon(self._icon_channel_raw, icon_color, sz_small)
-            self._icon_codec = self._tint_icon(self._icon_codec_raw, icon_color, sz_small)
-            self._icon_quit = self._tint_icon(self._icon_quit_raw, icon_color, sz_std)
-            # Branding: Use original colors for the logo, ensured square to prevent stretching
-            self._icon_app = self._make_icon_square(self._icon_app_raw)
-            # Tray-specific icon: fit the full logo in a square while maximizing visible area
-            self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
-            # Skip settings icon as requested (text-only for cleaner alignment)
-            # self._icon_settings = self._tint_icon(self._icon_settings_raw, icon_color, sz_small)
+            if hasattr(self, "_content_widget") and hasattr(self._content_widget, "refresh_theme"):
+                self._content_widget.refresh_theme()
+            if getattr(self, "_title_bar", None) is not None and hasattr(
+                self._title_bar, "refresh_theme"
+            ):
+                self._title_bar.refresh_theme()
+            if hasattr(self, "mini_button") and self.mini_button is not None:
+                self.mini_button.update()
+            if hasattr(self, "live_badge") and hasattr(self.live_badge, "refresh_theme"):
+                self.live_badge.refresh_theme()
+            if hasattr(self, "station_pill") and hasattr(self.station_pill, "refresh_theme"):
+                self.station_pill.refresh_theme()
+            if hasattr(self, "ambient_cover") and hasattr(self.ambient_cover, "refresh_theme"):
+                self.ambient_cover.refresh_theme()
+            if hasattr(self, "now_playing_title") and self.now_playing_title is not None:
+                self.now_playing_title.set_text_color(PALETTE["text_primary"])
+            if hasattr(self, "now_playing_artist") and self.now_playing_artist is not None:
+                self.now_playing_artist.set_text_color(PALETTE["text_secondary"])
+            if hasattr(self, "track_hover_group") and self.track_hover_group is not None:
+                self.track_hover_group.update()
+            if hasattr(self, "track_menu_btn") and self.track_menu_btn is not None:
+                self.track_menu_btn.update()
+            if hasattr(self, "history_button") and self.history_button is not None:
+                self.history_button.update()
+            if hasattr(self, "settings_button") and self.settings_button is not None:
+                self.settings_button.update()
 
-            # Assign to UI buttons
-            if hasattr(self, "play_button"):
-                self.play_button.setIcon(self._icon_play)
-            if hasattr(self, "pause_button"):
-                self.pause_button.setIcon(self._icon_pause)
-            if hasattr(self, "stop_button"):
-                self.stop_button.setIcon(self._icon_stop)
-            if hasattr(self, "force_stop_button"):
-                self.force_stop_button.setIcon(self._icon_force_stop)
+            if hasattr(self, "playback_controls") and self.playback_controls is not None:
+                if hasattr(self.playback_controls, "refresh_theme"):
+                    self.playback_controls.refresh_theme()
+                else:
+                    self.playback_controls.hero_play.set_accent_color(accent)
+            if hasattr(self, "channel_switch") and self.channel_switch is not None:
+                if hasattr(self.channel_switch, "refresh_theme"):
+                    self.channel_switch.refresh_theme()
+                else:
+                    self.channel_switch.set_accent_color(accent)
 
-            # Update metadata icon labels with the new tinted icons
-            if hasattr(self, "channel_icon_label"):
-                self.channel_icon_label.setPixmap(self._icon_channel.pixmap(16, 16))
-            if hasattr(self, "format_icon_label"):
-                self.format_icon_label.setPixmap(self._icon_codec.pixmap(16, 16))
+            self._refresh_time_row_styles()
 
-            # Skip settings icon as requested (text-only for cleaner alignment)
-            if hasattr(self, "mute_button"):
-                is_muted = self._get_bool(KEY_MUTE, False)
-                self.mute_button.setIcon(self._icon_mute if is_muted else self._icon_unmute)
+            # --- Icon Dynamic Tinting (Cached by Accent, Brand App Icon Preserved) ---
+            if hasattr(self, "_icon_play_raw") and hasattr(self, "_tint_icon"):
+                tinted_cache = getattr(self, "_tinted_icons_cache", None)
+                if tinted_cache is None:
+                    tinted_cache = {}
+                    self._tinted_icons_cache = tinted_cache
 
-            try:
-                self.setWindowIcon(self._icon_app)
-            except Exception:
-                pass
-
-            if hasattr(self, "mute_button"):
-                self.mute_button.setIcon(
-                    self._icon_unmute if not self.mute_button.isChecked() else self._icon_mute
-                )
-            # Settings icon removed as requested
-            # if hasattr(self, 'settings_button'): self.settings_button.setIcon(self._icon_settings)
-
-            # Synchronize icons with TrayManager
-            if hasattr(self, "tray_mgr") and self.tray_mgr:
-                self.tray_mgr.update_icon(self._get_tray_icon())
-                self.tray_mgr.update_controls_icons(
-                    {
-                        "play": self._icon_play,
-                        "pause": self._icon_pause,
-                        "stop": self._icon_stop,
-                        "mute": self._icon_mute,
-                        "unmute": self._icon_unmute,
-                        "force_stop": self._icon_force_stop,
-                        "channel": self._icon_channel,
-                        "codec": self._icon_codec,
-                        "quit": self._icon_quit,
+                cached_icons = tinted_cache.get(accent)
+                if cached_icons is None:
+                    icon_color = QColor(accent)
+                    sz_small = QSize(18, 18)
+                    sz_std = QSize(24, 24)
+                    cached_icons = {
+                        "play": self._tint_icon(self._icon_play_raw, icon_color, sz_std),
+                        "pause": self._tint_icon(self._icon_pause_raw, icon_color, sz_std),
+                        "stop": self._tint_icon(self._icon_stop_raw, icon_color, sz_std),
+                        "mute": self._tint_icon(self._icon_mute_raw, icon_color, sz_std),
+                        "unmute": self._tint_icon(self._icon_unmute_raw, icon_color, sz_std),
+                        "force_stop": self._tint_icon(
+                            self._icon_force_stop_raw, icon_color, sz_std
+                        ),
+                        "channel": self._tint_icon(self._icon_channel_raw, icon_color, sz_small),
+                        "codec": self._tint_icon(self._icon_codec_raw, icon_color, sz_small),
+                        "quit": self._tint_icon(self._icon_quit_raw, icon_color, sz_std),
                     }
-                )
-                # Refresh tray menu state to apply icons immediately
+                    tinted_cache[accent] = cached_icons
+
+                self._icon_play = cached_icons["play"]
+                self._icon_pause = cached_icons["pause"]
+                self._icon_stop = cached_icons["stop"]
+                self._icon_mute = cached_icons["mute"]
+                self._icon_unmute = cached_icons["unmute"]
+                self._icon_force_stop = cached_icons["force_stop"]
+                self._icon_channel = cached_icons["channel"]
+                self._icon_codec = cached_icons["codec"]
+                self._icon_quit = cached_icons["quit"]
+
+                if getattr(self, "_icon_app", None) is None or self._icon_app.isNull():
+                    self._icon_app = self._make_icon_square(self._icon_app_raw)
+                if getattr(self, "_icon_app_tray", None) is None or self._icon_app_tray.isNull():
+                    self._icon_app_tray = self._make_tray_icon(self._icon_app_raw)
+
+                channel_lbl = getattr(self, "channel_icon_label", None)
+                if channel_lbl is not None:
+                    channel_lbl.setPixmap(self._icon_channel.pixmap(16, 16))
+                format_lbl = getattr(self, "format_icon_label", None)
+                if format_lbl is not None:
+                    format_lbl.setPixmap(self._icon_codec.pixmap(16, 16))
+
+                if not getattr(self, "_window_icon_applied", False):
+                    try:
+                        self.setWindowIcon(self._icon_app)
+                        if getattr(self, "_title_bar", None) is not None:
+                            self._title_bar.set_icon(self._icon_app)
+                        self._window_icon_applied = True
+                    except Exception:
+                        pass
+
+                if hasattr(self, "tray_mgr") and self.tray_mgr:
+                    if hasattr(self.tray_mgr, "refresh_theme"):
+                        self.tray_mgr.refresh_theme()
+                    self.tray_mgr.update_icon(self._get_tray_icon())
+                    self.tray_mgr.update_controls_icons(
+                        {
+                            "play": self._icon_play,
+                            "pause": self._icon_pause,
+                            "stop": self._icon_stop,
+                            "mute": self._icon_mute,
+                            "unmute": self._icon_unmute,
+                            "force_stop": self._icon_force_stop,
+                            "channel": self._icon_channel,
+                            "codec": self._icon_codec,
+                            "quit": self._icon_quit,
+                            "settings": self._icon_settings,
+                        }
+                    )
+                    try:
+                        self._update_tray_controls()
+                    except Exception:
+                        pass
+            elif (
+                hasattr(self, "tray_mgr")
+                and self.tray_mgr
+                and hasattr(self.tray_mgr, "refresh_theme")
+            ):
+                self.tray_mgr.refresh_theme()
+
+            # Synchronize custom progress bar, drawers, footer, lyrics, and mini-player
+            if hasattr(self, "song_progress") and self.song_progress is not None:
+                self.song_progress.refresh_theme()
+            if hasattr(self, "sleep_timer_widget") and hasattr(
+                self.sleep_timer_widget, "refresh_theme"
+            ):
+                self.sleep_timer_widget.refresh_theme()
+            if hasattr(self, "status_footer") and hasattr(self.status_footer, "refresh_theme"):
+                self.status_footer.refresh_theme()
+            if hasattr(self, "lyrics_panel") and self.lyrics_panel is not None:
+                if hasattr(self.lyrics_panel, "refresh_theme"):
+                    self.lyrics_panel.refresh_theme()
+                else:
+                    self.lyrics_panel.set_accent(accent)
+            if hasattr(self, "lyrics_button") and self.lyrics_button is not None:
+                if hasattr(self.lyrics_button, "refresh_theme"):
+                    self.lyrics_button.refresh_theme()
+                else:
+                    self.lyrics_button.set_accent_color(accent)
+            if hasattr(self, "sleep_button") and self.sleep_button is not None:
+                self.sleep_button.refresh_theme()
+            if hasattr(self, "mini_hud") and hasattr(self.mini_hud, "refresh_theme"):
+                self.mini_hud.refresh_theme()
+            history_pop = getattr(self, "_history_popover", None)
+            if history_pop is not None:
+                history_pop.update()
+            eq_pop = getattr(self, "_eq_popover", None)
+            if eq_pop is not None and hasattr(eq_pop, "refresh_theme"):
+                eq_pop.refresh_theme()
+            settings_dlg = getattr(self, "_settings_dlg", None)
+            if settings_dlg is not None and hasattr(settings_dlg, "refresh_theme"):
+                settings_dlg.refresh_theme()
+            about_dlg = getattr(self, "_about_dialog", None)
+            if about_dlg is not None and hasattr(about_dlg, "refresh_theme"):
+                about_dlg.refresh_theme()
+
+            # Apply dark titlebar on Windows once
+            if not getattr(self, "_win_dark_titlebar_applied", False):
                 try:
-                    self._update_tray_controls()
+                    self._apply_windows_titlebar_dark_mode(dark)
+                    self._win_dark_titlebar_applied = True
                 except Exception:
                     pass
-
-            # Synchronize custom progress bar color
-            if hasattr(self, "song_progress"):
-                self.song_progress.setAccentColor(accent)
-
-            try:
-                self._set_album_cover_pixmap(self._cover_cache.get(self._current_cover_url or ""))
-            except Exception:
-                self._set_album_cover_pixmap(None)
-
-            # Apply dark titlebar on Windows
-            try:
-                self._apply_windows_titlebar_dark_mode(dark)
-            except Exception:
-                pass
             try:
                 if hasattr(self, "dev_console") and self.dev_console and self.dev_console.is_open():
                     self.dev_console.apply_theme(dark)
             except Exception:
                 pass
+            self.update()
         except Exception:
             pass
 
@@ -1657,144 +3989,207 @@ class ListenMoePlayer(QWidget):
         """Remove compositor decorations from a QMessageBox and add a visible border."""
         if not _IS_WIN32:
             msg.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-            msg.setStyleSheet("QDialog { background-color: #121212; border: 1px solid #3a3a3a; }")
+            msg.setStyleSheet(
+                f"QDialog {{ background-color: {PALETTE['bg_dialog']}; "
+                f"border: 1px solid {PALETTE['border_card']}; }}"
+            )
 
-    def _tint_icon(
-        self, icon: QIcon, color: QColor, size: Optional[QSize] = None
-    ) -> QIcon:
-        """
-        Tints an icon with the requested color while optically normalizing its glyph bounds
-        and generating multi-resolution pixmaps (16px to 64px). This eliminates tiny/misaligned
-        icons in tray menus and toolbars caused by unequal PNG transparent margins.
-        """
+    def _tint_icon(self, icon: QIcon, color: QColor, size: QSize) -> QIcon:
         try:
             if icon is None or icon.isNull():
                 return icon
-
-            # Extract high-resolution image from QIcon
-            large_sz = 256
-            src_pm = icon.pixmap(large_sz, large_sz)
-            if src_pm.isNull():
+            if size is None or size.isEmpty():
+                size = QSize(16, 16)
+            src = icon.pixmap(size)
+            if src.isNull():
                 return icon
-            img = src_pm.toImage()
-
-            # Find non-transparent bounds using fast Alpha8 buffer scan
-            alpha_img = img.convertToFormat(QImage.Format.Format_Alpha8)
-            bits = alpha_img.constBits()
-            if bits is None:
-                return icon
-            buf = bits.asarray(alpha_img.sizeInBytes())
-            w, h, bpl = alpha_img.width(), alpha_img.height(), alpha_img.bytesPerLine()
-
-            min_y = None
-            max_y = None
-            min_x = w
-            max_x = 0
-
-            for y in range(h):
-                row = buf[y * bpl : y * bpl + w]
-                if any(row):
-                    row_nonzero = [x for x, val in enumerate(row) if val > 10]
-                    if row_nonzero:
-                        if min_y is None:
-                            min_y = y
-                        max_y = y
-                        min_x = min(min_x, row_nonzero[0])
-                        max_x = max(max_x, row_nonzero[-1])
-
-            if min_y is None or max_y is None or min_x >= max_x:
-                cropped = img
-            else:
-                cropped = img.copy(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
-
-            result_icon = QIcon()
-            # Multi-resolution pixmaps ensuring crisp icons on all platforms and DPIs
-            for s in (16, 18, 20, 22, 24, 32, 48, 64):
-                target_content = max(10, int(round(s * 0.82)))
-                scaled = cropped.scaled(
-                    target_content,
-                    target_content,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                dst = QPixmap(s, s)
-                dst.fill(Qt.GlobalColor.transparent)
-                painter = QPainter(dst)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                ox = (s - scaled.width()) // 2
-                oy = (s - scaled.height()) // 2
-                painter.drawImage(ox, oy, scaled)
-                painter.setCompositionMode(
-                    QPainter.CompositionMode.CompositionMode_SourceIn
-                )
-                painter.fillRect(dst.rect(), color)
-                painter.end()
-                result_icon.addPixmap(dst)
-
-            return result_icon
+            dst = QPixmap(src.size())
+            dst.fill(Qt.GlobalColor.transparent)
+            painter = QPainter()
+            if painter.begin(dst):
+                try:
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+                    painter.drawPixmap(0, 0, src)
+                    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+                    painter.fillRect(dst.rect(), color)
+                finally:
+                    painter.end()
+            return QIcon(dst)
         except Exception:
             return icon
 
-    _ALLOWED_COVER_HOSTS = frozenset({"cdn.listen.moe", "listen.moe"})
+    _ALLOWED_COVER_HOSTS = ALLOWED_COVER_HOSTS
 
     def _normalize_album_cover_url(self, cover_ref: Optional[str]) -> Optional[str]:
-        try:
-            if not isinstance(cover_ref, str):
-                return None
-            value = cover_ref.strip()
-            if not value:
-                return None
+        return normalize_cover_url(cover_ref)
 
-            low = value.lower()
-            if low.startswith("http://"):
-                # Rifiuta esplicitamente endpoint HTTP in chiaro
-                return None
+    def _allows_local_cover_files(self) -> bool:
+        """Return True only when the active station is local music."""
+        is_local_fn = getattr(self, "_is_local_mode", None)
+        if callable(is_local_fn):
+            try:
+                return bool(is_local_fn())
+            except Exception:
+                pass
+        return (
+            str(getattr(self, "_current_radio_provider", STATION_LOCAL) or "").lower()
+            == STATION_LOCAL
+        )
 
-            if low.startswith("https://"):
-                raw_url = value
-            else:
-                clean_val = value.lstrip("/")
-                if clean_val.lower().startswith("covers/"):
-                    clean_val = clean_val[7:]
-                raw_url = f"https://cdn.listen.moe/covers/{clean_val}"
+    def _resolve_system_media_cover_url(self, cover_ref: Optional[str]) -> str:
+        """Resolve an MPRIS/SMTC artwork URI, preferring local file:// covers on Linux."""
+        if ListenMoePlayer._allows_local_cover_files(self):
+            local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
+            if local_file:
+                return Path(local_file).resolve().as_uri()
+            if isinstance(cover_ref, str) and cover_ref.strip().lower().startswith("file://"):
+                return ""
+        norm_url = self._normalize_album_cover_url(cover_ref) or ""
+        if norm_url and _IS_LINUX:
+            cached_uri = get_cached_cover_file_uri(norm_url)
+            if cached_uri:
+                return cached_uri
+        return norm_url
 
-            parts = urllib.parse.urlsplit(raw_url)
-            if parts.scheme.lower() != "https" or not parts.netloc:
-                return None
-
-            host = (parts.hostname or "").lower()
-            if not host or host not in ListenMoePlayer._ALLOWED_COVER_HOSTS:
-                return None
-
-            if parts.port not in (None, 443):
-                return None
-
-            # Encode non-ASCII and unsafe chars in path (preserve '/' and already-encoded '%xx')
-            safe_path = urllib.parse.quote(parts.path, safe="/%")
-            return urllib.parse.urlunsplit(
-                ("https", parts.netloc, safe_path, parts.query, parts.fragment)
-            )
-        except Exception:
+    @staticmethod
+    def _resolve_local_cover_file(cover_ref: Optional[str]) -> Optional[str]:
+        if not cover_ref or not isinstance(cover_ref, str):
             return None
+        val = cover_ref.strip()
+        if not val or val.startswith("\\\\") or val.startswith("//"):
+            return None
+        lower = val.lower()
+        if lower.startswith(("http://", "https://")):
+            return None
+        if lower.startswith("file://"):
+            parts = urllib.parse.urlsplit(val)
+            if parts.netloc and parts.netloc.lower() != "localhost":
+                return None
+            local_file = urllib.request.url2pathname(parts.path)
+            if not local_file or local_file.startswith("\\\\") or local_file.startswith("//"):
+                return None
+            return local_file if os.path.isfile(local_file) else None
+        return val if os.path.isfile(val) else None
+
+    @staticmethod
+    def _read_local_cover_bytes(local_file: str) -> Optional[bytes]:
+        try:
+            with open(local_file, "rb") as f:
+                raw_bytes = f.read((4 * 1024 * 1024) + 1)
+        except OSError:
+            return None
+        if not raw_bytes or len(raw_bytes) > (4 * 1024 * 1024):
+            return None
+        return raw_bytes
+
+    def _refresh_history_popover_if_visible(self) -> None:
+        if (
+            hasattr(self, "_history_popover")
+            and self._history_popover is not None
+            and self._history_popover.isVisible()
+        ):
+            self._history_popover._refresh_list()
+
+    def _ensure_local_cover_cached(self, cover_ref: Optional[str]) -> Optional[QPixmap]:
+        """Cache local file/URI cover artwork in the shared pixmap cache for history thumbs."""
+        if not cover_ref or not ListenMoePlayer._allows_local_cover_files(self):
+            return None
+        cached = get_cached_pixmap(cover_ref)
+        if cached is not None and not cached.isNull():
+            return cached
+        local_file = ListenMoePlayer._resolve_local_cover_file(cover_ref)
+        if not local_file:
+            return None
+        raw_bytes = ListenMoePlayer._read_local_cover_bytes(local_file)
+        if not raw_bytes:
+            return None
+        digest = hashlib.blake2b(raw_bytes, digest_size=16).digest()
+        if digest == getattr(self, "_current_cover_bytes_digest", None):
+            cur_pix = getattr(self, "_current_cover_pixmap", None)
+            if isinstance(cur_pix, QPixmap) and not cur_pix.isNull():
+                store_cached_pixmap(cover_ref, cur_pix)
+                return cur_pix
+        pix = QPixmap()
+        if pix.loadFromData(raw_bytes) and not pix.isNull():
+            store_cached_pixmap(cover_ref, pix)
+            return pix
+        return None
 
     def _request_album_cover(self, cover_ref: Optional[str]) -> None:
         try:
+            local_file = (
+                ListenMoePlayer._resolve_local_cover_file(cover_ref)
+                if ListenMoePlayer._allows_local_cover_files(self)
+                else None
+            )
+            if local_file and cover_ref:
+                try:
+                    st = os.stat(local_file)
+                    local_sig: Optional[tuple[str, str, int, int]] = (
+                        cover_ref,
+                        local_file,
+                        int(st.st_mtime_ns),
+                        int(st.st_size),
+                    )
+                except OSError:
+                    local_sig = None
+
+                if local_sig is not None and local_sig == getattr(
+                    self, "_current_local_cover_sig", None
+                ):
+                    ListenMoePlayer._ensure_local_cover_cached(self, cover_ref)
+                    return
+
+                raw_bytes = ListenMoePlayer._read_local_cover_bytes(local_file)
+                if raw_bytes:
+                    digest = hashlib.blake2b(raw_bytes, digest_size=16).digest()
+                    if digest == getattr(self, "_current_cover_bytes_digest", None):
+                        self._current_cover_url = cover_ref
+                        self._current_local_cover_sig = local_sig
+                        if get_cached_pixmap(cover_ref) is None:
+                            cur_pix = getattr(self, "_current_cover_pixmap", None)
+                            if isinstance(cur_pix, QPixmap) and not cur_pix.isNull():
+                                store_cached_pixmap(cover_ref, cur_pix)
+                            else:
+                                fallback_pix = QPixmap()
+                                if (
+                                    fallback_pix.loadFromData(raw_bytes)
+                                    and not fallback_pix.isNull()
+                                ):
+                                    store_cached_pixmap(cover_ref, fallback_pix)
+                        ListenMoePlayer._refresh_history_popover_if_visible(self)
+                        return
+                    pix = QPixmap()
+                    if pix.loadFromData(raw_bytes) and not pix.isNull():
+                        self._current_cover_url = cover_ref
+                        self._current_local_cover_sig = local_sig
+                        self._current_cover_bytes_digest = digest
+                        store_cached_pixmap(cover_ref, pix)
+                        self._set_album_cover_pixmap(pix)
+                        ListenMoePlayer._refresh_history_popover_if_visible(self)
+                        return
+
             cover_url = self._normalize_album_cover_url(cover_ref)
             if cover_url == self._current_cover_url:
                 return
             self._current_cover_url = cover_url
+            self._current_local_cover_sig = None
+            self._current_cover_bytes_digest = None
 
             if not cover_url:
                 self._set_album_cover_pixmap(None)
                 return
 
-            cached = self._cover_cache.get(cover_url)
+            cached = get_cached_pixmap(cover_url) or self._cover_cache.get(cover_url)
             if cached is not None and not cached.isNull():
+                if _IS_LINUX and get_cached_cover_file_uri(cover_url) is None:
+                    store_cover_file(cover_url, pixmap=cached)
                 self._set_album_cover_pixmap(cached)
+                sync_media = getattr(self, "_sync_system_media", None)
+                if callable(sync_media):
+                    sync_media()
                 return
 
-            self._set_album_cover_pixmap(None)
             with self._cover_download_lock:
                 if cover_url in self._cover_download_inflight:
                     return
@@ -1816,7 +4211,9 @@ class ListenMoePlayer(QWidget):
                 return
             if parts.port not in (None, 443):
                 return
-            req = urllib.request.Request(cover_url, headers={"User-Agent": "KikuMoe/1.11.1"})
+            req = urllib.request.Request(
+                cover_url, headers={"User-Agent": f"KikuMoe/{APP_VERSION}"}
+            )
             ssl_ctx = None
             try:
                 ssl_ctx = get_ssl_context()
@@ -1848,23 +4245,27 @@ class ListenMoePlayer(QWidget):
 
             pixmap = QPixmap()
             if not pixmap.loadFromData(raw):
+                if cover_url and cover_url == self._current_cover_url:
+                    self._set_album_cover_pixmap(None)
                 return
 
-            self._cover_cache[cover_url] = pixmap
-            if len(self._cover_cache) > 64:
-                oldest_key = next(iter(self._cover_cache))
-                if oldest_key != cover_url:
-                    self._cover_cache.pop(oldest_key, None)
+            store_cached_pixmap(cover_url, pixmap)
+            if _IS_LINUX:
+                store_cover_file(cover_url, raw=raw, pixmap=pixmap)
 
             if cover_url and cover_url == self._current_cover_url:
                 self._set_album_cover_pixmap(pixmap)
+                sync_media = getattr(self, "_sync_system_media", None)
+                if callable(sync_media):
+                    sync_media()
+            ListenMoePlayer._refresh_history_popover_if_visible(self)
         except Exception:
             pass
 
     def _update_media_ambient_background(self, pixmap: Optional[QPixmap]) -> None:
         """Build a subtle blurred background behind cover/title based on current album art."""
         try:
-            if not hasattr(self, "media_ambient_bg"):
+            if not hasattr(self, "media_ambient_bg") or not self.media_ambient_bg.isVisible():
                 return
 
             block = getattr(self, "media_ambient_block", None)
@@ -1916,7 +4317,32 @@ class ListenMoePlayer(QWidget):
 
     def _set_album_cover_pixmap(self, pixmap: Optional[QPixmap]) -> None:
         try:
-            if not hasattr(self, "album_cover_label"):
+            if pixmap is None or pixmap.isNull():
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+                self._current_cover_pixmap = None
+            else:
+                self._current_cover_pixmap = pixmap
+            if hasattr(self, "ambient_cover"):
+                self.ambient_cover.set_cover(pixmap)
+            if hasattr(self, "_content_widget") and isinstance(
+                self._content_widget, FullBleedCanvas
+            ):
+                amb_col = (
+                    self.ambient_cover.ambient_color if hasattr(self, "ambient_cover") else None
+                )
+                self._content_widget.set_backdrop(pixmap, amb_col)
+            if hasattr(self, "mini_hud") and self.mini_hud is not None:
+                self.mini_hud.set_cover(pixmap)
+            if hasattr(self, "tray_mgr") and self.tray_mgr is not None:
+                self.tray_mgr.set_cover_pixmap(pixmap)
+            if hasattr(self, "_settings_dlg") and self._settings_dlg is not None:
+                try:
+                    self._settings_dlg._sync_backdrop_from_parent()
+                except Exception:
+                    pass
+
+            if not hasattr(self, "album_cover_label") or not self.album_cover_label.isVisible():
                 return
 
             side = max(96, int(getattr(self, "_album_cover_size", 190)))
@@ -1966,33 +4392,37 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def _make_tray_icon(self, icon: QIcon) -> QIcon:
-        """Build a tray-friendly square icon that stays large without cropping."""
+    def _build_square_icon(
+        self, icon: QIcon, sizes: tuple[int, ...], fill_ratio: float = 1.0
+    ) -> QIcon:
+        """Trim transparent margins and render centered square icons for multiple target sizes."""
         try:
             if icon is None or icon.isNull():
                 return icon
 
             source_pm = None
             try:
-                sizes = icon.availableSizes()
-                if sizes:
-                    best = max(sizes, key=lambda s: int(s.width()) * int(s.height()))
+                avail = icon.availableSizes()
+                if avail:
+                    best = max(avail, key=lambda s: int(s.width()) * int(s.height()))
                     source_pm = icon.pixmap(best)
             except Exception:
                 source_pm = None
 
             if source_pm is None or source_pm.isNull():
-                source_pm = icon.pixmap(512, 512)
+                max_target = max(sizes) if sizes else 512
+                source_pm = icon.pixmap(max_target, max_target)
             if source_pm.isNull():
                 return icon
+            source_pm.setDevicePixelRatio(1.0)
 
             trimmed = self._trim_transparent_margins(source_pm, alpha_threshold=8)
             if trimmed is not None and not trimmed.isNull():
+                trimmed.setDevicePixelRatio(1.0)
                 source_pm = trimmed
 
-            tray_icon = QIcon()
-            fill_ratio = 0.95
-            for sz in (16, 20, 24, 32, 48, 64):
+            square_icon = QIcon()
+            for sz in sizes:
                 target_side = max(1, int(round(sz * fill_ratio)))
                 fitted = source_pm.scaled(
                     target_side,
@@ -2002,6 +4432,7 @@ class ListenMoePlayer(QWidget):
                 )
                 if fitted.isNull():
                     continue
+                fitted.setDevicePixelRatio(1.0)
                 canvas = QPixmap(sz, sz)
                 canvas.fill(Qt.GlobalColor.transparent)
                 painter = QPainter()
@@ -2015,17 +4446,22 @@ class ListenMoePlayer(QWidget):
                     finally:
                         painter.end()
                 if not canvas.isNull():
-                    tray_icon.addPixmap(canvas)
+                    square_icon.addPixmap(canvas)
 
-            return tray_icon if not tray_icon.isNull() else icon
+            return square_icon if not square_icon.isNull() else icon
         except Exception:
             return icon
+
+    def _make_tray_icon(self, icon: QIcon) -> QIcon:
+        """Build a tray-friendly square icon that stays large without cropping."""
+        return self._build_square_icon(icon, sizes=(16, 20, 24, 32, 48, 64), fill_ratio=0.95)
 
     def _trim_transparent_margins(self, pixmap: QPixmap, alpha_threshold: int = 0) -> QPixmap:
         """Trim outer transparent pixels so tiny tray sizes keep more visible content."""
         try:
             if pixmap is None or pixmap.isNull():
                 return pixmap
+            pixmap.setDevicePixelRatio(1.0)
             img = pixmap.toImage()
             if img.isNull():
                 return pixmap
@@ -2070,64 +4506,17 @@ class ListenMoePlayer(QWidget):
                 return pixmap
             if rect_w == w and rect_h == h:
                 return pixmap
-            return pixmap.copy(left, top, rect_w, rect_h)
+            cropped = pixmap.copy(left, top, rect_w, rect_h)
+            cropped.setDevicePixelRatio(1.0)
+            return cropped
         except Exception:
             return pixmap
 
     def _make_icon_square(self, icon: QIcon, size: int = 512) -> QIcon:
-        """Adds transparent padding to non-square icons to prevent stretching,
-        after cropping existing transparent whitespace to maximize visible area."""
-        try:
-            if icon.isNull():
-                return icon
-            # Use a large base pixmap to preserve quality
-            pixmap = icon.pixmap(size, size)
-            if pixmap.isNull():
-                return icon
-
-            # --- Autocrop transparent whitespace ---
-            try:
-                # Convert to image to find the true bounding box of non-transparent pixels
-                img = pixmap.toImage()
-                if not img.isNull():
-                    # Get the alpha mask bounding rect if possible
-                    # Fallback to manual check if logic is tricky,
-                    # but mask().boundingRect() is usually reliable
-                    mask = img.createAlphaMask()
-                    if not mask.isNull():
-                        from PyQt6.QtGui import QRegion
-
-                        mask_pm = QPixmap.fromImage(mask).mask()
-                        rect = QRegion(mask_pm).boundingRect() if mask_pm else img.rect()
-                    else:
-                        rect = img.rect()
-
-                    if not rect.isEmpty() and rect != img.rect():
-                        pixmap = pixmap.copy(rect)
-            except Exception:
-                pass
-
-            w, h = pixmap.width(), pixmap.height()
-            if w == h:
-                return icon
-
-            # Create a square transparent canvas based on the largest dimension
-            max_side = max(w, h)
-            square_pm = QPixmap(max_side, max_side)
-            square_pm.fill(Qt.GlobalColor.transparent)
-
-            # Center the original (now cropped) pixmap onto the square canvas
-            painter = QPainter(square_pm)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            x = (max_side - w) // 2
-            y = (max_side - h) // 2
-            painter.drawPixmap(x, y, pixmap)
-            painter.end()
-
-            return QIcon(square_pm)
-        except Exception:
-            return icon
+        """Pad non-square app icons onto square transparent canvases for taskbar and window use."""
+        base_sizes = (16, 20, 24, 32, 40, 48, 64, 128, 256)
+        sizes = base_sizes if size in base_sizes else (*base_sizes, size)
+        return self._build_square_icon(icon, sizes=sizes, fill_ratio=1.0)
 
     def _set_buffer_bar_indeterminate(self, active: bool) -> None:
         try:
@@ -2149,6 +4538,11 @@ class ListenMoePlayer(QWidget):
                 self.channel_value.setText(channel)
             if hasattr(self, "format_value"):
                 self.format_value.setText(fmt)
+            if hasattr(self, "status_footer"):
+                self.status_footer.set_format(str(fmt))
+            channel_sw = getattr(self, "channel_switch", None)
+            if channel_sw is not None:
+                channel_sw.set_selected(str(channel))
             # Mantieni o aggiorna titolo finestra in base al Now Playing
             try:
                 title = getattr(self, "_current_title", "") or ""
@@ -2158,121 +4552,526 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
-    def open_settings(self):
+    def _prewarm_settings(self) -> None:
+        """Pre-constructs the embedded settings panel during app startup idle.
+
+        Eliminates the ~350ms construction hitch and disk I/O on first click,
+        guaranteeing that the initial transition into settings runs at silky 60 FPS.
+        """
         try:
-            # Salva stato precedente
-            was_playing = bool(self.player and self.player.is_playing())
-            prev_channel = self.settings.value(KEY_CHANNEL, "J-POP")
-            prev_format = self.settings.value(KEY_FORMAT, "Vorbis")
-            prev_path = self.player.get_configured_path()
-            prev_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
-            prev_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
+            if hasattr(self, "_settings_dlg") and self._settings_dlg is not None:
+                return
+            if not hasattr(self, "_view_stack") or self._view_stack is None:
+                return
+            dlg = SettingsDialog(self, embedded=True)
+            self._settings_dlg = dlg
+            self._view_stack.addWidget(dlg)
+            # Warm up layout and font metrics so the first snapshot is instantaneous
+            self._view_stack._render_snapshot(dlg)
+        except Exception as e:
+            self.log.debug("[UI] _prewarm_settings exception: %s", e)
+
+    def _check_startup_updates(self) -> None:
+        """Background asynchronous OTA update check on startup."""
+        try:
+            enabled = self.settings.value(KEY_UPDATE_CHECK_ON_STARTUP, "true") == "true"
+            if not enabled:
+                return
+
+            last_check = float(self.settings.value(KEY_UPDATE_LAST_CHECK, 0.0) or 0.0)
+            now = time.time()
+            # Check at most once every 12 hours on startup to respect GitHub rate limits
+            if now - last_check < 43200:
+                return
+
+            self.settings.setValue(KEY_UPDATE_LAST_CHECK, now)
+            default_channel = (
+                UPDATE_CHANNEL_BETA
+                if ("-" in APP_VERSION or "beta" in APP_VERSION.lower())
+                else UPDATE_CHANNEL_STABLE
+            )
+            channel = str(self.settings.value(KEY_UPDATE_CHANNEL, default_channel)).strip().lower()
+            ignored_ver = str(self.settings.value(KEY_UPDATE_IGNORED_VERSION, "") or "").strip()
+
+            self._startup_update_worker = UpdateCheckWorker(
+                current_version=APP_VERSION,
+                channel=channel,
+                ignored_version=ignored_ver,
+                parent=self,
+            )
+
+            def _on_update_found(release):
+                if not getattr(self, "_is_shutting_down", False) and self.isVisible():
+                    dlg = UpdateDialog(release, parent=self, i18n=self.i18n)
+                    dlg.show()
+
+            self._startup_update_worker.update_available.connect(_on_update_found)
+            self._startup_update_worker.start()
+        except Exception as e:
+            self.log.debug("[UPDATER] Startup update check error: %s", e)
+
+    def toggle_history_popover(self) -> None:
+        """Open or close the session song history popover card."""
+        try:
+            if not self.isVisible():
+                self.showNormal()
+
+            if (
+                hasattr(self, "_history_popover")
+                and self._history_popover
+                and self._history_popover.isVisible()
+            ):
+                self._history_popover._animate_exit()
+                return
+
+            if not hasattr(self, "_history_popover") or self._history_popover is None:
+                self._history_popover = SongHistoryPopover(
+                    history_manager=self.history_mgr,
+                    parent=self,
+                    i18n=self.i18n,
+                )
+                self._history_popover.closed.connect(self._on_history_popover_closed)
+
+            if hasattr(self, "history_button"):
+                self.history_button.set_active(True)
+
+            # Position popover directly anchored below the history button
+            if hasattr(self, "history_button"):
+                btn_top_left = self.history_button.mapToGlobal(QPoint(0, 0))
+                pop_w = self._history_popover.width()
+                target_x = btn_top_left.x() + self.history_button.width() - pop_w + 20
+                target_x = max(10, target_x)
+                target_y = btn_top_left.y() + self.history_button.height() + 8
+                self._history_popover.open_at(QPoint(target_x, target_y))
+            else:
+                geo = self.geometry()
+                self._history_popover.open_at(QPoint(geo.x() + 40, geo.y() + 60))
+        except Exception:
+            pass
+
+    def _on_history_popover_closed(self) -> None:
+        try:
+            if hasattr(self, "history_button"):
+                self.history_button.set_active(False)
+        except Exception:
+            pass
+
+    def _load_equalizer_state(
+        self,
+    ) -> tuple[bool, str, float, list[float], float, list[float]]:
+        """Read persisted 10-band EQ state from QSettings."""
+        enabled = self._get_bool(KEY_EQ_ENABLED, DEFAULT_EQ_ENABLED)
+        preset = (
+            str(self.settings.value(KEY_EQ_PRESET, DEFAULT_EQ_PRESET) or DEFAULT_EQ_PRESET)
+            .strip()
+            .lower()
+        )
+        if preset not in EQ_PRESET_ORDER:
+            preset = DEFAULT_EQ_PRESET
+        try:
+            preamp = clamp_eq_db(float(self.settings.value(KEY_EQ_PREAMP, DEFAULT_EQ_PREAMP)))
+        except (TypeError, ValueError):
+            preamp = DEFAULT_EQ_PREAMP
+        raw_bands = self.settings.value(KEY_EQ_BANDS, "")
+        bands = parse_eq_bands(raw_bands)
+        if preset != EQ_PRESET_CUSTOM and preset in EQ_PRESETS:
+            p_pre, p_bands = EQ_PRESETS[preset]
+            preamp = clamp_eq_db(p_pre)
+            bands = normalize_eq_bands(p_bands)
+        try:
+            custom_preamp = clamp_eq_db(float(self.settings.value(KEY_EQ_CUSTOM_PREAMP, preamp)))
+        except (TypeError, ValueError):
+            custom_preamp = preamp
+        raw_custom_bands = self.settings.value(KEY_EQ_CUSTOM_BANDS, "")
+        custom_bands = parse_eq_bands(raw_custom_bands) if raw_custom_bands else list(bands)
+        return enabled, preset, preamp, bands, custom_preamp, custom_bands
+
+    def _apply_equalizer_to_player(self) -> None:
+        """Apply persisted EQ configuration to the active audio backend."""
+        try:
+            enabled, _preset, preamp, bands, _cpre, _cbands = self._load_equalizer_state()
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_eq_enabled(enabled)
+            if (
+                hasattr(self, "player")
+                and self.player is not None
+                and hasattr(self.player, "set_equalizer")
+            ):
+                self.player.set_equalizer(enabled, preamp, bands)
+        except Exception as e:
+            self.log.debug("[UI] _apply_equalizer_to_player failed: %s", e)
+
+    def _on_eq_changed(
+        self, enabled: bool, preset_id: str, preamp_db: float, bands_db: list[float]
+    ) -> None:
+        """Persist real-time EQ changes and push them immediately to the active backend."""
+        try:
+            clean_pre = clamp_eq_db(preamp_db)
+            clean_bands = normalize_eq_bands(bands_db)
+            self.settings.setValue(KEY_EQ_ENABLED, "true" if enabled else "false")
+            self.settings.setValue(KEY_EQ_PRESET, str(preset_id))
+            self.settings.setValue(KEY_EQ_PREAMP, clean_pre)
+            self.settings.setValue(KEY_EQ_BANDS, serialize_eq_bands(clean_bands))
+            if preset_id == EQ_PRESET_CUSTOM:
+                self.settings.setValue(KEY_EQ_CUSTOM_PREAMP, clean_pre)
+                self.settings.setValue(KEY_EQ_CUSTOM_BANDS, serialize_eq_bands(clean_bands))
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_eq_enabled(bool(enabled))
+            if (
+                hasattr(self, "player")
+                and self.player is not None
+                and hasattr(self.player, "set_equalizer")
+            ):
+                self.player.set_equalizer(bool(enabled), clean_pre, clean_bands)
+        except Exception as e:
+            self.log.debug("[UI] _on_eq_changed failed: %s", e)
+
+    def toggle_eq_popover(self) -> None:
+        """Open or close the 10-band Cyber-Glass Equalizer popover."""
+        try:
+            if not self.isVisible():
+                self.showNormal()
+
+            if (
+                hasattr(self, "_eq_popover")
+                and self._eq_popover is not None
+                and self._eq_popover.isVisible()
+                and not getattr(self._eq_popover, "_is_closing", False)
+            ):
+                self._eq_popover._animate_exit()
+                return
+
+            if not hasattr(self, "_eq_popover") or self._eq_popover is None:
+                self._eq_popover = EqualizerPopover(parent=self, i18n=self.i18n)
+                self._eq_popover.eq_changed.connect(self._on_eq_changed)
+                self._eq_popover.closed.connect(self._on_eq_popover_closed)
+
+            enabled, preset, preamp, bands, c_pre, c_bands = self._load_equalizer_state()
+            self._eq_popover.set_state(
+                enabled=enabled,
+                preset_id=preset,
+                preamp_db=preamp,
+                bands_db=bands,
+                custom_preamp_db=c_pre,
+                custom_bands_db=c_bands,
+            )
+
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_active(True)
+                btn_tl = self.eq_button.mapToGlobal(QPoint(0, 0))
+                pop_w = self._eq_popover.width()
+                pop_h = self._eq_popover.height()
+                target_x = btn_tl.x() + self.eq_button.width() - pop_w + 12
+                target_y = btn_tl.y() - pop_h - 8
+
+                slide_from_bottom = True
+                screen = self.screen() or QApplication.primaryScreen()
+                if screen is not None:
+                    avail = screen.availableGeometry()
+                    if target_y < avail.top() + 8:
+                        target_y = btn_tl.y() + self.eq_button.height() + 8
+                        slide_from_bottom = False
+                    target_x = max(avail.left() + 8, min(target_x, avail.right() - pop_w - 8))
+                    target_y = max(avail.top() + 8, min(target_y, avail.bottom() - pop_h - 8))
+                else:
+                    target_x = max(10, target_x)
+                    target_y = max(10, target_y)
+
+                self._eq_popover.open_at(
+                    QPoint(target_x, target_y),
+                    slide_from_bottom=slide_from_bottom,
+                    anchor_widget=self.eq_button,
+                )
+            else:
+                geo = self.geometry()
+                self._eq_popover.open_at(QPoint(geo.x() + 20, geo.y() + 80))
+        except Exception as e:
+            self.log.debug("[UI] toggle_eq_popover failed: %s", e)
+
+    def _on_eq_popover_closed(self) -> None:
+        try:
+            if hasattr(self, "eq_button") and self.eq_button is not None:
+                self.eq_button.set_active(False)
+        except Exception:
+            pass
+
+    def _on_track_labels_clicked(self) -> None:
+        """Handler for click on track title, artist, or hover group."""
+        if self._is_local_mode() and self.local_playlist.is_empty():
+            self.prompt_select_local_music()
+            return
+        self._show_track_context_menu(from_chevron=True)
+
+    def _show_track_context_menu(
+        self, pos: Optional[QPoint] = None, from_chevron: bool = False
+    ) -> None:
+        """Display context menu with Quick Search & Clipboard actions for current track."""
+        try:
+            if self._is_local_mode() and self.local_playlist.is_empty():
+                self.prompt_select_local_music()
+                return
+
+            title = (getattr(self, "_current_title", "") or "").strip()
+            artist = (getattr(self, "_current_artist", "") or "").strip()
+
+            if not title or title in ("–", self.i18n.t("unknown")):
+                return
+
+            menu = QMenu(self)
+            menu.setStyleSheet(
+                f"""
+                QMenu {{
+                    background-color: {PALETTE["bg_popover"]};
+                    border: 1px solid {PALETTE["border_card"]};
+                    border-radius: 8px;
+                    padding: 6px 0px;
+                }}
+                QMenu::item {{
+                    padding: 6px 24px 6px 10px;
+                    border-radius: 5px;
+                    margin: 1px 6px;
+                    color: {PALETTE["text_primary"]};
+                    font-size: 12px;
+                }}
+                QMenu::icon {{
+                    padding-left: 4px;
+                }}
+                QMenu::item:selected {{
+                    background-color: {PALETTE["accent_menu_hover"]};
+                    color: {PALETTE["text_primary"]};
+                }}
+                QMenu::separator {{
+                    height: 1px;
+                    background-color: {PALETTE["border_subtle"]};
+                    margin: 4px 8px;
+                }}
+                """
+            )
+
+            # Quick Search Actions with crisp vector icons
+            act_spotify = menu.addAction(get_spotify_icon(16), self.i18n.t("search_spotify"))
+            if act_spotify is not None:
+                act_spotify.triggered.connect(lambda: search_spotify(title, artist))
+
+            act_youtube = menu.addAction(get_youtube_icon(16), self.i18n.t("search_youtube"))
+            if act_youtube is not None:
+                act_youtube.triggered.connect(lambda: search_youtube(title, artist))
+
+            act_apple = menu.addAction(get_apple_music_icon(16), self.i18n.t("search_apple_music"))
+            if act_apple is not None:
+                act_apple.triggered.connect(lambda: search_apple_music(title, artist))
+
+            menu.addSeparator()
+
+            formatted = f"{artist} - {title}" if artist else title
+            act_copy_all = menu.addAction(get_copy_icon(16), self.i18n.t("copy_formatted"))
+            if act_copy_all is not None:
+                act_copy_all.triggered.connect(lambda: copy_to_clipboard(formatted))
+
+            if artist:
+                act_copy_artist = menu.addAction(get_copy_icon(16), self.i18n.t("copy_artist"))
+                if act_copy_artist is not None:
+                    act_copy_artist.triggered.connect(lambda: copy_to_clipboard(artist))
+
+            act_copy_title = menu.addAction(get_copy_icon(16), self.i18n.t("copy_title"))
+            if act_copy_title is not None:
+                act_copy_title.triggered.connect(lambda: copy_to_clipboard(title))
+
+            menu.addSeparator()
+
+            act_history = menu.addAction(
+                get_history_icon(16), f"{self.i18n.t('history_button')}..."
+            )
+            if act_history is not None:
+                act_history.triggered.connect(self.toggle_history_popover)
+
+            is_chevron = (
+                from_chevron
+                or (self.sender() == getattr(self, "track_menu_btn", None))
+                or (self.sender() == getattr(self, "now_playing_title", None))
+            )
+            if hasattr(self, "track_menu_btn") and is_chevron:
+                self.track_menu_btn.set_active(True)
+            if hasattr(self, "now_playing_title") and (
+                is_chevron or self.sender() == getattr(self, "now_playing_title", None)
+            ):
+                self.now_playing_title.set_menu_active(True)
+                self.now_playing_artist.set_menu_active(True)
+
+            def _on_menu_hide() -> None:
+                if hasattr(self, "track_menu_btn"):
+                    self.track_menu_btn.set_active(False)
+                if hasattr(self, "now_playing_title"):
+                    self.now_playing_title.set_menu_active(False)
+                    self.now_playing_title.set_hovered(False)
+                    self.now_playing_artist.set_menu_active(False)
+                    self.track_hover_group.refresh_pointer()
+
+            menu.aboutToHide.connect(_on_menu_hide)
+
+            if hasattr(self, "track_menu_btn") and is_chevron:
+                global_pos = self.track_menu_btn.mapToGlobal(
+                    QPoint(0, self.track_menu_btn.height() + 2)
+                )
+            else:
+                sender = self.sender()
+                if isinstance(sender, QWidget) and pos is not None:
+                    global_pos = sender.mapToGlobal(pos)
+                else:
+                    global_pos = QCursor.pos()
+            menu.exec(global_pos)
+        except Exception:
+            pass
+
+    def _close_embedded_settings(self) -> None:
+        try:
+            if hasattr(self, "settings_button"):
+                self.settings_button.set_active(False)
+            if hasattr(self, "_view_stack"):
+                self._view_stack.slide_to_index(0, direction=-1)
+        except Exception:
+            pass
+
+    def open_settings(self, tab_idx: int = 0):
+        try:
+            # Toggle off with smooth slide-out if embedded settings panel is already open
+            if hasattr(self, "_view_stack") and self._view_stack.currentIndex() == 1:
+                if tab_idx != 0 and hasattr(self, "_settings_dlg") and self._settings_dlg:
+                    self._settings_dlg.set_tab(tab_idx)
+                    return
+                if hasattr(self, "_settings_dlg") and self._settings_dlg:
+                    self._settings_dlg._restore_persisted_theme()
+                self._close_embedded_settings()
+                return
+
+            # Ensure main window is visible if triggered from system tray
+            if not self.isVisible():
+                self.showNormal()
+
+            # Salva stato precedente (mutabile così Apply ripetuti + OK restano idempotenti)
             try:
-                prev_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
+                init_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
             except Exception:
-                prev_nc = 1000
-            prev_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
-            prev_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-            dlg = SettingsDialog(self)
-            try:
-                self._apply_prev_audio_idx = prev_audio_idx
+                init_nc = 1000
+            prev = {
+                "station": str(self.settings.value(KEY_STATION, DEFAULT_STATION)),
+                "channel": str(self.settings.value(KEY_CHANNEL, "J-POP")),
+                "format": str(self.settings.value(KEY_FORMAT, "Vorbis")),
+                "path": self.settings.value(KEY_LIBVLC_PATH, "") or None,
+                "backend": self.settings.value(KEY_AUDIO_BACKEND, "auto"),
+                "tray_enabled": self._get_bool(KEY_TRAY_ENABLED, True),
+                "nc": init_nc,
+                "dev_console": self._get_bool(KEY_DEV_CONSOLE_ENABLED, False),
+                "audio_idx": self.settings.value(KEY_AUDIO_DEVICE_INDEX, ""),
+                "lang": self.settings.value(KEY_LANG, "it"),
+            }
 
-                def _on_apply_from_dialog():
-                    try:
-                        new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-                        if new_audio_idx != getattr(self, "_apply_prev_audio_idx", ""):
-                            if was_playing:
-                                self._restart_playback_with_session_persistence(
-                                    notification_body=(
-                                        "Audio riavviato: il timer di sessione continua"
-                                    )
-                                )
-                            self._apply_prev_audio_idx = new_audio_idx
-                    except Exception:
-                        pass
-
+            # Reuse persistent embedded panel so opening is instantaneous & 60 FPS
+            if not hasattr(self, "_settings_dlg") or self._settings_dlg is None:
+                dlg = SettingsDialog(self, embedded=True)
+                self._settings_dlg = dlg
+                self._view_stack.addWidget(dlg)
+            else:
+                dlg = self._settings_dlg
+                dlg.reload_from_settings()
                 try:
-                    dlg.settings_changed.connect(_on_apply_from_dialog)
-                    # Also update DevConsole [DEV] filter live on settings_changed
-                    try:
-
-                        def _on_settings_changed_apply_filter():
-                            try:
-                                if hasattr(self, "dev_console") and self.dev_console:
-                                    self.dev_console.set_show_dev(
-                                        self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False)
-                                    )
-                            except Exception:
-                                pass
-
-                        dlg.settings_changed.connect(_on_settings_changed_apply_filter)
-                    except Exception:
-                        pass
+                    dlg.accepted.disconnect()
+                    dlg.rejected.disconnect()
+                    dlg.settings_changed.disconnect()
                 except Exception:
                     pass
-            except Exception:
-                pass
 
             def _on_dialog_accepted():
-                # Lingua
+                self.apply_theme()
+                if hasattr(self, "playback_controls"):
+                    self.playback_controls.set_autoplay(self._get_bool(KEY_AUTOPLAY, False))
+                # Lingua: applica solo se effettivamente modificata
                 lang = self.settings.value(KEY_LANG, "it")
-                self.i18n.set_lang("it" if lang not in ("it", "en") else lang)
-                self.apply_translations()
+                if lang != prev["lang"]:
+                    self.i18n.set_lang("it" if lang not in ("it", "en") else lang)
+                    self.apply_translations()
+                prev["lang"] = lang
                 # Aggiorna header e valori visivi canale/formato da QSettings
                 self.update_header_label()
                 if hasattr(self, "channel_value"):
                     self.channel_value.setText(self.settings.value(KEY_CHANNEL, "J-POP"))
                 if hasattr(self, "format_value"):
                     self.format_value.setText(self.settings.value(KEY_FORMAT, "Vorbis"))
-                # Se canale o formato sono cambiati, riavvia WS/stream
-                # ma mantieni il Now Playing finché non arriva un nuovo evento
+                # Gestione cambio stazione / canale / formato senza riavvii errati
+                restarted_stream = False
                 try:
-                    new_channel = self.settings.value(KEY_CHANNEL, "J-POP")
-                    new_format = self.settings.value(KEY_FORMAT, "Vorbis")
-                    if new_channel != prev_channel or new_format != prev_format:
-                        # Mantieni il Now Playing corrente; il WS invierà il nuovo titolo a breve
-                        # Riavvia WS se è cambiato il canale
-                        if new_channel != prev_channel:
+                    new_station = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+                    new_channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+                    new_format = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+                    station_changed = new_station != prev["station"]
+                    channel_changed = new_channel != prev["channel"]
+                    format_changed = new_format != prev["format"]
+
+                    if station_changed:
+                        was_playing_before = bool(self.player and self.player.is_playing())
+                        self.set_radio_provider(
+                            new_station,
+                            new_channel if new_station == STATION_LISTENMOE else None,
+                        )
+                        restarted_stream = was_playing_before
+                    elif channel_changed or format_changed:
+                        is_listenmoe = new_station == STATION_LISTENMOE
+                        if channel_changed and is_listenmoe:
                             try:
-                                self._restart_ws_for_channel(new_channel)
+                                if hasattr(self, "station_mgr") and self.station_mgr:
+                                    self.station_mgr.set_channel(new_channel)
+                                    self.ws = getattr(self.station_mgr, "_active_provider", None)
+                                else:
+                                    self._restart_ws_for_channel(new_channel)
                             except Exception:
                                 pass
-                        self._restart_stream_after_channel_format_change()
-                        # Aggiorna tooltip/menu della tray
+                        should_restart_stream = (channel_changed and is_listenmoe) or (
+                            format_changed and new_station != STATION_LOCAL
+                        )
+                        if should_restart_stream:
+                            restarted_stream = bool(self.player and self.player.is_playing())
+                            self._restart_stream_after_channel_format_change()
                         try:
                             self.update_tray_texts()
                             self.tray_icon_refresh.emit()
                         except Exception:
                             pass
+
+                    prev["station"] = str(self.settings.value(KEY_STATION, DEFAULT_STATION))
+                    prev["channel"] = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+                    prev["format"] = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+                    if hasattr(self, "format_value"):
+                        self.format_value.setText(prev["format"])
                 except Exception:
                     pass
-                # Se il dispositivo audio è cambiato, riavvia il playback per applicarlo
-                try:
-                    new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
-                    if new_audio_idx != prev_audio_idx:
-                        if was_playing:
-                            self._restart_playback_with_session_persistence(
-                                notification_body="Audio riavviato: il timer di sessione continua"
-                            )
-                except Exception:
-                    pass
-                # Percorso VLC / backend
+
+                # Percorso VLC / backend / caching
                 new_path = self.settings.value(KEY_LIBVLC_PATH, "") or None
                 new_backend = self.settings.value(KEY_AUDIO_BACKEND, "auto")
-                path_changed = prev_path != new_path
-                backend_changed = prev_backend != new_backend
-                # Theme (light mode removed, keep dark mode always applied)
-                self.apply_theme()
-                # Ricalibra network caching status
+                path_changed = prev["path"] != new_path
+                backend_changed = prev["backend"] != new_backend
                 self.update_vlc_status_label()
-                # Se backend/path è cambiato o network-caching è variato sensibile, riavvia
                 try:
                     new_nc = int(self.settings.value(KEY_NETWORK_CACHING, 1000))
                 except Exception:
                     new_nc = 1000
-                if backend_changed or path_changed or new_nc != prev_nc:
+                needs_restart = (
+                    backend_changed
+                    or (new_backend == "vlc" and path_changed)
+                    or (prev["backend"] == "auto" and path_changed)
+                    or (new_nc != prev["nc"])
+                )
+                prev["path"] = new_path
+                prev["backend"] = new_backend
+                prev["nc"] = new_nc
+
+                new_audio_idx = self.settings.value(KEY_AUDIO_DEVICE_INDEX, "")
+                audio_changed = new_audio_idx != prev["audio_idx"]
+                prev["audio_idx"] = new_audio_idx
+
+                if needs_restart:
+                    resume_after_recreate = bool(self.player and self.player.is_playing())
                     self.status_changed.emit(self.t("status_restarting"))
-                    time.sleep(0.5)
                     # Recreate player with new settings
                     try:
                         self.player.stop()
@@ -2281,18 +5080,38 @@ class ListenMoePlayer(QWidget):
                     try:
                         self.player = self._create_player(on_event=self._on_player_event)
                     except Exception:
-                        self.player = PlayerVLC(
+                        from audio.player_vlc import PlayerVLC as _PlayerVLC
+
+                        self.player = _PlayerVLC(
                             on_event=self._on_player_event,
                             libvlc_path=new_path,
                             network_caching_ms=new_nc,
                         )
-                    self.player.set_volume(self.volume_slider.value())
+                    self._apply_effective_volume(self.volume_slider.value())
                     self.player.set_mute(self.mute_button.isChecked())
+                    self._apply_equalizer_to_player()
                     self.update_vlc_status_label()
+                    if resume_after_recreate:
+                        QTimer.singleShot(200, self.play_stream)
+                elif audio_changed and not restarted_stream:
+                    try:
+                        if self.player and self.player.is_playing():
+                            self._restart_playback_with_session_persistence(
+                                notification_body=self.t("tray_audio_restarted")
+                            )
+                    except Exception:
+                        pass
+
+                self._sync_sleep_timer_visibility()
+                self._sync_ambient_mode()
+                self._sync_dynamic_volume_settings()
+                self._sync_lyrics_settings()
+                self._sync_discord_settings()
                 # Tray visibility may have changed
                 new_tray_enabled = self._get_bool(KEY_TRAY_ENABLED, True)
-                if new_tray_enabled != prev_tray_enabled:
+                if new_tray_enabled != prev["tray_enabled"]:
                     self._ensure_tray(new_tray_enabled)
+                prev["tray_enabled"] = new_tray_enabled
                 # Session timer enable/disable may have changed
                 try:
                     new_session_enabled = self._get_bool(KEY_SESSION_TIMER_ENABLED, True)
@@ -2316,9 +5135,16 @@ class ListenMoePlayer(QWidget):
                     self.update_tray_texts()
                 except Exception:
                     pass
-                # Dev console enable/disable may have changed
+                # Dev console enable/disable and [DEV] filter may have changed
+                if hasattr(self, "dev_console") and self.dev_console:
+                    try:
+                        self.dev_console.set_show_dev(
+                            self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False)
+                        )
+                    except Exception:
+                        pass
                 new_dev_console = self._get_bool(KEY_DEV_CONSOLE_ENABLED, False)
-                if new_dev_console != prev_dev_console:
+                if new_dev_console != prev["dev_console"]:
                     try:
                         if not new_dev_console:
                             if hasattr(self, "dev_console") and self.dev_console:
@@ -2326,33 +5152,65 @@ class ListenMoePlayer(QWidget):
                                     self.dev_console.deactivate_logging()
                                 except Exception:
                                     pass
-                                # Non chiudere la UI della console: consenti all'utente
-                                # di aprirla/vederla anche se il logging di background è disattivato
-                                # (prima: self.dev_console.close())
                         else:
                             if hasattr(self, "dev_console") and self.dev_console:
-                                try:
-                                    self.dev_console.set_show_dev(
-                                        self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False)
-                                    )
-                                except Exception:
-                                    pass
                                 try:
                                     self.dev_console.activate_logging()
                                 except Exception:
                                     pass
                     except Exception:
                         pass
+                prev["dev_console"] = new_dev_console
 
-            # collega e mostra non-modale
+            # Collega e mostra nel pannello integrato della home
+            def _on_ok_embedded():
+                self._close_embedded_settings()
+                _on_dialog_accepted()
+
             try:
-                dlg.accepted.connect(_on_dialog_accepted)
+                dlg.accepted.connect(_on_ok_embedded)
+                dlg.rejected.connect(self._close_embedded_settings)
+                dlg.settings_changed.connect(_on_dialog_accepted)
             except Exception:
                 pass
             try:
-                dlg.show()
+                if hasattr(dlg, "set_tab"):
+                    dlg.set_tab(tab_idx)
+                if hasattr(self, "settings_button"):
+                    self.settings_button.set_active(True)
+                self._view_stack.slide_to_index(1, direction=1)
             except Exception:
                 pass
+        except Exception:
+            pass
+
+    def open_about(self) -> None:
+        """Opens Info & Credits: in embedded settings if visible, or standalone dialog if hidden."""
+        try:
+            if not self.isVisible():
+                from ui.about_dialog import AboutDialog
+
+                backend_name = "Audio"
+                if hasattr(self, "player") and self.player is not None:
+                    backend_name = getattr(
+                        self.player,
+                        "BACKEND_NAME",
+                        type(self.player).__name__.replace("Player", ""),
+                    )
+                if not hasattr(self, "_about_dialog") or self._about_dialog is None:
+                    self._about_dialog = AboutDialog(
+                        self,
+                        i18n=self.i18n,
+                        backend_name=backend_name,
+                    )
+                else:
+                    self._about_dialog.about_widget.set_i18n(self.i18n)
+                    self._about_dialog.about_widget.set_backend_name(backend_name)
+                self._about_dialog.show()
+                self._about_dialog.raise_()
+                self._about_dialog.activateWindow()
+            else:
+                self.open_settings(tab_idx=3)
         except Exception:
             pass
 
@@ -2375,9 +5233,10 @@ class ListenMoePlayer(QWidget):
                     self.dev_console = DevConsole(self, translator=self.i18n, logger=self.log)
                 except Exception:
                     return
-            # Ensure the [DEV] filter is up-to-date with settings
+            # Ensure the [DEV] filter and translator are up-to-date with settings
             try:
                 if hasattr(self, "dev_console") and self.dev_console:
+                    self.dev_console.set_translator(self.i18n)
                     self.dev_console.set_show_dev(self._get_bool(KEY_DEV_CONSOLE_SHOW_DEV, False))
             except Exception:
                 pass
@@ -2427,7 +5286,11 @@ class ListenMoePlayer(QWidget):
                 self.sleep_label.setText(
                     self.t("sleep_remaining", time=self._format_mmss(self._sleep_remaining_sec))
                 )
-                self.sleep_label.setVisible(True)
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_active_countdown(self._sleep_remaining_sec)
+            if hasattr(self, "playback_controls"):
+                m, s = divmod(max(0, self._sleep_remaining_sec), 60)
+                self.playback_controls.set_sleep_active(True, f"{m:02d}:{s:02d}")
         except Exception:
             pass
 
@@ -2446,6 +5309,10 @@ class ListenMoePlayer(QWidget):
             if hasattr(self, "sleep_label"):
                 self.sleep_label.setText("")
                 self.sleep_label.setVisible(False)
+            if hasattr(self, "sleep_timer_widget"):
+                self.sleep_timer_widget.set_inactive()
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_sleep_active(False)
         except Exception:
             pass
 
@@ -2483,24 +5350,25 @@ class ListenMoePlayer(QWidget):
             pass
 
     def get_selected_stream_url(self) -> str:
-        """Restituisce l'URL dello stream in base a canale e formato nelle impostazioni."""
+        """Restituisce l'URL dello stream in base a stazione, canale e formato."""
         try:
-            channel = self.settings.value(KEY_CHANNEL, "J-POP")
-            fmt = self.settings.value(KEY_FORMAT, "Vorbis")
-            urls = STREAMS.get(channel)
-            if isinstance(urls, dict):
-                url = urls.get(fmt)
+            if self._is_local_mode():
+                if hasattr(self, "local_playlist") and self.local_playlist:
+                    curr = self.local_playlist.get_current_track()
+                    if curr and curr.file_path:
+                        return str(curr.file_path)
+                return ""
+
+            if hasattr(self, "station_mgr") and self.station_mgr:
+                url = self.station_mgr.get_stream_url()
                 if url:
-                    return url
-                # fallback: prova Vorbis, altrimenti il primo disponibile
-                url = urls.get("Vorbis") or (next(iter(urls.values())) if urls else None)
-                if url:
-                    return url
-            # fallback globale noto
-            jpop = STREAMS.get("J-POP", {})
-            return jpop.get("Vorbis") or (
-                next(iter(jpop.values())) if jpop else "https://listen.moe/stream"
+                    return str(url)
+            station = getattr(self, "_current_radio_provider", None) or str(
+                self.settings.value(KEY_STATION, DEFAULT_STATION)
             )
+            channel = str(self.settings.value(KEY_CHANNEL, "J-POP"))
+            fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+            return get_station_stream_url(station, channel, fmt)
         except Exception:
             return "https://listen.moe/stream"
 
@@ -2562,12 +5430,25 @@ class ListenMoePlayer(QWidget):
             pass
         title = self._current_title or self.t("unknown")
         artist = self._current_artist or ""
-        text = f"<b>{title}</b>" + (f" — {artist}" if artist and title != "–" else "")
+        text = f"{title}" + (f" — {artist}" if artist and title != "–" else "")
         # Append remaining or total duration
         time_text = "--:--"
         try:
             if getattr(self, "_current_duration_seconds", None) == 0:
                 time_text = self.t("live_mode")
+                start_epoch = self._current_start_epoch
+                if start_epoch is not None:
+                    try:
+                        import time
+
+                        now = time.time() + getattr(self, "_clock_sync_offset", 0)
+                        elapsed = max(0.0, now - start_epoch)
+                        if hasattr(self, "song_elapsed_label"):
+                            self.song_elapsed_label.setText(self._format_mmss(int(elapsed)))
+                    except Exception:
+                        pass
+                elif hasattr(self, "song_elapsed_label"):
+                    self.song_elapsed_label.setText("0:00")
             elif self._current_duration_seconds and int(self._current_duration_seconds) > 0:
                 # Prefer remaining time only if start timestamp is plausible;
                 # otherwise show total duration
@@ -2576,7 +5457,14 @@ class ListenMoePlayer(QWidget):
                     dur = int(self._current_duration_seconds)
                 except Exception:
                     dur = None
-                if dur and self._current_start_epoch is not None:
+                if dur and self._is_local_mode():
+                    curr_t = self._get_local_playback_seconds()
+                    elapsed_sec = max(0, min(int(curr_t), dur))
+                    remaining_sec = max(0, dur - elapsed_sec)
+                    mmss = self._format_mmss(remaining_sec)
+                    if hasattr(self, "song_elapsed_label"):
+                        self.song_elapsed_label.setText(self._format_mmss(elapsed_sec))
+                elif dur and self._current_start_epoch is not None:
                     try:
                         import time
 
@@ -2593,12 +5481,20 @@ class ListenMoePlayer(QWidget):
                         remaining = dur - max(0, elapsed)
                         if remaining < 0:
                             remaining = 0
-                        mmss = self._format_mmss(remaining)
+                        mmss = self._format_mmss(int(remaining))
+                        if hasattr(self, "song_elapsed_label"):
+                            self.song_elapsed_label.setText(
+                                self._format_mmss(int(max(0, min(elapsed, dur))))
+                            )
                     else:
                         # Fallback to total duration to avoid misleading or extreme values
                         mmss = self._format_mmss(dur)
+                        if hasattr(self, "song_elapsed_label"):
+                            self.song_elapsed_label.setText("0:00")
                 elif dur:
                     mmss = self._format_mmss(dur)
+                    if hasattr(self, "song_elapsed_label"):
+                        self.song_elapsed_label.setText("0:00")
                 if mmss:
                     time_text = mmss
         except Exception:
@@ -2608,6 +5504,10 @@ class ListenMoePlayer(QWidget):
                 self.song_time_label.setText(time_text)
         except Exception:
             pass
+        if hasattr(self, "now_playing_title"):
+            self.now_playing_title.setText(title)
+        if hasattr(self, "now_playing_artist"):
+            self.now_playing_artist.setText(artist)
         self.now_playing_changed.emit(text)
         # Update window title too
         try:
@@ -2644,6 +5544,11 @@ class ListenMoePlayer(QWidget):
             if not hasattr(self, "tray_mgr") or self.tray_mgr is None:
                 return
             self.tray_mgr.update_tooltip(self._get_tray_tooltip())
+            self.tray_mgr.sync_stream_settings(
+                channel=str(self.settings.value(KEY_CHANNEL, "J-POP")),
+                fmt=str(self.settings.value(KEY_FORMAT, "Vorbis")),
+                station=str(self.settings.value(KEY_STATION, DEFAULT_STATION)),
+            )
         except Exception:
             pass
 
@@ -2652,10 +5557,19 @@ class ListenMoePlayer(QWidget):
         try:
             # Header
             try:
-                header = self.i18n.t("header").format(
-                    channel=self.settings.value(KEY_CHANNEL, "J-POP"),
-                    format=self.settings.value(KEY_FORMAT, "Vorbis"),
+                station_id = str(
+                    getattr(self, "_current_radio_provider", None)
+                    or self.settings.value(KEY_STATION, DEFAULT_STATION)
                 )
+                fmt = self.settings.value(KEY_FORMAT, "Vorbis")
+                if station_id == STATION_LISTENMOE:
+                    header = self.i18n.t("header").format(
+                        channel=self.settings.value(KEY_CHANNEL, "J-POP"),
+                        format=fmt,
+                    )
+                else:
+                    st_disp = get_station_display_name(station_id, self.i18n)
+                    header = f"{st_disp} - {fmt}" if fmt else st_disp
             except Exception:
                 if hasattr(self, "label"):
                     header = self.label.text()
@@ -2739,13 +5653,16 @@ class ListenMoePlayer(QWidget):
                     self.tray_mgr = TrayManager(
                         self,
                         self.i18n,
-                        on_show_window=self.showNormal,
+                        on_show_window=self._show_window_from_tray,
                         on_open_settings=self.open_settings,
+                        on_change_station=self.set_radio_provider,
                         on_change_channel=self._tray_change_channel,
                         on_change_format=self._tray_change_format,
                         on_toggle_play_pause=self._tray_toggle_play_pause,
                         on_stop_stream=self.stop_stream,
                         on_toggle_mute=self.toggle_mute_shortcut,
+                        on_quit=self._on_tray_quit,
+                        on_about=self.open_about,
                     )
                 except Exception:
                     return
@@ -2785,6 +5702,14 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
 
+    def _on_tray_quit(self) -> None:
+        """Triggered when the user selects 'Quit' from the tray menu."""
+        try:
+            self._from_tray_quit = True
+            self.close()
+        finally:
+            self._from_tray_quit = False
+
     def _tray_change_format(self, fmt: str) -> None:
         try:
             self._apply_tray_stream_setting_change(KEY_FORMAT, fmt)
@@ -2798,6 +5723,13 @@ class ListenMoePlayer(QWidget):
         try:
             try:
                 self.settings.setValue(key, value)
+            except Exception:
+                pass
+            try:
+                if key == KEY_FORMAT and hasattr(self, "format_value") and self.format_value:
+                    self.format_value.setText(value)
+                elif key == KEY_CHANNEL and hasattr(self, "channel_value") and self.channel_value:
+                    self.channel_value.setText(value)
             except Exception:
                 pass
             try:
@@ -2826,7 +5758,7 @@ class ListenMoePlayer(QWidget):
                 was_playing = False
             if was_playing:
                 self._restart_playback_with_session_persistence(
-                    notification_body="Audio riavviato: il timer di sessione continua"
+                    notification_body=self.t("tray_audio_restarted")
                 )
             else:
                 # Se non stava riproducendo, aggiorna comunque icona/tooltip
@@ -2844,11 +5776,13 @@ class ListenMoePlayer(QWidget):
             ok = bool(self.player and self.player.is_ready())
             # Aggiorna pallino colore
             try:
-                self.vlc_status_icon.setStyleSheet(  # type: ignore[attr-defined]
-                    "background-color: #2e7d32; border-radius: 5px;"
-                    if ok
-                    else "background-color: #c62828; border-radius: 5px;"
-                )
+                vlc_icon = getattr(self, "vlc_status_icon", None)
+                if vlc_icon is not None:
+                    vlc_icon.setStyleSheet(
+                        "background-color: #2e7d32; border-radius: 5px;"
+                        if ok
+                        else "background-color: #c62828; border-radius: 5px;"
+                    )
             except Exception:
                 pass
             # Testo: se disponibile versione, mostralo
@@ -2859,17 +5793,34 @@ class ListenMoePlayer(QWidget):
                     txt = f"{ver}"
             except Exception:
                 txt = None
-            if not ok:
-                self.vlc_status.setText(self.i18n.t("vlc_not_found"))  # type: ignore[attr-defined]
-            else:
-                self.vlc_status.setText(txt or "Audio backend OK")  # type: ignore[attr-defined]
+            vlc_lbl = getattr(self, "vlc_status", None)
+            if vlc_lbl is not None:
+                if not ok:
+                    vlc_lbl.setText(self.i18n.t("vlc_not_found"))
+                else:
+                    vlc_lbl.setText(txt or self.i18n.t("backend_ok"))
+            if hasattr(self, "status_footer"):
+                backend_name = "Audio"
+                if hasattr(self, "player") and self.player is not None:
+                    backend_name = getattr(
+                        self.player,
+                        "BACKEND_NAME",
+                        type(self.player).__name__.replace("Player", ""),
+                    )
+                self.status_footer.set_backend_status(backend_name, is_ready=ok)
+                fmt = str(self.settings.value(KEY_FORMAT, "Vorbis"))
+                self.status_footer.set_format(fmt)
         except Exception:
             pass
 
     # ------------------- Player controls -------------------
     def play_stream(self, is_retry: bool = False, *args) -> None:
+        if getattr(self, "_closing", False):
+            return
         try:
             self._retry_pending = False
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.stop()
             if is_retry and getattr(self, "_retry_count", 0) > self._max_retries:
                 return
             if not is_retry:
@@ -2881,6 +5832,19 @@ class ListenMoePlayer(QWidget):
                     url = self.get_selected_stream_url()
                 except Exception:
                     url = None
+                if self._is_local_mode() and (not url or self.local_playlist.is_empty()):
+                    if hasattr(self, "player") and self.player and self.player.is_playing():
+                        self.player.stop()
+                    self._refresh_play_button_text(False)
+                    self.status_changed.emit(self.i18n.t("queue_empty_hint"))
+                    if (
+                        hasattr(self, "_local_prompt_timer")
+                        and self._local_prompt_timer is not None
+                    ):
+                        self._local_prompt_timer.start(100)
+                    else:
+                        QTimer.singleShot(100, self._prompt_local_music_if_needed)
+                    return
                 if not hasattr(self, "player") or self.player is None or not url:
                     try:
                         self.log.info("[UI] play_stream aborted: no player backend or url")
@@ -2889,7 +5853,7 @@ class ListenMoePlayer(QWidget):
                     self.status_changed.emit(self.t("status_error"))
                     return
                 if not getattr(self.player, "is_ready", lambda: False)():
-                    init_err = getattr(self.player, "get_init_error", lambda: "sconosciuto")()
+                    init_err = getattr(self.player, "get_init_error", lambda: "unknown")()
                     self.log.error(
                         "[UI] play_stream aborted: backend %s is not ready: %s",
                         type(self.player).__name__,
@@ -2907,14 +5871,21 @@ class ListenMoePlayer(QWidget):
                         self.player.is_ready(),
                         getattr(self.player, "get_init_error", lambda: None)(),
                     )
-                    # Sanitizza URL prima di log e play
+                    # Sanitizza URL prima di log e play (preserva i percorsi file locali)
                     try:
-                        m = re.search(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or "")
-                        safe_url = (m.group(0) if m else (url or "").strip()).rstrip(
-                            ".,;!?)]}'\" \t\r\n"
-                        )
-                        if safe_url.lower().endswith("/mp3.") or safe_url.lower().endswith(".mp3."):
-                            safe_url = safe_url[:-1]
+                        if self._is_local_mode() or os.path.isfile(url):
+                            safe_url = url
+                        else:
+                            m = re.search(
+                                r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&()*+,;=%]+", url or ""
+                            )
+                            safe_url = (m.group(0) if m else (url or "").strip()).rstrip(
+                                ".,;!?)]}'\" \t\r\n"
+                            )
+                            if safe_url.lower().endswith("/mp3.") or safe_url.lower().endswith(
+                                ".mp3."
+                            ):
+                                safe_url = safe_url[:-1]
                     except Exception:
                         safe_url = url
                     self.log.info(f"[UI] play_stream url={safe_url}")
@@ -2923,6 +5894,11 @@ class ListenMoePlayer(QWidget):
                 self.status_changed.emit(
                     self.t("status_opening") if hasattr(self, "t") else "Opening..."
                 )
+                try:
+                    if hasattr(self, "song_progress"):
+                        self.song_progress.trigger_play_launch()
+                except Exception:
+                    pass
                 # Preserva il timer se stiamo già riproducendo
                 # (es. cambio URL o click Riproduci mentre attivo)
                 try:
@@ -2934,7 +5910,7 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
                 ok = self.player.play_url(safe_url)
-                if not ok:
+                if not ok and not self._is_local_mode():
                     # Fallback: prova formato alternativo per lo stesso canale
                     try:
                         channel = self.settings.value(KEY_CHANNEL, "J-POP")
@@ -2998,10 +5974,24 @@ class ListenMoePlayer(QWidget):
                     self.log.info("[UI] pause_resume clicked")
                 except Exception:
                     pass
-                # Aggiorna subito lo stato UI di pausa e la tray (pre-toggle)
+                is_playing = False
+                is_paused_backend = False
                 try:
-                    new_paused = not bool(getattr(self, "_ui_paused", False))
-                    self._ui_paused = new_paused
+                    is_playing = bool(getattr(self.player, "is_playing", lambda: False)())
+                    is_paused_backend = bool(getattr(self.player, "is_paused", lambda: False)())
+                except Exception:
+                    pass
+
+                if not is_playing and not is_paused_backend:
+                    needs_play = True
+                    new_paused = False
+                else:
+                    effective_paused = bool(getattr(self, "_ui_paused", False) or is_paused_backend)
+                    new_paused = not effective_paused
+
+                # Aggiorna subito lo stato UI di pausa e la tray (pre-toggle)
+                self._ui_paused = new_paused
+                try:
                     is_muted = bool(getattr(self.player, "get_mute", lambda: False)())
                     if hasattr(self, "tray_mgr") and self.tray_mgr:
                         self.log.debug(
@@ -3013,25 +6003,15 @@ class ListenMoePlayer(QWidget):
                 except Exception:
                     pass
 
-                if not new_paused:
-                    try:
-                        is_playing = getattr(self.player, "is_playing", lambda: False)()
-                        is_paused_backend = getattr(self.player, "is_paused", lambda: False)()
-                        if not is_playing and not is_paused_backend:
-                            needs_play = True
-                    except Exception:
-                        pass
-
                 if not needs_play:
                     # Esegui il toggle del backend
                     self.player.pause_toggle()
-
-                # Gestisci il session timer e aggiorna solo il tooltip
-                try:
-                    self._apply_session_timer_running_state(not new_paused)
-                except Exception:
-                    pass
-                self._refresh_play_button_text(not new_paused)
+                    # Gestisci il session timer e aggiorna stato pulsante
+                    try:
+                        self._apply_session_timer_running_state(not new_paused)
+                    except Exception:
+                        pass
+                    self._refresh_play_button_text(not new_paused)
 
             if needs_play:
                 try:
@@ -3045,11 +6025,17 @@ class ListenMoePlayer(QWidget):
     def stop_stream(self, reset_session: bool = True) -> None:
         try:
             self._retry_count = 0
+            self._retry_pending = False
+            if hasattr(self, "_retry_timer") and self._retry_timer is not None:
+                self._retry_timer.stop()
+            if hasattr(self, "_local_prompt_timer") and self._local_prompt_timer is not None:
+                self._local_prompt_timer.stop()
             try:
                 self.log.info("[UI] stop_stream clicked")
             except Exception:
                 pass
             with self._playback_lock:
+                self._ui_paused = False
                 # Stop backend playback
                 try:
                     self.player.stop()
@@ -3119,20 +6105,95 @@ class ListenMoePlayer(QWidget):
         except Exception as e:
             self.status_changed.emit(f"{self.t('status_error')} {e}")
 
+    def _effective_volume(self, user_volume: int) -> int:
+        """Compute backend volume (0..100) after applying the active dynamic volume factor."""
+        base = max(0, min(100, int(user_volume)))
+        if base <= 0:
+            return 0
+        factor = max(0.0, min(1.0, float(getattr(self, "_dynamic_volume_factor", 1.0))))
+        if factor >= 0.999:
+            return base
+        return max(1, min(100, int(round(base * factor))))
+
+    def _apply_effective_volume(self, user_volume: Optional[int] = None) -> int:
+        """Apply scaled volume to the backend and refresh UI badges without changing KEY_VOLUME."""
+        if user_volume is None:
+            if hasattr(self, "volume_slider"):
+                base = int(self.volume_slider.value())
+            else:
+                try:
+                    base = int(self.settings.value(KEY_VOLUME, 60))
+                except (TypeError, ValueError):
+                    base = 60
+        else:
+            base = int(user_volume)
+        base = max(0, min(100, base))
+        effective = self._effective_volume(base)
+
+        try:
+            if hasattr(self, "player") and self.player:
+                self.player.set_volume(effective)
+        except Exception:
+            pass
+
+        app_name = str(getattr(self, "_dynamic_volume_app", "") or "")
+        factor = float(getattr(self, "_dynamic_volume_factor", 1.0))
+        is_ducked = bool(app_name) and factor < 0.999
+        tooltip = (
+            self.i18n.t(
+                "dynamic_volume_ducked_tooltip",
+                effective=effective,
+                app=app_name,
+                base=base,
+            )
+            if is_ducked
+            else f"{base}%"
+        )
+        try:
+            if hasattr(self, "playback_controls") and self.playback_controls is not None:
+                self.playback_controls.set_volume_display(
+                    effective, is_ducked=is_ducked, tooltip=tooltip
+                )
+            else:
+                if hasattr(self, "volume_value_label"):
+                    self.volume_value_label.setText(f"{effective}%")
+                if hasattr(self, "volume_slider"):
+                    self.volume_slider.setToolTip(tooltip)
+        except Exception:
+            pass
+        return effective
+
+    def _sync_dynamic_volume_settings(self) -> None:
+        """Reload Dynamic Volume configuration from QSettings into the controller."""
+        ctrl = getattr(self, "dynamic_volume", None)
+        if ctrl is None:
+            return
+        enabled = self._get_bool(KEY_DYNAMIC_VOLUME_ENABLED, DEFAULT_DYNAMIC_VOLUME_ENABLED)
+        apps_raw = str(
+            self.settings.value(KEY_DYNAMIC_VOLUME_APPS, DEFAULT_DYNAMIC_VOLUME_APPS)
+            or DEFAULT_DYNAMIC_VOLUME_APPS
+        )
+        try:
+            level = int(self.settings.value(KEY_DYNAMIC_VOLUME_LEVEL, DEFAULT_DYNAMIC_VOLUME_LEVEL))
+        except (TypeError, ValueError):
+            level = DEFAULT_DYNAMIC_VOLUME_LEVEL
+        mode = str(
+            self.settings.value(KEY_DYNAMIC_VOLUME_MODE, DEFAULT_DYNAMIC_VOLUME_MODE)
+            or DEFAULT_DYNAMIC_VOLUME_MODE
+        )
+        ctrl.configure(enabled, apps_raw, level, mode)
+
+    def _on_dynamic_volume_factor_changed(self, factor: float, active_app: str) -> None:
+        self._dynamic_volume_factor = max(0.05, min(1.0, float(factor)))
+        self._dynamic_volume_app = str(active_app or "")
+        self._apply_effective_volume()
+
     def change_volume(self, value: int) -> None:
         try:
-            self.player.set_volume(int(value))
+            self._apply_effective_volume(int(value))
             self.settings.setValue(KEY_VOLUME, int(value))
-            # Aggiorna UI volume
             try:
-                if hasattr(self, "volume_value_label"):
-                    self.volume_value_label.setText(f"{int(value)}%")
-                if hasattr(self, "volume_slider"):
-                    self.volume_slider.setToolTip(f"{int(value)}%")
-            except Exception:
-                pass
-            try:
-                self.log.info(f"[UI] volume_changed -> {int(value)}")
+                self.log.debug(f"[UI] volume_changed -> {int(value)}")
             except Exception:
                 pass
         except Exception:
@@ -3144,15 +6205,12 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         try:
+            if hasattr(self, "playback_controls"):
+                self.playback_controls.set_muted(checked)
             self.mute_button.setText(self.i18n.t("unmute") if checked else self.i18n.t("mute"))
-            # Update tooltip and icon according to state
-            try:
-                self.mute_button.setToolTip(
-                    self.i18n.t("tt_unmute") if checked else self.i18n.t("tt_mute")
-                )
-                self.mute_button.setIcon(self._icon_mute if checked else self._icon_unmute)
-            except Exception:
-                pass
+            self.mute_button.setToolTip(
+                self.i18n.t("tt_unmute") if checked else self.i18n.t("tt_mute")
+            )
         except Exception:
             pass
         try:
@@ -3180,7 +6238,8 @@ class ListenMoePlayer(QWidget):
                     vol = 0
                 if vol <= 0:
                     try:
-                        msg = QMessageBox(self)
+                        parent_widget = self if self.isVisible() else None
+                        msg = QMessageBox(parent_widget)
                         msg.setWindowTitle(self.i18n.t("volume_zero_title"))
                         msg.setText(self.i18n.t("volume_zero_text"))
                         restore_btn = msg.addButton(
@@ -3200,7 +6259,7 @@ class ListenMoePlayer(QWidget):
                             if hasattr(self, "volume_slider"):
                                 self.volume_slider.setValue(60)
                             else:
-                                self.player.set_volume(60)
+                                self._apply_effective_volume(60)
                             try:
                                 self.settings.setValue(KEY_VOLUME, 60)
                             except Exception:
@@ -3216,7 +6275,10 @@ class ListenMoePlayer(QWidget):
         except Exception:
             pass
         try:
-            self.mute_button.toggle()
+            if hasattr(self, "playback_controls"):
+                self.playback_controls._on_speaker_clicked()
+            else:
+                self.mute_button.toggle()
         except Exception:
             pass
 
@@ -3253,3 +6315,341 @@ class ListenMoePlayer(QWidget):
                 self.update_tray_texts()
         except Exception:
             pass
+
+    # ------------------- Local Music & Drag-and-Drop -------------------
+
+    def _is_local_mode(self) -> bool:
+        """Returns True if the currently selected station is Local Music."""
+        if hasattr(self, "station_mgr") and self.station_mgr:
+            return bool(self.station_mgr.current_station_id == STATION_LOCAL)
+        return (
+            str(self.settings.value(KEY_STATION, DEFAULT_STATION)).lower().strip() == STATION_LOCAL
+        )
+
+    def _get_local_playback_seconds(self) -> float:
+        """Return current local track playback position in seconds (non-negative)."""
+        if hasattr(self, "player") and self.player:
+            t = getattr(self.player, "get_time", lambda: 0.0)()
+            if t is not None:
+                raw_t = max(0.0, float(t))
+                hold_until = getattr(self, "_seek_hold_until", 0.0)
+                if hold_until > 0.0:
+                    hold_target = getattr(self, "_seek_hold_target", raw_t)
+                    if time.monotonic() < hold_until and abs(raw_t - hold_target) > 1.5:
+                        return float(hold_target)
+                    self._seek_hold_until = 0.0
+                return raw_t
+        return 0.0
+
+    def _apply_local_seek(self, target_sec: float, duration_sec: Optional[float] = None) -> None:
+        """Seek local playback to target_sec and synchronize UI state without bouncing."""
+        dur = (
+            duration_sec
+            if duration_sec is not None
+            else getattr(self, "_current_duration_seconds", 0)
+        )
+        clamped = max(0.0, float(target_sec))
+        if dur and dur > 0:
+            clamped = min(float(dur), clamped)
+        if hasattr(self, "player") and self.player:
+            try:
+                self.player.seek(clamped)
+            except Exception as e:
+                self.log.warning(f"[UI] Seek failed: {e}")
+        self._seek_hold_target = clamped
+        self._seek_hold_until = time.monotonic() + 0.35
+        self._last_integer_second = int(clamped)
+        if dur and dur > 0:
+            self.song_progress._display_ratio = clamped / float(dur)
+        else:
+            self.song_progress._display_ratio = 0.0
+        self.song_progress.setValue(int(clamped * 1000))
+        if hasattr(self, "lyrics_panel") and self.lyrics_panel:
+            self.lyrics_panel.set_position(clamped)
+        if hasattr(self, "song_elapsed_label"):
+            self.song_elapsed_label.setText(self._format_mmss(int(clamped)))
+        if hasattr(self, "song_time_label") and dur and dur > 0:
+            rem = max(0, int(float(dur) - clamped))
+            self.song_time_label.setText(self._format_mmss(rem))
+
+    def play_next_track(self) -> None:
+        """Advances to the next track in the local queue and starts playback."""
+        if not self._is_local_mode():
+            return
+        self._playback_ended_stopped = False
+        next_track = self.local_playlist.next_track()
+        if next_track:
+            self.log.info(f"[UI] Next local track: {next_track.title} by {next_track.artist}")
+            self.play_stream(is_retry=False)
+        else:
+            self.log.info("[UI] Next track reached end of playlist.")
+            if not getattr(self, "_playback_ended_stopped", False):
+                self.stop_stream()
+
+    def play_previous_track(self) -> None:
+        """Returns to previous track (or restarts current track if >3s in)."""
+        if not self._is_local_mode():
+            return
+        curr_time = self._get_local_playback_seconds()
+        if curr_time > 3.0:
+            try:
+                self._apply_local_seek(0.0)
+                return
+            except Exception:
+                pass
+
+        prev_track = self.local_playlist.previous_track()
+        if prev_track:
+            self.log.info(f"[UI] Previous local track: {prev_track.title} by {prev_track.artist}")
+            self.play_stream(is_retry=False)
+        else:
+            self.log.info("[UI] Previous track reached start of playlist.")
+
+    def show_local_queue_dialog(self) -> None:
+        """Opens or brings to front the frameless Local Queue manager dialog."""
+        if self._queue_dialog is None:
+            self._queue_dialog = LocalQueueDialog(self.local_playlist, self, i18n=self.i18n)
+            self._queue_dialog.play_track_requested.connect(self._on_queue_play_track_requested)
+        if self._queue_dialog.isVisible() and not getattr(self._queue_dialog, "_is_closing", False):
+            self._queue_dialog.activateWindow()
+            self._queue_dialog.raise_()
+        else:
+            self._queue_dialog.show()
+            self._queue_dialog.activateWindow()
+            self._queue_dialog.raise_()
+
+    def _on_queue_play_track_requested(self, index: int) -> None:
+        """Plays the track selected in the queue dialog."""
+        if self.local_playlist.set_current_index(index):
+            if (
+                hasattr(self, "station_mgr")
+                and self.station_mgr.current_station_id != STATION_LOCAL
+            ):
+                self.set_radio_provider(STATION_LOCAL)
+            self.play_stream(is_retry=False)
+
+    def prompt_select_local_music(self) -> None:
+        """Opens prompt dialog to pick local folder, files, or manage queue."""
+        try:
+            from ui.widgets.local_prompt_dialog import LocalMusicPromptDialog
+
+            if self._local_prompt_dialog is not None:
+                if self._local_prompt_dialog.isVisible() and not getattr(
+                    self._local_prompt_dialog, "_is_closing", False
+                ):
+                    self._local_prompt_dialog.activateWindow()
+                    self._local_prompt_dialog.raise_()
+                    return
+                self._local_prompt_dialog.deleteLater()
+                self._local_prompt_dialog = None
+
+            dlg = LocalMusicPromptDialog(
+                self.local_playlist,
+                parent=self,
+                i18n=self.i18n,
+            )
+            self._local_prompt_dialog = dlg
+
+            def _on_prompt_closed(*_args: Any) -> None:
+                if self._local_prompt_dialog is dlg:
+                    self._local_prompt_dialog = None
+
+            dlg.finished.connect(_on_prompt_closed)
+            dlg.tracks_loaded.connect(self._on_local_prompt_tracks_loaded)
+            dlg.open_queue_requested.connect(self.show_local_queue_dialog)
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+        except Exception as e:
+            self.log.warning(f"[UI] Failed showing local prompt dialog: {e}")
+
+    def _on_local_prompt_tracks_loaded(self, count: int) -> None:
+        try:
+            curr = self.local_playlist.get_current_track()
+            if curr:
+                self._on_local_track_changed(curr)
+                self.play_stream(is_retry=False)
+        except Exception as e:
+            self.log.warning(f"[UI] Error starting playback after loading tracks: {e}")
+
+    def _on_seek_requested(self, ratio: float) -> None:
+        """Performs immediate audio seek and syncs progress UI and lyrics."""
+        if not self._is_local_mode():
+            return
+        track = self.local_playlist.get_current_track()
+        if not track or track.duration_seconds <= 0:
+            return
+        target_sec = max(0.0, min(track.duration_seconds, ratio * track.duration_seconds))
+        self._apply_local_seek(target_sec, duration_sec=track.duration_seconds)
+        self.log.info(f"[UI] Local seek to {target_sec:.2f}s ({ratio * 100:.1f}%)")
+
+    def _on_local_track_changed(self, track: Optional[LocalTrackInfo]) -> None:
+        """Updates UI display, cover art, and lyrics cascade when local track changes."""
+        try:
+            if not self._is_local_mode():
+                return
+            if not track:
+                self._current_title = self.i18n.t("station_local")
+                self._current_artist = self.i18n.t("queue_empty_hint")
+                self._current_duration_seconds = None
+                self._current_start_epoch = None
+                self._current_cover_ref = None
+                self._current_cover_url = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+                self.song_progress.setValue(0)
+                self.song_progress.set_seekable(False)
+                self.playback_controls.set_nav_enabled(False, False)
+                self._set_album_cover_pixmap(None)
+                if hasattr(self, "now_playing_title"):
+                    self.now_playing_title.setText(self._current_title)
+                    self.now_playing_title.setToolTip(self.i18n.t("local_select_folder"))
+                if hasattr(self, "now_playing_artist"):
+                    self.now_playing_artist.setText(self._current_artist)
+                    self.now_playing_artist.setToolTip(self.i18n.t("local_select_folder"))
+                self.label_refresh.emit()
+                self._sync_system_media()
+                return
+
+            self._current_title = track.display_title()
+            self._current_artist = track.display_artist()
+            if hasattr(self, "now_playing_title"):
+                self.now_playing_title.setText(self._current_title)
+                self.now_playing_title.setToolTip(self.i18n.t("search_menu_tooltip"))
+            if hasattr(self, "now_playing_artist"):
+                self.now_playing_artist.setText(self._current_artist)
+                self.now_playing_artist.setToolTip(self.i18n.t("search_menu_tooltip"))
+            self._current_duration_seconds = (
+                int(track.duration_seconds) if track.duration_seconds > 0 else None
+            )
+            self._current_start_epoch = time.time()
+            self.song_progress.set_seekable(True)
+            self.song_progress.set_live_mode(False)
+            if self._current_duration_seconds and self._current_duration_seconds > 0:
+                self.song_progress.setMaximum(int(self._current_duration_seconds * 1000))
+            self.song_progress.setValue(0)
+
+            # Update deck navigation buttons
+            has_prev = self.local_playlist.current_index > 0 or self.local_playlist.repeat_mode == 1
+            has_next = (
+                self.local_playlist.current_index < len(self.local_playlist.tracks) - 1
+                or self.local_playlist.repeat_mode == 1
+            )
+            self.playback_controls.set_nav_enabled(has_prev, has_next)
+
+            # Update album art (deduplicate identical embedded/sidecar bytes across tracks)
+            if track.cover_bytes:
+                digest = hashlib.blake2b(track.cover_bytes, digest_size=16).digest()
+                cover_cache_key = f"local:{digest.hex()}"
+                if digest != getattr(self, "_current_cover_bytes_digest", None):
+                    pix = QPixmap()
+                    if pix.loadFromData(track.cover_bytes) and not pix.isNull():
+                        self._current_cover_bytes_digest = digest
+                        self._current_local_cover_sig = None
+                        cover_uri = store_cover_file(
+                            cover_cache_key, raw=track.cover_bytes, pixmap=pix
+                        )
+                        self._current_cover_ref = cover_uri
+                        self._current_cover_url = cover_uri
+                        self._set_album_cover_pixmap(pix)
+                    else:
+                        self._current_cover_ref = None
+                        self._current_cover_url = None
+                        self._current_cover_bytes_digest = None
+                        self._current_local_cover_sig = None
+                        self._set_album_cover_pixmap(None)
+                else:
+                    cover_uri = get_cached_cover_file_uri(cover_cache_key) or store_cover_file(
+                        cover_cache_key,
+                        raw=track.cover_bytes,
+                        pixmap=getattr(self, "_current_cover_pixmap", None),
+                    )
+                    self._current_cover_ref = cover_uri
+                    self._current_cover_url = cover_uri
+            else:
+                self._current_cover_ref = None
+                self._current_cover_url = None
+                self._current_cover_bytes_digest = None
+                self._current_local_cover_sig = None
+                self._set_album_cover_pixmap(None)
+
+            # 3-level lyrics cascade
+            if self.lyrics_button.isChecked():
+                if not self._show_local_track_lyrics(track):
+                    self._refresh_lyrics()
+
+            self.label_refresh.emit()
+            self._sync_mini_hud()
+            self._sync_system_media()
+            self.update_tray_texts()
+        except Exception as e:
+            self.log.debug(f"[UI] _on_local_track_changed failed: {e}")
+
+    def _on_local_playback_ended(self) -> None:
+        """Invoked when local playlist finishes all tracks without repeat."""
+        self.log.info("[UI] Local playlist ended.")
+        self._playback_ended_stopped = True
+        self.stop_stream()
+
+    def dragEnterEvent(self, a0) -> None:
+        """Accepts audio files or folders dragged directly onto the player."""
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is not None and mime is not None and mime.hasUrls():
+            for url in mime.urls():
+                p = url.toLocalFile()
+                if os.path.isdir(p):
+                    a0.acceptProposedAction()
+                    return
+                ext = os.path.splitext(p)[1].lower()
+                if ext in SUPPORTED_AUDIO_EXTENSIONS:
+                    a0.acceptProposedAction()
+                    return
+        super().dragEnterEvent(a0)
+
+    def dropEvent(self, a0) -> None:
+        """Appends dropped audio files/folders asynchronously, switches to Local, and plays."""
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is not None and mime is not None and mime.hasUrls():
+            paths = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+            valid_paths = [
+                p
+                for p in paths
+                if os.path.isdir(p)
+                or (
+                    os.path.isfile(p)
+                    and os.path.splitext(p)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS
+                )
+            ]
+            if valid_paths:
+                a0.acceptProposedAction()
+                was_empty = len(self.local_playlist.tracks) == 0
+
+                def _collect_and_enqueue() -> None:
+                    files_to_add: List[str] = []
+                    for p in valid_paths:
+                        if os.path.isdir(p):
+                            for root, _, files in os.walk(p):
+                                for f in files:
+                                    if os.path.splitext(f)[1].lower() in SUPPORTED_AUDIO_EXTENSIONS:
+                                        files_to_add.append(os.path.join(root, f))
+                        elif os.path.isfile(p):
+                            files_to_add.append(p)
+                    if not files_to_add:
+                        return
+
+                    def _on_added(added: int) -> None:
+                        if added <= 0:
+                            return
+                        if (
+                            hasattr(self, "station_mgr")
+                            and self.station_mgr.current_station_id != STATION_LOCAL
+                        ):
+                            self.set_radio_provider(STATION_LOCAL)
+                        if was_empty or not (hasattr(self, "player") and self.player.is_playing()):
+                            self.play_stream(is_retry=False)
+
+                    self.local_playlist.add_files_async(files_to_add, on_done=_on_added)
+
+                threading.Thread(target=_collect_and_enqueue, daemon=True).start()
+                return
+        super().dropEvent(a0)

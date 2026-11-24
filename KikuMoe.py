@@ -1,77 +1,79 @@
 import os
 import signal
 import sys
-import traceback
-from datetime import datetime
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication
-
+from core.crash_handler import install_crash_handlers, write_crash_log
 from core.ssl_compat import setup_ssl_environment
-from ui.main_window import ListenMoePlayer
 
 # Configure process-wide SSL/TLS CA certificate resolution as early as possible
 setup_ssl_environment()
 
 _IS_WIN32 = sys.platform == "win32"
-_MAX_CRASH_LOG_SIZE = 512 * 1024  # 512 KB
 
 if not _IS_WIN32 and "QT_QPA_PLATFORM" not in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
 
 
-def _rotate_crash_log(log_path: str, max_bytes: int = _MAX_CRASH_LOG_SIZE) -> None:
-    try:
-        if os.path.isfile(log_path) and os.path.getsize(log_path) >= max_bytes:
-            backup_path = f"{log_path}.1"
-            try:
-                os.replace(log_path, backup_path)
-            except Exception:
-                with open(log_path, "w", encoding="utf-8") as f:
-                    f.truncate(0)
-    except Exception:
-        pass
-
-
-def _write_crash_log(exc: BaseException) -> str:
-    if _IS_WIN32:
-        local_app_data = os.environ.get("LOCALAPPDATA", "")
-        base_dir = os.path.join(local_app_data, "KikuMoe") if local_app_data else os.getcwd()
-    else:
-        xdg_data = os.environ.get("XDG_DATA_HOME", "")
-        base_dir = (
-            os.path.join(xdg_data, "KikuMoe")
-            if xdg_data
-            else os.path.join(os.path.expanduser("~"), ".local", "share", "KikuMoe")
-        )
-    try:
-        os.makedirs(base_dir, exist_ok=True)
-    except Exception:
-        pass
-    log_path = os.path.join(base_dir, "crash.log")
-    _rotate_crash_log(log_path)
-    try:
-        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"\n=== KikuMoe Crash [{timestamp}] ===\n")
-            f.write("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
-    except Exception:
-        pass
-    return log_path
-
-
 def main() -> int:
+    if "--help" in sys.argv or "-h" in sys.argv:
+        from core.constants import APP_NAME, APP_VERSION
+
+        print(f"{APP_NAME} v{APP_VERSION} - LISTEN.moe Desktop Client")
+        print("\nUsage: KikuMoe [options]")
+        print("\nOptions:")
+        print("  -v, --version      Show application version and exit")
+        print("  --check-audio      Run audio subsystem diagnostics and exit")
+        print("  --debug            Enable debug logging")
+        print("  -h, --help         Show this help message and exit")
+        return 0
+
+    if "--version" in sys.argv or "-v" in sys.argv:
+        from core.constants import APP_NAME, APP_VERSION
+
+        print(f"{APP_NAME} {APP_VERSION}")
+        return 0
+
+    if "--check-audio" in sys.argv:
+        from audio.diagnostics import log_audio_diagnostics
+        from core.logger import get_logger
+
+        log = get_logger("CheckAudio")
+        status = log_audio_diagnostics(log)
+        print("\n--- Audio Diagnostic Summary ---")
+        for k, v in status.items():
+            print(f"  {k}: {v}")
+        if "Missing" in status.get("ffmpeg", ""):
+            return 1
+        if status.get("portaudio", "").startswith("Failed"):
+            return 1
+        return 0
+
     if "--debug" in sys.argv:
         sys.argv = [a for a in sys.argv if a != "--debug"]
         from core.logger import set_debug
 
         set_debug(True)
 
+    from core.logger import get_log_file_path, get_logger
+
+    crash_log_path = install_crash_handlers()
+    log = get_logger("Startup")
+    log.info(
+        "Starting KikuMoe... Logging to: %s (crashes: %s)", get_log_file_path(), crash_log_path
+    )
+
     try:
+        from PyQt6.QtCore import QTimer
+        from PyQt6.QtWidgets import QApplication
+
+        from ui.main_window import ListenMoePlayer
+
         app = QApplication(sys.argv)
         app.setApplicationName("KikuMoe")
         app.setDesktopFileName("me.chiro.kikumoe")
         window = ListenMoePlayer()
+        if not window.windowIcon().isNull():
+            app.setWindowIcon(window.windowIcon())
 
         def _quit_gracefully(*_: object) -> None:
             try:
@@ -96,7 +98,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 0
     except BaseException as exc:
-        log_path = _write_crash_log(exc)
+        log_path = write_crash_log(exc, source="main")
         try:
             print("\n--- CRITICAL STARTUP ERROR ---")
             print(f"Type: {type(exc).__name__}")

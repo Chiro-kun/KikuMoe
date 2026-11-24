@@ -1,0 +1,583 @@
+"""Compact controls for the existing player window."""
+
+import html
+from typing import Optional
+
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtWidgets import (
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QSizePolicy,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.themes.cyber_moe import PALETTE
+
+MINI_COVER_SIZE = 68
+
+
+class MarqueeLabel(QWidget):
+    def __init__(self, color: str, bold: bool = False, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._text = ""
+        self._text_width = 0
+        self._color = QColor(color)
+        self._offset = 0
+        self._pause = 40
+        self.setFixedHeight(18)
+        self.setMinimumWidth(0)
+        font = QFont("Segoe UI")
+        font.setPixelSize(13 if bold else 12)
+        font.setBold(bold)
+        self.setFont(font)
+        self._timer = QTimer(self)
+        self._timer.setInterval(35)
+        self._timer.timeout.connect(self._tick)
+
+    def _needs_scroll(self) -> bool:
+        return bool(self._text and self.width() > 0 and self._text_width > self.width())
+
+    def _sync_timer_state(self) -> None:
+        if self.isVisible() and self._needs_scroll():
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            if self._timer.isActive():
+                self._timer.stop()
+            self._offset = 0
+            self._pause = 40
+
+    def set_text(self, text: str) -> None:
+        if self._text == text:
+            return
+        self._text = text
+        self._text_width = self.fontMetrics().horizontalAdvance(text) if text else 0
+        self._offset = 0
+        self._pause = 40
+        self.setToolTip(html.escape(text) if text else "")
+        self._sync_timer_state()
+        self.update()
+
+    def set_color(self, color: str) -> None:
+        self._color = QColor(color)
+        self.update()
+
+    def _tick(self) -> None:
+        if not self.isVisible() or not self._needs_scroll():
+            self._offset = 0
+            self._pause = 40
+            self._timer.stop()
+        elif self._pause:
+            self._pause -= 1
+        else:
+            self._offset += 1
+            if self._offset > self._text_width + 32:
+                self._offset = 0
+                self._pause = 40
+        self.update()
+
+    def showEvent(self, a0) -> None:
+        super().showEvent(a0)
+        self._sync_timer_state()
+
+    def hideEvent(self, a0) -> None:
+        self._timer.stop()
+        self._offset = 0
+        self._pause = 40
+        super().hideEvent(a0)
+
+    def resizeEvent(self, a0) -> None:
+        super().resizeEvent(a0)
+        self._offset = 0
+        self._pause = 40
+        self._sync_timer_state()
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        painter.setFont(self.font())
+        painter.setPen(self._color)
+        width = self._text_width
+        painter.drawText(
+            QRectF(-self._offset, 0, width + 2, self.height()),
+            Qt.AlignmentFlag.AlignVCenter,
+            self._text,
+        )
+        if self._offset:
+            painter.drawText(
+                QRectF(width + 32 - self._offset, 0, width + 2, self.height()),
+                Qt.AlignmentFlag.AlignVCenter,
+                self._text,
+            )
+
+
+class MiniIconButton(QPushButton):
+    def __init__(self, kind: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.kind = kind
+        self.setFixedSize(27, 27)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCheckable(kind == "pin")
+
+    def paintEvent(self, a0) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        active = self.isChecked() or self.isDown() or self.underMouse()
+        bg = QColor(PALETTE["accent"] if self.isChecked() else PALETTE["bg_subtle"])
+        if self.isDown():
+            bg = QColor(PALETTE["accent_pressed"])
+        elif self.underMouse():
+            bg = QColor(PALETTE["accent_hover"])
+        fg = QColor(PALETTE["on_accent"] if active else PALETTE["text_primary"])
+        p.setBrush(bg)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(QRectF(1, 1, 25, 25), 7, 7)
+        p.setPen(
+            QPen(
+                fg,
+                1.6,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        if self.kind in ("play", "pause"):
+            if self.kind == "pause":
+                p.drawLine(QPointF(10, 8), QPointF(10, 19))
+                p.drawLine(QPointF(17, 8), QPointF(17, 19))
+            else:
+                path = QPainterPath()
+                path.moveTo(10, 8)
+                path.lineTo(19, 13.5)
+                path.lineTo(10, 19)
+                path.closeSubpath()
+                p.setBrush(fg)
+                p.drawPath(path)
+        elif self.kind in ("restore", "mini"):
+            p.drawRoundedRect(QRectF(7, 8, 13, 11), 1, 1)
+            if self.kind == "restore":
+                p.drawLine(QPointF(8, 11), QPointF(19, 11))
+            else:
+                p.drawLine(QPointF(10, 16), QPointF(17, 16))
+        elif self.kind == "pin":
+            p.drawLine(QPointF(10, 8), QPointF(18, 8))
+            p.drawLine(QPointF(11, 8), QPointF(11, 14))
+            p.drawLine(QPointF(17, 8), QPointF(17, 14))
+            p.drawLine(QPointF(9, 15), QPointF(19, 15))
+            p.drawLine(QPointF(14, 15), QPointF(14, 20))
+        else:
+            p.drawLine(QPointF(9, 9), QPointF(18, 18))
+            p.drawLine(QPointF(18, 9), QPointF(9, 18))
+
+
+class MiniTrackProgress(QProgressBar):
+    """A smooth track with rounded ends, including the filled portion and optional seeking."""
+
+    seek_requested = pyqtSignal(float)
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._seekable = False
+        self._is_dragging = False
+        self._press_ratio = 0.0
+
+    def set_seekable(self, seekable: bool) -> None:
+        self._seekable = bool(seekable)
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor if self._seekable else Qt.CursorShape.ArrowCursor
+        )
+        self.update()
+
+    def _ratio_from_x(self, x: float) -> float:
+        w = max(1.0, float(self.width()))
+        return max(0.0, min(1.0, x / w))
+
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and a0.button() == Qt.MouseButton.LeftButton:
+            ratio = self._ratio_from_x(float(a0.position().x()))
+            self._press_ratio = ratio
+            self._is_dragging = True
+            self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
+            self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mousePressEvent(a0)
+
+    def mouseMoveEvent(self, a0) -> None:
+        if a0 is not None and self._seekable and self._is_dragging:
+            ratio = self._ratio_from_x(float(a0.position().x()))
+            self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
+            self.update()
+            return
+        super().mouseMoveEvent(a0)
+
+    def mouseReleaseEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and self._seekable
+            and self._is_dragging
+            and a0.button() == Qt.MouseButton.LeftButton
+        ):
+            self._is_dragging = False
+            ratio = self._ratio_from_x(float(a0.position().x()))
+            if abs(ratio - self._press_ratio) > 0.002:
+                self.setValue(int(ratio * (self.maximum() - self.minimum()) + self.minimum()))
+                self.seek_requested.emit(ratio)
+            self.update()
+            return
+        super().mouseReleaseEvent(a0)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        track = QRectF(0, 0, self.width(), self.height())
+        radius = track.height() / 2.0
+        painter.setBrush(QColor("#35394d"))
+        painter.drawRoundedRect(track, radius, radius)
+        maximum = self.maximum() - self.minimum()
+        if maximum > 0:
+            ratio = max(0.0, min(1.0, (self.value() - self.minimum()) / maximum))
+            width = track.width() * ratio
+            if width > 0:
+                painter.setBrush(QColor(PALETTE["accent"]))
+                painter.drawRoundedRect(
+                    QRectF(0, 0, width, track.height()), min(radius, width / 2.0), radius
+                )
+        painter.end()
+
+
+class MiniHud(QWidget):
+    restore_requested = pyqtSignal()
+    play_requested = pyqtSignal()
+    pin_changed = pyqtSignal(bool)
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setObjectName("miniHud")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setStyleSheet(
+            f"QWidget#miniHud {{ background: #121523; border: 1px solid {PALETTE['border_card']}; "
+            "border-radius: 12px; }"
+            "QSlider::groove:horizontal { height: 4px; background: #35394d; border-radius: 2px; }"
+            f"QSlider::sub-page:horizontal {{ background: {PALETTE['accent']}; "
+            "border-radius: 2px; }"
+            "QSlider::handle:horizontal { background: white; width: 10px; margin: -4px 0; "
+            f"border: 2px solid {PALETTE['accent']}; border-radius: 6px; }}"
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(12)
+        self.cover = QLabel()
+        self.cover.setFixedSize(MINI_COVER_SIZE, MINI_COVER_SIZE)
+        self.cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover.setStyleSheet("background: #25293a; border-radius: 8px;")
+        layout.addWidget(self.cover)
+        details = QVBoxLayout()
+        details.setSpacing(3)
+        self.title = MarqueeLabel("#ffffff", True)
+        self.artist = MarqueeLabel("#a0a5b8")
+        details.addWidget(self.title)
+        details.addWidget(self.artist)
+        time_row = QHBoxLayout()
+        time_row.setSpacing(4)
+        self.elapsed_label = QLabel("--:--")
+        self.duration_label = QLabel("--:--")
+        for label in (self.elapsed_label, self.duration_label):
+            label.setStyleSheet(
+                f"color: {PALETTE['text_secondary']}; background: transparent; "
+                "border: none; font-size: 9px; font-weight: 600;"
+            )
+            label.setFixedHeight(12)
+        self.track_progress = MiniTrackProgress()
+        self.track_progress.setObjectName("miniTrackProgress")
+        self.track_progress.setRange(0, 1000)
+        self.track_progress.setValue(0)
+        self.track_progress.setTextVisible(False)
+        self.track_progress.setFixedHeight(4)
+        time_row.addWidget(self.elapsed_label)
+        time_row.addWidget(self.track_progress, 1)
+        time_row.addWidget(self.duration_label)
+        details.addLayout(time_row)
+        self.volume = QSlider(Qt.Orientation.Horizontal)
+        self.volume.setRange(0, 100)
+        self.volume.setFixedHeight(18)
+        self.volume.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        details.addWidget(self.volume)
+        self.volume_popup = QLabel(self)
+        self.volume_popup.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.volume_popup.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.volume_popup.setStyleSheet(
+            f"background: {PALETTE['bg_surface_elevated']}; color: {PALETTE['text_primary']}; "
+            f"border: 1px solid {PALETTE['accent']}; border-radius: 6px; "
+            "font-size: 11px; font-weight: 700; padding: 3px 7px;"
+        )
+        self.volume_popup.hide()
+        self._volume_opacity = QGraphicsOpacityEffect(self.volume_popup)
+        self.volume_popup.setGraphicsEffect(self._volume_opacity)
+        self._volume_animation = QPropertyAnimation(self._volume_opacity, b"opacity", self)
+        self._volume_animation.setDuration(160)
+        self._volume_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._volume_animation.finished.connect(self._finish_volume_animation)
+        self._volume_timer = QTimer(self)
+        self._volume_timer.setSingleShot(True)
+        self._volume_timer.timeout.connect(self._hide_volume_popup)
+        self.volume.valueChanged.connect(self._show_volume_popup)
+        layout.addLayout(details, 1)
+        controls = QVBoxLayout()
+        controls.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(4)
+        self.pin_button = MiniIconButton("pin")
+        self.restore_button = MiniIconButton("restore")
+        top.addWidget(self.pin_button)
+        top.addWidget(self.restore_button)
+        controls.addLayout(top)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(4)
+        self.play_button = MiniIconButton("play")
+        self.close_button = MiniIconButton("close")
+        bottom.addWidget(self.play_button)
+        bottom.addWidget(self.close_button)
+        controls.addLayout(bottom)
+        layout.addLayout(controls)
+        self.pin_button.toggled.connect(self.pin_changed)
+        self.restore_button.clicked.connect(self.restore_requested)
+        self.play_button.clicked.connect(self.play_requested)
+        self.close_button.clicked.connect(self._close_window)
+        self._drag_offset: Optional[QPoint] = None
+        self.refresh_theme()
+
+    def refresh_theme(self) -> None:
+        self.setStyleSheet(
+            f"QWidget#miniHud {{ background: {PALETTE['bg_footer']}; "
+            f"border: 1px solid {PALETTE['border_card']}; border-radius: 12px; }}"
+            "QSlider::groove:horizontal { height: 4px; background: rgba(255, 255, 255, 0.14); "
+            "border-radius: 2px; }"
+            f"QSlider::sub-page:horizontal {{ background: {PALETTE['accent']}; "
+            "border-radius: 2px; }"
+            "QSlider::handle:horizontal { background: white; width: 10px; margin: -4px 0; "
+            f"border: 2px solid {PALETTE['accent']}; border-radius: 6px; }}"
+        )
+        self.cover.setStyleSheet(f"background: {PALETTE['bg_subtle']}; border-radius: 8px;")
+        self.title.set_color(PALETTE["text_primary"])
+        self.artist.set_color(PALETTE["text_secondary"])
+        for label in (self.elapsed_label, self.duration_label):
+            label.setStyleSheet(
+                f"color: {PALETTE['text_secondary']}; background: transparent; "
+                "border: none; font-size: 9px; font-weight: 600;"
+            )
+        self.volume_popup.setStyleSheet(
+            f"background: {PALETTE['bg_surface_elevated']}; color: {PALETTE['text_primary']}; "
+            f"border: 1px solid {PALETTE['accent']}; border-radius: 6px; "
+            "font-size: 11px; font-weight: 700; padding: 3px 7px;"
+        )
+        self.track_progress.update()
+        for btn in (self.pin_button, self.restore_button, self.play_button, self.close_button):
+            btn.update()
+        self.update()
+
+    def _close_window(self) -> None:
+        window = self.window()
+        if window is not None:
+            window.close()
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        minutes, seconds_part = divmod(max(0, int(seconds)), 60)
+        return f"{minutes}:{seconds_part:02d}"
+
+    def set_track_progress(
+        self, elapsed: Optional[float], duration: Optional[float], live: bool = False
+    ) -> None:
+        if duration is not None and duration > 0:
+            if elapsed is not None:
+                elapsed = max(0.0, min(elapsed, duration))
+            self.elapsed_label.setText(
+                self._format_time(elapsed) if elapsed is not None else "--:--"
+            )
+            self.duration_label.setText(self._format_time(duration))
+            if not getattr(self.track_progress, "_is_dragging", False):
+                self.track_progress.setValue(
+                    int(elapsed * 1000 / duration) if elapsed is not None else 0
+                )
+        else:
+            self.elapsed_label.setText(
+                self._format_time(elapsed) if elapsed is not None else "--:--"
+            )
+            self.duration_label.setText("LIVE" if live else "--:--")
+            self.track_progress.setValue(0)
+
+    def _show_volume_popup(self, value: int) -> None:
+        if not self.isVisible():
+            return
+        self.volume_popup.setText(f"{value}%")
+        self.volume_popup.adjustSize()
+        slider_pos = self.volume.mapTo(self, QPoint(0, 0))
+        usable_width = max(0, self.volume.width() - 14)
+        center_x = slider_pos.x() + 7 + round(usable_width * value / 100)
+        x = max(
+            2,
+            min(
+                self.width() - self.volume_popup.width() - 2,
+                center_x - self.volume_popup.width() // 2,
+            ),
+        )
+        y = max(2, slider_pos.y() - self.volume_popup.height() - 2)
+        self.volume_popup.move(x, y)
+        was_hidden = self.volume_popup.isHidden()
+        self._volume_animation.stop()
+        self._volume_timer.stop()
+        self.volume_popup.show()
+        self.volume_popup.raise_()
+        self._volume_animation.setStartValue(0.0 if was_hidden else self._volume_opacity.opacity())
+        self._volume_animation.setEndValue(1.0)
+        self._volume_animation.start()
+        self._volume_timer.start(1200)
+
+    def _hide_volume_popup(self) -> None:
+        self._volume_animation.stop()
+        self._volume_animation.setStartValue(self._volume_opacity.opacity())
+        self._volume_animation.setEndValue(0.0)
+        self._volume_animation.start()
+
+    def _finish_volume_animation(self) -> None:
+        if self._volume_opacity.opacity() <= 0.0:
+            self.volume_popup.hide()
+
+    def hideEvent(self, a0) -> None:
+        self._volume_timer.stop()
+        self._volume_animation.stop()
+        self.volume_popup.hide()
+        super().hideEvent(a0)
+
+    def set_cover(self, pixmap: Optional[QPixmap]) -> None:
+        if pixmap is None or pixmap.isNull():
+            self.cover.clear()
+            return
+        size = float(MINI_COVER_SIZE)
+        dpr = max(1.0, self.cover.devicePixelRatioF())
+        rounded = QPixmap(round(size * dpr), round(size * dpr))
+        rounded.setDevicePixelRatio(dpr)
+        rounded.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(rounded)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(0, 0, size, size), 8, 8)
+        painter.setClipPath(clip)
+        side = float(min(pixmap.width(), pixmap.height()))
+        source = QRectF((pixmap.width() - side) / 2, (pixmap.height() - side) / 2, side, side)
+        painter.drawPixmap(QRectF(0, 0, size, size), pixmap, source)
+        painter.end()
+        self.cover.setPixmap(rounded)
+
+    def mousePressEvent(self, a0: Optional[QMouseEvent]) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            window = self.window()
+            if window is not None:
+                handle = window.windowHandle()
+                if handle is not None and handle.startSystemMove():
+                    return
+                self._drag_offset = a0.globalPosition().toPoint() - window.frameGeometry().topLeft()
+        super().mousePressEvent(a0)
+
+    def mouseMoveEvent(self, a0: Optional[QMouseEvent]) -> None:
+        if (
+            a0 is not None
+            and bool(a0.buttons() & Qt.MouseButton.LeftButton)
+            and self._drag_offset is not None
+        ):
+            window = self.window()
+            if window is not None:
+                window.move(a0.globalPosition().toPoint() - self._drag_offset)
+        super().mouseMoveEvent(a0)
+
+
+class MiniHudWindow(QWidget):
+    """Dedicated fixed-size top-level window for Mini-HUD on Wayland tiling compositors.
+
+    Creating a fresh xdg_toplevel with fixed size (min == max) before show() ensures
+    tiling compositors such as niri, Sway, and Hyprland automatically place Mini-HUD
+    in the floating layer above tiled windows without disturbing the tiled main window.
+    """
+
+    MINI_WIDTH = 420
+    MINI_HEIGHT = 112
+
+    def __init__(
+        self,
+        *,
+        on_close_requested=None,
+        on_visibility_changed=None,
+        window_title: str = "KikuMoe Mini-HUD",
+    ) -> None:
+        flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
+        super().__init__(None, flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setWindowTitle(window_title)
+        self.setFixedSize(self.MINI_WIDTH, self.MINI_HEIGHT)
+        self._on_close_requested = on_close_requested
+        self._on_visibility_changed = on_visibility_changed
+        self._force_closing = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._host_layout = layout
+
+    def attach_hud(self, hud: MiniHud) -> None:
+        if hud.parent() is not self:
+            hud.setParent(self)
+        if self._host_layout.indexOf(hud) < 0:
+            self._host_layout.addWidget(hud)
+        hud.show()
+
+    def force_close(self) -> None:
+        self._force_closing = True
+        self.hide()
+        self.close()
+
+    def closeEvent(self, a0) -> None:
+        if self._force_closing:
+            super().closeEvent(a0)
+            return
+        if a0 is not None:
+            a0.ignore()
+        if callable(self._on_close_requested):
+            self._on_close_requested()
+
+    def showEvent(self, a0) -> None:
+        super().showEvent(a0)
+        if callable(self._on_visibility_changed):
+            self._on_visibility_changed()
+
+    def hideEvent(self, a0) -> None:
+        super().hideEvent(a0)
+        if callable(self._on_visibility_changed):
+            self._on_visibility_changed()
+
+    def changeEvent(self, a0) -> None:
+        super().changeEvent(a0)
+        if a0 is not None and a0.type() == QEvent.Type.WindowStateChange:
+            if self.isMaximized() or self.isFullScreen():
+                QTimer.singleShot(0, self.showNormal)
+            if callable(self._on_visibility_changed):
+                self._on_visibility_changed()

@@ -1,0 +1,384 @@
+# Changelog
+
+All notable changes to KikuMoe will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [2.0.0] - 2026-11-24
+
+> **KikuMoe 2.0.0 Stable** — Complete Cyber-Moe UI redesign, multi-station radio engine, local music playback with 3-level synced lyrics, 10-band cross-backend ISO equalizer, dynamic volume auto-ducking, dual-channel OTA updates, and full Windows SMTC / Linux MPRIS & Wayland integration.
+>
+> Below are all changes since `2.0.0-beta4` culminating in the `2.0.0` stable release (see `2.0.0-beta1` through `2.0.0-beta4` below for the full 2.0.0 development history).
+
+### Added
+- **10-Band ISO Audio Equalizer (`audio/equalizer.py`, `ui/equalizer_popover.py`, `ui/main_window.py`)**:
+  - Real-time 10-band ISO equalizer (`31 Hz`–`16 kHz`) + preamp (`-12 dB` to `+12 dB`) across all three audio backends: zero-dependency pure-Python biquad cascade with C1 soft-clipping safety knee in `PlayerFFmpeg`, `anequalizer`/`superequalizer` filter graph in `PlayerMPV`, and native `libvlc_audio_equalizer` in `PlayerVLC`.
+  - Built-in presets (`Flat`, `★ Recommended` / `★ Consigliato`, `Bass Boost`, `Treble Boost`, `Pop`, `Anime / J-Pop`, `Rock`, `Electronic`, `Vocal`, `Headphones`, `Classical`, `Night / Soft`, plus persistent `Custom`), all calibrated for `≤ 0.0 dB` summed peak headroom to prevent digital clipping.
+  - Cyber-Glass interactive spline-curve Equalizer window (`580×380`) with mouse drag, wheel fine-tuning, double-click/right-click reset, persistent open state (does not auto-close on outside clicks or app switch), header dragging (including native Wayland `startSystemMove()`), and pixel-centered vector `×` close button.
+- **Dynamic Volume / Auto-Ducking (`core/dynamic_volume.py`, `ui/settings_dialog.py`)**:
+  - Automatically lowers KikuMoe's playback volume while selected applications (e.g., Discord, games, browsers) are running or actively outputting audio, with configurable target duck level, app picker, fast unduck polling, and smooth 2-second smoothstep fade-in restoration (#89, #90, #96, #97).
+- **Better Lyrics Provider & Configurable Lyrics Cascade (`core/lyrics.py`, `ui/settings_dialog.py`)**:
+  - Added Better Lyrics support alongside LRCLIB with selectable provider priority (*Auto*, *Better Lyrics first*, *LRCLIB only*, *Better Lyrics only*) and optional API key support (#94).
+- **Linux Wayland Tiling Compositor Support for Mini-HUD (`core/wayland_window.py`, `ui/widgets/mini_hud.py`, `ui/main_window.py`)**:
+  - Hosted Mini-HUD inside a dedicated fixed-size (`420×112`) top-level `MiniHudWindow` on Linux Wayland so tiling compositors (`niri`, `Hyprland`, `Sway`) automatically open it in the floating layer above tiled windows without disturbing the tiled main window.
+  - Wired the Mini-HUD Pin toggle on Wayland to idempotent compositor-native IPC (`niri msg`, `hyprctl`, `swaymsg`), and gracefully disabled the button with an explanatory tooltip on Wayland compositors without IPC support.
+- **XDG Desktop Portal Native File Picker on Linux (`ui/native_file_dialog.py`)**:
+  - Uses the native desktop file chooser via XDG Desktop Portal over D-Bus on Linux (#82) and defaults to the user's Music folder on first run (#86).
+- **Comprehensive Crash Handler (`core/crash_handler.py`)**:
+  - Captures and logs native fatal signals, `sys.excepthook`, `threading.excepthook`, and Qt fatal errors to persistent crash logs for easier diagnostics.
+
+### Performance
+- **Background / Tray Power-Saving & Visualizer Bypass (`ui/main_window.py`, `ui/widgets/ambient_cover.py`)**:
+  - Added visibility-aware suspension (`_sync_ui_timers_for_visibility`, `set_ui_suspended`) that automatically pauses high-frequency visual timers (`song_tick_timer`, `_progress_timer`, 60 FPS visualizer, and `LiveEqualizerBadge`) when the window is hidden in tray, minimized, or switched to Mini-HUD.
+  - Detached the PCM visualizer audio tap whenever the visualizer is disabled or the main stage is not visible, eliminating unnecessary DSP/FFT work in background playback.
+  - Auto-stopped the 60 FPS `AmbientCoverCard` visualizer timer once bars decay to zero while playback is stopped.
+- **Zero-Dependency Audio Pipeline Optimization (`audio/equalizer.py`, `audio/player_ffmpeg.py`, `core/audio_analyzer.py`)**:
+  - Combined preamp, 10-band biquad EQ cascade, and output volume scaling into a single-pass `process_pcm_s16le_with_volume()` helper, materializing the pre-fader PCM buffer only when an active visualizer tap is attached.
+  - Optimized `AudioSpectrumAnalyzer.feed_pcm()` to slice only the trailing `FFT_SIZE * 4` bytes before `struct.unpack` (8× less work on 8192-byte chunks) and cached logarithmic frequency bin boundaries/tilt factors in `_bar_map_cache`.
+- **RAM & Local Music Optimizations (`core/local_metadata.py`, `ui/main_window.py`)**:
+  - Added a thread-safe bounded LRU cover-art byte pool (`intern_cover_bytes`, keyed by 16-byte `blake2b` digest, max 128 entries) so tracks from the same album share a single `bytes` object in memory.
+  - Unified cover art `QPixmap` caching through `network/image_cache.py`, removing duplicate pixmap storage in `ListenMoePlayer._cover_cache`.
+  - Made file/folder drag-and-drop (`dropEvent`) non-blocking by scanning paths off the UI thread and delegating metadata loading to `local_playlist.add_files_async()`.
+- **Startup Speed & UI Fluidity (`KikuMoe.py`, `ui/main_window.py`, `ui/history_popover.py`, `ui/widgets/mini_hud.py`)**:
+  - Deferred `PyQt6` and `ListenMoePlayer` imports in `KikuMoe.py` until after CLI flags (`--help`, `--version`, `--check-audio`) are handled.
+  - Lazy-imported audio backends (`PlayerFFmpeg`, `PlayerMPV`, `PlayerVLC`) inside `_create_player()` so unused backend libraries and probes do not load at startup.
+  - Made `SongHistoryPopover` lazily rebuild row widgets on `open_at()` while keeping header badge counts and button states updated in O(1) when hidden; cached HiDPI pre-scaled cover thumbnails in `_TrackThumbnail` instead of re-scaling on every `paintEvent`; skipped scaling/blurring hidden legacy cover widgets.
+  - Stopped the 1s Discord RPC polling timer whenever Discord Rich Presence is disabled and eliminated per-second `QSettings` reads on periodic ticks via `_sync_discord_settings()`.
+  - Optimized Mini-HUD `MarqueeLabel` to cache text widths, handle `hideEvent()`, and only run its 35 ms scroll timer when visible and overflowing.
+
+### Security
+- **Hardened Metadata, Cover Paths, Updater & Binary Parsers (`core/local_metadata.py`, `core/updater.py`, `network/image_cache.py`, `ui/main_window.py`)**:
+  - Hardened rich-text metadata sinks against unintended HTML injection, enforced strict HTTPS host whitelisting and local path verification for cover art, validated updater download URLs, and added bounds checks in local binary metadata parsers.
+
+### Fixed
+- **Linux MPRIS album cover artwork (`network/image_cache.py`, `ui/main_window.py`)**: cached downloaded radio covers and local track embedded covers to a bounded local disk cache (`$XDG_CACHE_HOME/kikumoe/mpris_art`), transcoded WebP/non-universal formats to PNG for universal widget compatibility, and published `file://` URIs in `mpris:artUrl` with immediate D-Bus `PropertiesChanged` sync (#80).
+- **Local music stability & playback sync**: prevented crashes during automatic track transitions (#91), switching to local music with an existing playlist (#88), and rapid station switching (#84); fixed local pause/resume and MPRIS backend state sync (#92); preserved local music station when applying settings (#87); enlarged queue thumbnails and eliminated player cover flicker (#79); cached local cover pixmaps for session history thumbnails (#95).
+- **System tray & window lifecycle**: prevented `CloseConfirmDialog` from triggering `lastWindowClosed` when hidden in tray (#99), accepted `closeEvent` cleanly on embedded `SettingsDialog`, kept tray menu header synced and fixed Linux DBusMenu action initialization (#93), and omitted channel suffix from station change logs on channel-less/local stations (#98).
+- **Settings & UI layout polish**: moved the Better Lyrics API Key field to a full-width stacked layout and aligned settings `QLineEdit` heights to `34px` (`min-height: 24px`) to prevent text clipping; included lyrics provider and API key in Settings Apply change detection; scaled lyrics font size and panel height responsively in hero/fullscreen mode (#85); prevented premature station pill label elision on Linux (#83); rounded titlebar close button hover and removed queue dialog outer gutter (#81); honored `StatusFooter` minimum height and animated dock transitions cleanly.
+- **Equalizer anti-clipping headroom & soft-limiter (`audio/equalizer.py`, `ui/main_window.py`)**: recalibrated `headphones` and all built-in 10-band EQ presets so summed `Q=1.414` peak response stays at or below `0.0 dB` across 20 Hz–20 kHz, added a transparent C1 soft-clipping safety knee above `-0.92 dBFS` in `BiquadEqualizerProcessor`, and ensured built-in presets always reload their canonical curve on startup.
+
+### Testing
+- Added a global per-test hang watchdog in `tests/conftest.py` (`KIKUMOE_TEST_TIMEOUT`, default 30s) that dumps all thread tracebacks and exits immediately if any test stalls.
+- Expanded automated test coverage to 309 tests across equalizer DSP/backends/UI, dynamic volume, Better Lyrics, native XDG file dialogs, crash handler, rapid station switching, performance/power-saving, Wayland Mini-HUD IPC/lifecycle, and Linux MPRIS local `file://` cover art.
+
+---
+
+## [2.0.0-beta4] - 2026-11-19
+
+### Added
+- **Local Music Playback, Queue Manager & 3-Level Lyrics Cascade**:
+  - **Zero-Dependency Binary Metadata Parser (`core/local_metadata.py`)**:
+    - Implemented a pure Python binary parser using `struct`, `io`, and `pathlib` with zero external C/binary dependencies, extracting exact track metadata, durations, and album cover art.
+    - Supported formats: MP3 (ID3v2.3/ID3v2.4 `TIT2`, `TPE1`, `TALB`, `APIC` image extraction, `USLT` lyrics), FLAC (`STREAMINFO` block, duration calculation, and Vorbis comments `METADATA_BLOCK_PICTURE`), OGG / Opus headers and comments, WAV (RIFF headers and duration), and M4A / AAC container atoms (`mvhd`, `ilst`, `©nam`, `©ART`, `©alb`, `covr`, `©lyr`).
+  - **3-Level Synchronized & Plain Lyrics Cascade**:
+    - Level 1: Automatic discovery of companion sidecar `.lrc` files in the same directory (e.g. `Song.mp3` with `Song.lrc`).
+    - Level 2: Embedded lyrics tags directly inside audio files (`USLT`, Vorbis `LYRICS`, and MP4 `©lyr`).
+    - Level 3: Seamless automatic fallback to online LRCLIB search by track title and artist when local lyrics are unavailable.
+    - Real-time animated lyric synchronization in `LyricsPanel` driven by the audio player's millisecond-accurate playhead position.
+  - **Zero-Latency Seeking & Audio Backend Integration (`PlayerFFmpeg`, `PlayerMPV`, `PlayerVLC`)**:
+    - Implemented `seek(seconds)` on all three audio backends: keyframe-accurate stream offset (`-ss`) for FFmpeg, absolute seek commands for MPV, and `libvlc_media_player_set_time` for VLC.
+    - Enhanced `SmoothProgressBar` and `MiniHud` with interactive, draggable scrubber playheads emitting `seek_requested(ratio)`.
+  - **Local Playlist Manager (`core/local_playlist.py`)**:
+    - Thread-safe playlist queue with sequential navigation, shuffle mode, repeat modes (`Repeat Off`, `Repeat All`, `Repeat One`), track reordering, and session persistence in `QSettings`.
+  - **Cyber-Glass Local Queue Manager Dialog (`ui/local_queue_dialog.py`)**:
+    - Frameless modal dialog featuring real-time search filtering across title, artist, and album, track queue statistics pill, double-click playback, right-click context menu (*Riproduci ora*, *Apri percorso file*, *Rimuovi*), and direct file/folder drag-and-drop.
+    - Added dedicated transport deck controls in `PlaybackControls`: Previous Track (`btn_prev`), Next Track (`btn_next`), and Local Queue (`btn_queue`).
+    - Keyboard shortcuts: `F5` / `MediaPrevious` for previous track, `F6` / `MediaNext` for next track, and `Ctrl+L` for the Local Queue dialog.
+    - Direct Drag & Drop: dropping audio files or folders directly onto the main player window instantly enqueues them, switches station to `STATION_LOCAL`, and initiates playback.
+    - Windows SMTC and Linux MPRIS hardware multimedia keys and system tray integration.
+- **Dual-Channel In-App OTA Updates via GitHub Releases API (`core/updater.py`, `ui/update_dialog.py`)**:
+  - Implemented dual-channel update checks with user selection in *Settings → Info* / *General*: **Stabile** (`stable`, tracking official final releases) and **Beta** (`beta`, preview releases and beta builds), with smart initial detection based on current SemVer.
+  - Robust SemVer parser handling major, minor, patch, pre-release tags (`-betaX`), and build metadata with strict semantic ordering.
+  - Asynchronous background worker (`UpdateCheckWorker`) with rate-limit protection, timestamp caching (24h cooldown), and configurable automatic startup checks.
+  - Frameless Cyber-Glass Update Dialog (`UpdateDialog`) rendering formatted GitHub Markdown release notes, release date, asset download size, and real-time download progress bar (`AssetDownloadWorker`).
+  - Automatic post-download execution: launches the downloaded Windows setup/installer executable or marks Linux AppImages as executable upon completion.
+- **Centralized Single-Source-of-Truth Versioning System (`version.yml`)**:
+  - Centralized application versioning into a single root file `version.yml`, eliminating version divergence across metadata files.
+  - Created automated sync utility `scripts/sync_version.py` that synchronizes version strings into `pyproject.toml`, `core/constants.py`, `assets/version_info.txt`, `kikumoe.spec`, and CI/CD pipelines.
+  - Added CLI flags `--check` and `--dry-run` with automated test validation in `tests/test_version.py`.
+
+### Added
+- **Local Music Selector Prompt Dialog (`ui/widgets/local_prompt_dialog.py`)**:
+  - Modal prompt displayed when switching to "Musica Locale", clicking the empty queue track label ("Coda vuota · Seleziona cartella o trascina file"), or pressing Play with an empty queue, offering quick options to select a music folder, select audio files, open the queue manager, or drag-and-drop audio directly.
+  - Automatic non-blocking prompt trigger on startup when KikuMoe opens with "Musica Locale" as the active station and the queue is empty.
+- **60 FPS Drop-In and Fade Dialog Animations (`ui/dialog_animations.py`)**:
+  - Implemented `CyberMoeDialogAnimationMixin` providing smooth 60 FPS vertical drop-in and crossfade entrance (190ms with `OutCubic` easing) and elegant exit fade-out animations (120ms with `InCubic` easing) across all frameless dialogs (`LocalMusicPromptDialog`, `LocalQueueDialog`, `UpdateDialog`, `AboutDialog`).
+- **Crisp Vector Icons for Local Music Buttons (`ui/vector_icons.py`)**:
+  - Replaced system Unicode emojis with brand-harmonized anti-aliased vector icons: added `get_folder_icon` / `get_folder_pixmap` alongside `get_music_note_icon` and `get_queue_icon` on primary, secondary, and tertiary action buttons.
+- **Empty-State Queue View (`ui/local_queue_dialog.py`)**:
+  - Added an interactive empty state card in the queue dialog with direct *Aggiungi Cartella…* and *Aggiungi File…* action buttons when no tracks are loaded.
+
+### Changed
+- Refactored `StationManager` and `get_selected_stream_url()` to return empty string for `STATION_LOCAL` when the queue is empty instead of falling back to default web radio stream.
+- Enhanced `SimpleStationRow` and `StationRowWithChannels` with mouse transparency on text/icon labels to ensure 100% reliable click detection across the entire row.
+- Enhanced Windows SMTC and Linux MPRIS bridges to report exact local track position timestamps and track durations.
+
+### Fixed
+- **Fixed local music prompt dialog visibility and re-opening**: fixed an issue where `LocalMusicPromptDialog` would only appear once and fail to re-open on subsequent clicks of "Musica Locale" or the track title. `CyberMoeDialogAnimationMixin` now properly hides the dialog, restores full opacity, and clears the reference upon exit animation completion, allowing the dialog to be opened and closed repeatedly without issue.
+- **Restored text animations and hover glow in local music mode**: updated empty local queue state to display "Musica Locale" and "Coda vuota · Seleziona cartella o trascina file", restoring the 60 FPS vertical slide-up transition, tactile bounce click, and Cyber-Glass hover capsule glow. Calling `setText()` on local track changes now immediately triggers the smooth track title/artist transition animation.
+- **Fixed title bar badge pill text overflow**: updated `_VersionBadgeLabel` and `_BrandTitleLabel` in `ui/custom_titlebar.py` to dynamically recompute pill width based on exact font metrics on `setText()`, resolving text spilling out of the "MUSICA LOCALE" title bar pill in `LocalMusicPromptDialog` and other custom dialogs.
+- **Fixed station switching bug where web radio stream remained playing when switching to local music with an empty queue**: switching to local music now immediately stops the active radio stream backend and updates metadata labels to show an empty queue status.
+- **Fixed empty queue prompt trigger and click responsiveness**: clicking anywhere on the track title, artist label ("Coda vuota…"), or hover container immediately displays the local music selection prompt.
+- **Restored default album placeholder artwork**: removed forced station icon from album artwork area when playing local tracks without embedded covers or when the queue is empty, preserving the default vinyl disc placeholder.
+- Fixed cross-platform `os.startfile` compatibility on Linux by safely resolving `getattr(os, "startfile", None)`.
+- Resolved MP4/M4A data atom offset calculation in binary metadata parser to avoid title string truncation.
+
+---
+
+## [2.0.0-beta3] - 2026-11-02
+
+### Added
+- **Audio-Reactive Conformal Fluid Wave Visualizer with Multi-Stop Cyber Gradient**:
+  - Replaced radial line bars with a 60 FPS conformal spline wave undulating organically around the album cover pedestal without occluding artwork.
+  - Implemented pre-fader audio tapping in `audio/player_ffmpeg.py`, feeding raw unattenuated PCM to `AudioSpectrumAnalyzer` so visualizer reactivity remains at full dynamic range regardless of the user listening volume slider.
+  - Added real-time Automatic Gain Control (AGC) with peak envelope tracking and musical spectrum focus (bins 1..68, ~40Hz to ~11.7kHz) in `core/audio_analyzer.py`, ensuring punchy, expressive animation across all genres from heavy metal to acoustic lo-fi.
+  - Enhanced wave aesthetics with a multi-stop neon cyber gradient across the primary bloom stroke, specular core highlight, resonant echo wave, and translucent radial glow fill, dynamically harmonized with active theme palettes and artwork dominant colors.
+  - Resolved vertical wave clipping ("viene tagliato") with dynamic margin-aware boundary safety limits and adjusted album cover sizing (`180px`), completely eliminating boundary chopping while preserving full clearance at minimum window height.
+  - Configured visualizer toggle to default to disabled (`off`) in `core/constants.py` and `ui/widgets/ambient_cover.py`.
+- **Settings Dialog Back Button Glitch Fix (`BackToPlayerButton` in `ui/settings_dialog.py`)**:
+  - Replaced the scale-distorting widget bounce with a smooth, glitch-free vector chevron nudge animation: the `<` chevron glides left by 2.2px on hover and 3.2px on press with 60 FPS exponential ease-out, while maintaining crisp text rendering and solid border boundaries without clipping outside bounds.
+  - Added clean state reset (`reset_state()`) in `hideEvent`, `reject()`, and `accept()`, ensuring that `SlidingStackedWidget` snapshot transitions never capture the button in an interrupted, scaled, or pressed state when switching back to the player.
+- **Settings Dialog Typography & Discord ID Alignment (`ui/settings_dialog.py`)**:
+  - Removed bold weight from settings field labels ("Tema interfaccia", "Selezione lingua", "Stazione radio", "Canale di default", "ID applicazione Discord") by refining `QLabel#settingsFieldLabel` to `font-weight: 500`, harmonizing typography with comboboxes, switches, and input fields.
+  - Aligned Discord Application ID input width with standard combobox sizing and resolved border clipping by adjusting text input height to 30px within a 36px row container, matching the height and vertical rhythm of adjacent toggle switch rows.
+- **Visualizer Idle Resting Halo State (`ui/widgets/ambient_cover.py`)**:
+  - Ensured the visualizer wave remains visible as an elegant, gently undulating ambient resting halo around the album cover even when playback is stopped, paused, or awaiting audio data, rather than staying invisible until the first audio chunk arrives.
+  - Keeps the 60 FPS animation timer active in calm idle breathing mode (`_phase += 0.02`) when the visualizer is enabled, providing smooth resting contours that dynamically surge and pulse as soon as music playback begins.
+- **Fix Visualizer Wave Clipping with Lyrics Active (`ui/widgets/ambient_cover.py`, `ui/main_window.py`)**:
+  - Resolved wave clipping when the lyrics panel is open by adding horizontal margin-aware boundary safety limits (`max_allowed_dx = max(6.0, horiz_margin - 5.5)`) in `_build_wave_path`.
+  - Expanded cover container width in lyrics mode from `self._album_cover_size + 26` (206px) to `self._album_cover_size + 84` (264px) in `ui/main_window.py`, providing a comfortable ~36px lateral clearance for full unconstrained wave amplitude.
+- **Fix Color Picker "+ Salva" Button Clipping (`ui/color_picker_dialog.py`)**:
+  - Resolved text clipping on the "+ Salva" slot button by increasing button height from `22px` to `26px` and adding dedicated cyber-glass button styling (`#saveSlotBtn`) with balanced `2px 12px` padding and theme accent hover glow.
+  - Aligned section header and save button vertically with `AlignVCenter` in the saved custom swatches row.
+- **Dynamic Station Codecs, Channels & Linux DBus Native Tray Rework (`ui/tray_manager.py`, `ui/main_window.py`)**:
+  - Dynamically rebuilds and checks the active audio format (codec) in the system tray menu according to each station's supported formats (e.g. `MP3 320k`, `MP3 128k`, `AAC 64k` for TruckersFM; `MP3 256k`, `MP3 128k`, `Opus 64k` for Gensokyo Radio; `Vorbis`, `Opus`, `MP3` for LISTEN.moe), fixing missing checkmarks when listening to non-default stations.
+  - Automatically adapts channel submenu visibility: displays `J-POP` and `K-POP` channels when listening to multi-channel stations (LISTEN.moe) and cleanly hides the `Canale` submenu for single-stream stations (TruckersFM, Gensokyo Radio, ANISON.FM, Neuro 21).
+  - Implemented Linux DBusmenu / `StatusNotifierItem` native tray compatibility: because FreeDesktop `libdbusmenu` drops Qt's custom `QWidgetAction` (`TrayNowPlayingCard`), native playback and metadata actions are enabled on Linux with live track titles, artists, session times, dynamic album art thumbnail icons, vector playback actions (`Play/Pausa`, `Stop`, `Muto`, `Cronologia brani`), and native section headers.
+  - Added system tray icon click activation handling (`_on_tray_activated`): left-click/double-click restores and raises the main window, and middle-click toggles playback.
+- **Cyber-Glass System Tray Header Card (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
+  - Replaced the two plain disabled text lines with a rich, interactive cyber-glass card embedded at the top of the tray menu via `QWidgetAction`.
+  - Displays high-resolution rounded album cover art (or fallback KikuMoe brand logo) with anti-aliased corner clipping.
+  - Features real-time track metadata (auto-elided title, artist, station branding pill, and live session timer).
+  - Integrates 4 quick inline glass action buttons directly in the card: `[Play/Pause]`, `[Stop]`, `[Mute]`, and `[Cronologia brani...]`.
+  - Clicking anywhere on the card body immediately raises and brings KikuMoe to the foreground.
+- **Complete Vector Icon Suite Expansion (`ui/vector_icons.py`)**:
+  - Implemented anti-aliased SVG vector icons for all system tray and window actions:
+    - Play triangle (`get_play_icon`) and Pause dual bars (`get_pause_icon`).
+    - Stop rounded square (`get_stop_icon`).
+    - Speaker with audio waves and muted slash (`get_volume_icon`).
+    - Window layout emblem (`get_window_icon`).
+    - High-visibility bright gear (`get_settings_icon`), replacing the dark/invisible PNG.
+    - Information circle badge (`get_info_icon`).
+    - Radio broadcast tower with electromagnetic waves (`get_station_icon`).
+    - Dual musical notes (`get_channel_icon`).
+    - Audio waveform (`get_codec_icon`).
+    - Standby power emblem in glowing crimson/rose (`get_power_quit_icon`).
+- **Bespoke Cyber-Moe Color Picker Dialog (`ui/color_picker_dialog.py`)**:
+  - Designed a high-DPI frameless modal color picker replacing Qt's legacy `QColorDialog`, complete with `CustomTitleBar`, KikuMoe branding, and 60 FPS drop-in/fade animations.
+  - Interactive 2D Saturation/Value gradient canvas with high-contrast dual-ring cursor and full-spectrum vertical Hue rainbow slider.
+  - Split Before/After color comparison swatch with one-click restore.
+  - Monospace HEX input with automatic normalization and one-click copy feedback.
+  - Un-truncated, spacious RGB (0..255) and HSV (H°, S%, V%) numeric spinboxes with mouse-wheel support.
+  - Built-in desktop Screen Eyedropper (`Pipetta`) with a live 9×9 magnified pixel grid loupe and real-time color sampling.
+  - 16 curated Cyber-Moe and vibrant neon quick-palette swatches with selection checkmarks.
+  - 8 user-customizable saved color slots persisted in `QSettings` (`custom_accent_palette`).
+  - Real-time accent preview on the dialog's primary OK button with contrast-aware foreground styling.
+- **Theme & Custom Accent Engine**:
+  - Added 5 curated Cyber-Moe visual presets in Settings (*Generali → Aspetto e Tema*), organized in dedicated modular theme files under `ui/themes/` (`cyber_moe.py`, `midnight_amoled.py`, `sakura_bloom.py`, `neon_matrix.py`, `ocean_cyan.py`, and shared `engine.py`): **Cyber Moe** (default dark violet & neon pink), **Midnight AMOLED** (pure `#000000` black surfaces), **Sakura Bloom** (soft rose & cherry glow), **Neon Matrix** (deep slate & acid green), and **Ocean Cyan** (navy deep & cyan glow).
+  - Added an interactive **Custom Accent Color** toggle, glowing color swatch picker, and one-click preset reset (`AccentColorSwatchButton`) that dynamically derives hover, pressed, shimmer, contrast-aware foreground (`on_accent`), glass border, scrollbar, and glow RGBA tokens across the entire UI.
+  - Real-time live preview across the main player, title bar, waveform/equalizer badge, station selector, progress scrubber, lyrics panel, mini-player HUD, dialogs, popovers, and system tray menu, with automatic rollback to persisted `QSettings` on Cancel.
+- **Lyrics**: Show LRCLIB lyrics beside the album cover, with animated scrolling for synchronized tracks and a plain-text fallback.
+- **System Media Controls**: Integrate with Windows SMTC and Linux MPRIS for playback controls and track metadata, with a media-key fallback on Windows.
+- **Discord Rich Presence Button**: Add a localized button linking to the KikuMoe project page.
+- **Settings Shortcut**: Open settings with Ctrl+, including from the mini player.
+- **Mini Player Track Progress**: Show elapsed time, duration and a compact progress indicator, with a live label for streams without a known duration.
+- **Mini Player Volume Feedback**: Show an animated percentage bubble when the mini player volume changes.
+- **Mini Player HUD**: Toggle a compact player with F9 or the title bar button, with cover art, scrolling track information, playback, volume, always-on-top, and separately saved window geometry.
+- **Settings Feedback**: Show a short, animated confirmation when settings are applied.
+- **Discord Rich Presence**: Optional local IPC integration for Discord desktop and compatible arRPC clients, with configurable Application ID, track metadata, artwork, playback state, and automatic reconnection.
+- **Multi-Station Radio Engine**:
+  - Integrated community and partner web radio stations: LISTEN.moe (J-POP & K-POP), Gensokyo Radio (Touhou Project 24/7), ANISON.FM (Japanese anime music), Neuro 21 Radio (Neuro & Evil karaoke covers), and TruckersFM (Euro Truck & gaming hits).
+  - Modernized top HUD station selector: `StationPillButton` featuring an animated vector chevron, active station branding, and the `StationGlassPopover` frosted glass channel switcher.
+  - Pluggable provider architecture (`StationProvider`) handling diverse metadata streams (LISTEN.moe WebSockets, AzuraCast REST APIs, Icecast/Liquidsoap status endpoints).
+- **Session Song History & Popover**:
+  - In-memory thread-safe `SongHistoryManager` ring buffer (up to 100 tracks) with consecutive duplicate filtering to avoid spamming the history during reconnects or polling cycles.
+  - Cyber-Glass `SongHistoryPopover` modal card featuring smooth drop-in/fade animations (190ms `OutCubic`), session track count badge, "Svuota" (clear) action, and empty state guidance.
+  - Dedicated vector history button (`HistoryIconButton`) in the header HUD with 60 FPS click-bounce animation (`0.84 -> 1.04 -> 1.0`).
+- **Intelligent Quick Search Engine (`core/quick_search.py`)**:
+  - **Spotify Desktop Detection & Fallback**: Automatically probes for Spotify desktop installations across platforms (Windows Registry `HKCU/HKCR/HKLM\Software\Classes\spotify\shell\open\command` + exe paths, Linux `which spotify`, Flatpak, Snap, macOS). Launches native URI `spotify:search:<query>` if installed, with seamless fallback to `https://open.spotify.com/search/<query>` in the default browser.
+  - Direct search integrations for **YouTube**, **YouTube Music**, and **Apple Music**.
+  - One-click clipboard actions: Copy formatted `"Artist - Title"`, song title, or artist name with visual feedback.
+- **Track Title Dropdown Chevron & Interactive Capsule (`TrackMenuChevronButton`)**:
+  - Interactive vector chevron (`▾`) positioned dynamically right at the optical midline and baseline of the song title in `AnimatedTrackLabel`.
+  - Added subtle glowing Cyber-Glass hover capsule surrounding the active song title and chevron on mouse hover with pointing hand cursor.
+  - Left-clicking either the title text or the chevron directly opens the Quick Search & Actions menu anchored underneath.
+  - Automatically hidden when playback is idle and elides cleanly on long titles without pushing title text off-center.
+- **Official Vector Icon Suite (`ui/vector_icons.py`)**:
+  - Replaced all Unicode emojis across menus and buttons with authentic, pixel-perfect vector SVGs rendered via `QSvgRenderer`:
+    - Official Spotify brand green disc `#1ED760` with accurate convex sound waves.
+    - Official YouTube red badge `#FF0000` with centered white play triangle.
+    - Official Apple Music gradient badge (`#FA2D48` → `#FA5570`) with white paired musical notes.
+    - Copy documents icon with rounded corners in slate `#CBD5E1`.
+    - Neon clock history icon with hour and minute hands.
+  - Rendered across the Now Playing context menu, history popover action buttons, and system tray.
+
+### Changed
+- **Seamless System Tray Header & Enlarged Artwork (`TrayNowPlayingCard` in `ui/tray_manager.py`)**:
+  - Removed detached card container borders and background box, seamlessly integrating the Now Playing widget as the native top header of the system tray context menu.
+  - Eliminated the top dark padding gap above the header card by configuring top padding to `0px` and matching top corner curvature with asymmetric rounded clipping, making the ambient glow sit completely flush with the top border.
+  - Implemented dynamic Cyber ambient glow in the tray header background (`TrayNowPlayingCard.paintEvent`): renders an anti-aliased radial aura behind the album cover art and a soft top-down ambient light wash that dynamically morphs with the active theme preset and custom accent color, with smooth Destination-In vertical falloff masking that guarantees 0% alpha before the card bottom to prevent any cutoff seam.
+  - Increased album cover art thumbnail size from 46×46 px to 58×58 px with smooth anti-aliased 8px rounded corners.
+  - Removed cramped hint text and centered quick media buttons (`[Play/Pause]`, `[Stop]`, `[Mute]`, `[Cronologia brani...]`) with comfortable 36×28 px touch targets.
+  - Added real-time playback control state synchronization whenever the tray menu is opened (`menu.aboutToShow.connect(self._sync_controls_from_parent)`), ensuring the Play/Pause icon immediately reflects current playback state.
+  - Polished section header typography and spacing (`FINESTRA`, `PREFERENZE`).
+- **Mini Player Layout**: Increased its compact window size and cover art to give track information, progress, and volume more room.
+- **Scrollbars**: Apply Cyber-Moe track and accent colors to vertical and horizontal scrollbars, with hover and pressed states defined in the theme palette.
+- **Track Metadata Hover**: Connected title and artist highlights follow each text width, fade smoothly, and open the track actions from either row.
+- **Apple Music Icon**: Refined the gradient badge and music note for clearer rendering at menu sizes.
+- **Close Confirmation Dialog UI**:
+  - Modernized `CloseConfirmDialog` with custom Cyber-Glass title bar (`CustomTitleBar`), dialog title "Chiudere l'app?", and clean non-redundant description body.
+  - Replaced asymmetric dialog icon with a perfectly balanced standby power emblem badge (`DialogIconBadge`).
+  - Added smooth drop-in and fade entrance/exit animations with `WindowStaysOnTopHint`.
+- **System Tray Context Menu Overhaul (`ui/tray_manager.py`)**:
+  - Replaced all legacy low-res PNGs and bitmap icons with crisp, resolution-independent vector icons that automatically re-tint with the active theme and custom accent color.
+  - Streamlined the context menu by removing redundant duplicate playback items (*Riproduci*, *Stop*, *Muto*, *Cronologia brani*), which are now integrated directly inside the interactive Cyber-Glass Now Playing header card.
+  - Modernized section headers (`FINESTRA`, `PREFERENZE`) with bold, uppercase, tracked typography and polished item spacing.
+  - Deep glassmorphism background (`#141624`), subtle borders (`PALETTE["border_card"]`), and smooth accent hover highlights (`PALETTE["accent_menu_hover"]`).
+  - Full-box edge-to-edge menu item hover state (`margin: 0px`, `padding: 0px` on menu): removed inset horizontal margins and bottom padding so hover states fill the entire width and reach the bottom of the tray menu seamlessly.
+  - Dynamic theme accent styling and increased font size (`11px` bold) for tray section headers (*FINESTRA*, *PREFERENZE*), harmonizing section titles with the active theme and custom accent.
+  - Inward subcontrol positioning for submenu chevrons (`QMenu::right-arrow { right: 12px; }`), preventing `>` arrows from colliding with the right border.
+  - Added localized tooltips and labels (`tray_open_app`, `tray_no_track`).
+- **Audio-Reactive Conformal Fluid Wave Visualizer (`core/audio_analyzer.py`, `ui/widgets/ambient_cover.py`)**:
+  - Implemented an audio-reactive **Conformal Fluid Neon Wave** visualizer that envelops the rounded album cover art and vinyl disc placeholder, bringing organic Cyber-Moe fluid wave dynamics to playback.
+  - Conformal contour geometry: dynamically follows the rounded-rectangle boundary of the cover pedestal on all four sides and corners, eliminating edge occlusions and clipping.
+  - Dual-wave neon rendering: primary high-intensity neon fluid spline with white core and vibrant theme bloom, backed by a resonant echo wave and soft translucent neon aura.
+  - Frequency perimeter distribution: deep sub-bass and kick punch ripple downward and outward at the bottom, mids contour the sides, and treble sparkles at the top.
+  - Zero binary dependencies: high-performance pure-Python Radix-2 Cooley-Tukey iterative FFT (<0.2 ms execution budget per frame) with Hanning windowing and logarithmic frequency grouping into 64 symmetric perceptual nodes.
+  - Silky physical smoothing with instant attack (0.65) and exponential gravity decay (0.86), preventing harsh flickering and ensuring smooth natural movement at 60 FPS.
+  - Audio-reactive ambient nebula glow: kick-drum / sub-bass energy dynamically pulses the radial background glow behind the artwork in real time.
+  - Thread-safe zero-overhead PCM tap on `PlayerFFmpeg` with procedural harmonic generator fallback when streaming via VLC/MPV or when muted.
+  - Fully integrated with dynamic themes and custom accents: visualizer wave and glow inherit `PALETTE["accent"]` or artwork dominant colors automatically.
+  - Configurable toggle switch (*Visualizzatore audio radiale*) in *Impostazioni → Aspetto* with instant live preview.
+
+### Fixed
+- **Linux Native DBus Tray Playback Section & Cover Art Thumbnail (`ui/tray_manager.py`, `tests/test_tray_manager.py`)**:
+  - Restored full playback controls (`Play/Pausa`, `Stop`, `Muto`, `Cronologia brani`), live track title, artist, session timer, and album cover art thumbnail icon on Linux desktop environments (KDE Plasma, GNOME, Xfce) where FreeDesktop DBusmenu serializes tray menus and drops custom `QWidgetAction`s.
+  - Harmonized full vector icon palette with the theme accent color (`accent`) across all tray actions (`Muto`, `Cronologia brani`, `Mostra finestra`, `Impostazioni`, `Info`, `Stazione`, `Canale`, `Codec`), eliminating dull grey icons.
+  - Eliminated redundant separators preceding section headers (`RIPRODUZIONE`, `FINESTRA`, `PREFERENZE`), removing double-spaced gaps and excessive vertical padding across tray menu rows.
+  - Pinned `KIKUMOE_TRAY_FORCE_CARD=1` in `test_tray_menu_clean_layout` so both card and Linux DBus layouts are thoroughly validated in CI.
+- **CI Headless Offscreen Segmentation Fault & Close Dialog Lifecycle (`ui/close_dialog.py`, `tests/test_ui_widgets.py`)**:
+  - Resolved CI segmentation fault (exit code 139) occurring in `test_close_dialog_remember_checkbox_alignment_and_animation`.
+  - Replaced native window `grab()` with safe offscreen `QPixmap.render(painter)` in `RememberCheckBox` and `GlassComboBox` popup unit tests, preventing `QOffscreenBackingStore` null-pointer dereferences in headless / offscreen Qt environments.
+  - Implemented safe animation lifecycle management in `CloseConfirmDialog`: automatically stops running entrance/exit parallel animation groups and checkbox variant animations in `hideEvent`, `reject()`, `accept()`, and `closeEvent()`.
+  - In offscreen mode (`QT_QPA_PLATFORM=offscreen`), entrance and exit animations complete synchronously without leaving orphan property animations ticking on deallocated dialogs during pytest teardown.
+  - Added deterministic cleanup (`dlg.close()`, `dlg.deleteLater()`, `qapp.processEvents()`) to all close dialog test fixtures.
+- **System Tray Section Header Alignment**: Corrected the horizontal alignment of disabled section headers (*FINESTRA*, *PREFERENZE*) in `ui/tray_manager.py` by applying `margin-left: -13px; padding-left: 0px;` on `QMenu::item:disabled`, bringing section titles into perfect optical alignment with the icon column.
+- **System Tray Icon Left Padding**: Added explicit `padding-left: 10px;` and `padding-right: 6px;` to `QMenu::icon` in `ui/tray_manager.py`, preventing action icons from touching the left menu border when full-width hover is active.
+- **Color Picker UI & SpinBox Truncation**: Replaced Qt's unlocalized, fixed-width non-native `QColorDialog` with the bespoke `AccentColorPickerDialog`, resolving cut-off spinbox digits (`3:`, `2!`), native window titlebar clash, and archaic Windows 95 layout.
+- **History Popover Cover Art Cache**: Added a shared, thread-safe in-memory LRU cover art cache (`network/image_cache.py`) so `SongHistoryPopover` renders album art thumbnails across LISTEN.moe and partner web radio stations.
+- **PortAudio Thread Safety & Device Enumeration**: Serialized concurrent `Pa_Initialize`/`Pa_Terminate` and `silence_stderr()` calls via `PORTAUDIO_LOCK` across audio backends and Settings to prevent Linux PortAudio segfaults, and cancelled pending device-refresh timers when closing Settings.
+- **PyQt6 Type Annotations & Method Overrides**: Aligned widget override signatures and optional type narrowing across `ui/`, `core/`, and `network/` with PyQt6 type stubs and Pylance/mypy checks.
+- **Settings Panel & Backdrop Rendering Performance**:
+  - Cached steady-state HiDPI composited backdrop frames in `FullBleedCanvas` to eliminate per-frame CPU pixmap scaling and multi-gradient recomputation during Settings scrolling, widget hovers, and 60 FPS tab/panel slides.
+  - Moved PyAudio output device enumeration (`Pa_Initialize`) off the Qt main thread into a background worker, deduplicated global QSS rules on embedded `SettingsDialog`, cached tinted icons and theme application state in `ListenMoePlayer.apply_theme`, and eliminated redundant theme re-polishing on Cancel/Apply/OK.
+- **Close Confirmation Dialog**: Use a translucent, themed frame and a compact animated remember-choice checkbox with a vector checkmark.
+- **Station Selector and Settings Transitions**: Deliver station selections immediately, avoid popup motion on Linux, and preserve the settings panel during return animations.
+- **Audio Status Badge**: Show the active audio backend instead of the misleading initial AUTO label, and update its readiness indicator even when legacy widgets are absent.
+- **Tooltip Corners**: Match the tooltip border to its rectangular native background.
+- **Mini Player on Linux**: Keep the compact window at its intended size and reject maximize/full-screen requests.
+- **FFmpeg Rapid Pause**: Avoid stopping the audio output while another thread is writing, preventing host errors during rapid pause and resume.
+- **Mini Player Artwork**: Clip album covers to rounded corners, including on high-DPI displays.
+- **Discord Settings Labels**: Match the wording and localization of the other settings.
+- **Settings Horizontal Clipping**: Allow horizontal scrolling when a narrow window cannot fit a settings page, and keep the audio device selector flexible.
+- **Minimum Window Size**: Prevent the main window from being resized below the height needed by the player layout.
+- **Compact Settings Layout**: Settings pages scroll vertically when the window is too small for their contents, preventing overlapping cards while keeping the action buttons visible.
+- **Title Capsule Hit-Testing**: Hit-testing is now strictly bounded to the title text and chevron geometry (`get_capsule_rect()`). Mouse movements and clicks in empty margin areas to the left or right of centered text are properly ignored.
+- **Active Menu State Retention**: The unified title hover capsule remains fully illuminated while the dropdown search context menu is open (`set_menu_active(True)`), preventing the capsule from prematurely collapsing on `leaveEvent`.
+- **Chevron Button Clean Rendering**: Removed standalone square box background from `TrackMenuChevronButton` when clicked/active; the chevron icon seamlessly tints to the accent color `#EC186C` inside the unified title capsule without an isolated bounding box.
+- **CloseConfirmDialog Geometry Conflict**: Resolved Windows platform window geometry error (`QWindowsWindow::setGeometry: Unable to set geometry 430x180 ... Resulting geometry: 430x181`) by dynamically clamping the height to `max(186, self.sizeHint().height())`.
+- **History Popover Widget Overlap**: Fixed visual ghosting and overlapping text rows in `SongHistoryPopover` by explicitly invoking `w.setParent(None)` prior to `w.deleteLater()` when clearing and rebuilding the scrollable track list.
+- **Station Selection Persistence**: Fixed issue where switching to Neuro 21 or TruckersFM reverted back to LISTEN.moe due to station ID normalization.
+- **Audio Scrubber Duration for Web Stations**: Ensured non-websocket radio stations correctly report duration and track countdowns without progress bar resets.
+
+---
+
+## [2.0.0-beta2] - 2026-10-26
+
+### Added
+- **Linux Audio Startup Diagnostics**: Automated probing of active sound daemons (PipeWire socket, PulseAudio server, ALSA) and audio backend readiness (FFmpeg binary, PortAudio host APIs, MPV, VLC) logged on startup and inspectable in the Developer Console.
+- **Standalone Static FFmpeg Bundling**: Bundled static `ffmpeg` directly into PyInstaller's frozen binary (`sys._MEIPASS`) and automated static FFmpeg download in `build.sh` for self-contained Linux builds.
+- **Minimal Audio-Only FFmpeg Linux Build**: Dedicated compilation recipe (`packaging/linux/build-minimal-ffmpeg.sh`) building a specialized static FFmpeg binary (~15 MB vs ~140 MB full build) tailored specifically for web radio audio streams (PCM, MP3, AAC, FLAC, Opus, Ogg/Vorbis) and protocols (`pipe`, `crypto`, `https`, `tls`).
+- **Headless CLI Flags (`--check-audio`, `--help`)**: Non-GUI command-line interface arguments in `KikuMoe.py` allowing headless verification of system audio daemons, sound backends, and environment diagnostics with standardized process exit codes.
+- **CI Smoke Tests & Footprint Profiling**: Headless automated CI validation on both GitHub Actions and Forgejo CI executing `--check-audio` and `--help` directly against built Linux AppImage artifacts, coupled with automated AppDir footprint and largest file breakdowns.
+- **PyAudio & PortAudio Linux Bundling**: Explicit inclusion of `pyaudio` C-extensions (`_portaudio`), `libportaudio.so.2`, and fallback `libjack.so.0` inside the Linux AppDir, guaranteeing PortAudio availability out-of-the-box even on systems without JACK or pipewire-jack packages.
+- **Persistent File Logging & History Buffer**: Added rotating log file handler (`kikumoe.log`) in platform data directories and an in-memory ring buffer (1000 lines) replayed upon opening the Developer Console.
+- **Powered By Section**: New cards in Settings (Info tab) and About dialog featuring brand direct links to supported radio stream services (LISTEN.moe, etc.) with vector logos.
+- **Telegram Channel Link**: Added official Telegram link button with custom vector plane icon in the About section.
+- **Micro-Interactions**: Smooth 60 FPS click-bounce animations (`0.90 -> 1.04 -> 1.0`) on all action, link, and copy buttons across the UI.
+- **Dynamic DevConsole Logger Level Sync**: Changing the log level in the Developer Console now immediately synchronizes all active application loggers (`KikuMoe`, `PlayerMPV`, `PlayerVLC`, `PlayerFFmpeg`) in real-time, with automatic restoration of default levels upon closing the console.
+- **Lazy Logger Hooks**: DevConsole automatically attaches its log handler to newly instantiated player backends and loggers.
+- **Live Track Ambient Mode & Counter**: Added active ambient shimmer wave animation on the progress bar and continuous elapsed second counting (`0:01, 0:02... / LIVE`) for untimed songs or live broadcasts (`duration == 0`) from LISTEN.moe, preventing the UI from appearing frozen.
+- **Detailed MPV Diagnostics**: Enhanced audio startup diagnostics to report the exact dynamic linker exception and root cause (`__cause__`) when `libmpv` fails to import on Linux host systems.
+- **Audio Scaling Tests**: Automated unit tests validating volume scaling and perceptual curve curves across all playback backends.
+
+### Changed
+- **PyInstaller Onedir Mode on Linux**: Converted Linux packaging from `onefile` to `onedir` in `kikumoe.spec`, eliminating the runtime overhead of unpacking files to `/tmp` on every launch, speeding up startup time and reducing disk churn.
+- **AppImage Zstandard Compression**: Modernized `packaging/linux/build-appimage.sh` with pinned `appimagetool` v1.9.1 and `zstd` level 19 compression, achieving an ultra-compact distribution footprint.
+- **Binary & Asset Stripping**: Excluded unused Qt translations (>15 MB saved), stripped host media codecs (Mesa/GPU, x264, x265, VP8/VP9, AV1), and removed duplicate system ICU libraries from the bundled AppDir.
+- **Perceptual Volume Curve**: Implemented unified power 1.5 volume scaling across MPV, VLC, and FFmpeg backends ($100 \cdot \sqrt{\text{vol}/100}$ for cubic backends, $(\text{vol}/100)^{1.5}$ for FFmpeg amplitude). Low volume settings (< 20%) are now clear, audible, and natural without abrupt drop-offs.
+- **CI / Build Triggers & Concurrency**: Added `concurrency: cancel-in-progress` groups to GitHub and Forgejo CI workflows, and included the `redesign` branch directly in build triggers to enable automated builds on both tags and branch pushes.
+- **Isolated Build Dependency Group**: Introduced `tool.poetry.group.build.dependencies` in `pyproject.toml` isolating PyInstaller and build tooling from runtime dependencies.
+- **Log Spam Reduction (#71)**: Downgraded `volume_changed` event messages from `INFO` to `DEBUG` to eliminate console and terminal flooding during volume slider drag.
+- **Tagline & Localization**: Updated application tagline and descriptions across Italian and English translations to cover web radio, music, and local playback capabilities.
+- **Binary Size Optimization**: Excluded unused heavy Qt6 modules (`QtQml`, `QtQuick`, `QtPdf`, `QtSql`, `QtXml`, `QtBluetooth`, etc.) and stdlib modules (`tkinter`, `unittest`, `pydoc`, `sqlite3`) in `kikumoe.spec`, and eliminated duplicate ffmpeg bundling inside the onefile payload in favor of AppDir placement, drastically reducing Linux executable and AppImage size.
+
+### Fixed
+- **Host MPV Dynamic Library Conflicts (Arch / Fedora)**:
+  - Excluded `libssl.so*` and `libcrypto.so*` from the PyInstaller bundle on Linux, resolving `OPENSSL_3.5.0 not found` caused when host `libmpv` dynamically loads host `libcurl.so.4`.
+  - Excluded `libfontconfig.so*` from the PyInstaller bundle on Linux, resolving `undefined symbol: FcConfigSetDefaultSubstitute` when host `libmpv` loads host `libass.so.9` against modern host Fontconfig 2.14+.
+- **Host VLC Dynamic Library Loading & Discovery**:
+  - Implemented `_find_libvlc_path()` to systematically probe system library directories (`/usr/lib`, `/usr/lib64`, `/usr/local/lib`, etc.) and export `PYTHON_VLC_LIB_PATH` prior to `import vlc`.
+  - Updated audio diagnostics to verify `libvlc_new()` instantiation, reporting VLC as `Ready` only when confirmed operational and reporting exact initialization exceptions under `Unavailable` instead of misleading `Available`.
+- **PyAudio Sample Rate Auto-Negotiation**:
+  - Added multi-rate candidate probing (`48000 Hz`, `44100 Hz`, and device default rate) in `PlayerFFmpeg._open_pyaudio_stream`, eliminating audio crackling, pitch distortion, and invalid sample rate errors when connecting to non-48kHz sinks or fallback devices.
+- **Packaging Script Path Resolution**: Fixed relative path ambiguities in `build-minimal-ffmpeg.sh` and `fetch-ffmpeg.sh` by ensuring destination paths are resolved to absolute coordinates.
+- **Progress Bar Freeze on Untimed Tracks**: Fixed an issue where receiving a song with `dur == 0` caused `_on_song_tick` to return immediately, leaving the progress bar static at 0% and freezing the elapsed time text.
+- **Linux AppImage Audio Playback**:
+  - Excluded conflicting low-level system audio libraries (`libasound`, `libpulse*`, `libjack`, `libpipewire*`, `libspa*`, `libasound_module*`) and standard C++ runtime (`libstdc++`, `libgcc_s`) in `kikumoe.spec`, forcing dynamic binding to host ALSA/PipeWire/PulseAudio plugins and resolving `GLIBCXX` symbol mismatches with host `libmpv` and `librubberband`.
+  - Bundled standalone static `ffmpeg` in AppImage (`usr/bin/ffmpeg`) and added search paths in `PlayerFFmpeg`.
+  - Added multi-output driver fallback (`--aout=pulse,alsa`) for VLC on Linux.
+- **Silent Audio Failures & Error Visibility**:
+  - Promoted FFmpeg process termination, exit codes, and `stderr` error output from `DEBUG` to `ERROR` in `PlayerFFmpeg`.
+  - Promoted VLC and MPV initialization and playback failure exceptions to `ERROR`, ensuring all streaming issues are visible in `kikumoe.log` and the Developer Console.
+- **Typing & Event Override Signatures (Pylance)**:
+  - Corrected Qt event override parameter signatures (`enterEvent(self, event)`, `mousePressEvent(self, a0)`, `mouseMoveEvent(self, a0)`, `setChecked(self, a0)`, `eventFilter(self, a0, a1)`, `showEvent(self, a0)`) across `custom_titlebar.py`, `settings_dialog.py`, `dev_console.py`, and `about_dialog.py`.
+  - Added null safety checks on optional Qt mouse and key events.
+- **Settings Animation Stutter (#72)**: Pre-warmed settings panel widgets during application startup idle and cached SVG/PNG brand assets in memory, reducing first-click opening time from ~330 ms to < 10 ms.
+- **Settings Dialog Closing Delay**: Streamlined dialog destruction and animation callbacks for instantaneous, lag-free close interactions.
+- **Layout & Sizing Stability**:
+  - Locked volume percentage label width to prevent layout shifts and controls repositioning when volume reaches 100%.
+  - Vertically aligned playback controls and adjusted radio button row spacing and minimum window height to prevent overlap on compact displays.
+  - Wrapped all Info tab sections into unified Cyber-Moe glass cards matching Audio and General tabs styling.
+- **Dropdown & Combobox Popups (#58)**: Fixed transparent background and text overlap on GlassComboBox dropdown items.
+- **System Tray Integration (#65, #67)**:
+  - Fixed tray menu quit action to properly respect the "Confirm on exit" preference.
+  - Synchronized tray menu state in real-time with the actual player playback state.
+- **Settings Slide Transition (#62)**: Fixed layout corruption and rendering glitches during tab transitions.
+- **Console Log Locale (#59)**: Fixed developer console log formatting to avoid locale-dependent corruption.
+- **UI Contrast & Title Bar Alignment (#60, #61)**: Improved app icon contrast in dark theme and aligned the version badge label with the app title.
+- **SSL Certificate Verification**: Fixed OpenSSL certificate bundle verification failures on Linux.
+
+---
+
+## [2.0.0-beta1] - 2026-10-21
+
+### Added
+- **Cyber-Moe Glass UI Redesign**: Complete aesthetic overhaul with dark glassmorphism, accent glow effects, custom frameless window title bar, and Cascadia/Segoe UI typography.
+- **Ambient Album Art Glow**: Dynamic ambient lighting reacting to currently playing track album covers with smooth cross-fade animation.
+- **Integrated Settings Panel**: Slide-in settings interface with tabbed organization (General, Audio, Info) and live hardware output device enumeration.
+- **Cyber-Moe Developer Console**: Live floating debug console with filter levels, log autoscroll, text wrap, copy-to-clipboard, and export options.
+- **Sleep & Session Timers**: Configurable sleep timers with smooth fade-out and stop-on-end-of-track support.
+- **Backend Architecture**: Support for MPV (`libmpv-2`), VLC (`libvlc`), and FFmpeg audio engines with seamless runtime fallback.

@@ -1,13 +1,10 @@
-"""Tests for TrayManager and icon rendering in KikuMoe 1.11.1."""
-
 import os
+from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import QApplication, QWidget
 
-from core.i18n import I18n
-from ui.main_window import ListenMoePlayer
+from core.constants import KEY_CHANNEL, KEY_FORMAT
 from ui.tray_manager import TrayManager
 
 
@@ -20,75 +17,660 @@ def qapp():
     return app
 
 
-def test_tint_icon_optical_normalization(qapp):
-    player = ListenMoePlayer.__new__(ListenMoePlayer)
+class DummySettings:
+    def __init__(self, initial_values=None):
+        self._values = initial_values or {}
 
-    # Test with app_stop.png (which previously had 37% empty padding and shrank to 5px)
-    icon_path = os.path.join("icons", "app_stop.png")
-    raw_icon = QIcon(icon_path)
-    tinted = player._tint_icon(raw_icon, QColor("#ec186c"))
+    def value(self, key, default=None):
+        return self._values.get(key, default)
 
-    assert not tinted.isNull()
-    # Check 16x16 pixmap
-    pm16 = tinted.pixmap(16, 16)
-    assert not pm16.isNull()
-    img16 = pm16.toImage()
-
-    # Measure non-transparent bounds in 16x16
-    min_x, max_x = 16, 0
-    min_y, max_y = 16, 0
-    for y in range(16):
-        for x in range(16):
-            if img16.pixelColor(x, y).alpha() > 10:
-                min_x = min(min_x, x)
-                max_x = max(max_x, x)
-                min_y = min(min_y, y)
-                max_y = max(max_y, y)
-
-    content_w = max_x - min_x + 1
-    content_h = max_y - min_y + 1
-
-    # Content must occupy at least 11px (not 5px as in the bug)
-    assert content_w >= 11
-    assert content_h >= 11
-
-    # Check horizontal & vertical centering (margins within 1px)
-    left_m = min_x
-    right_m = 16 - 1 - max_x
-    top_m = min_y
-    bottom_m = 16 - 1 - max_y
-    assert abs(left_m - right_m) <= 1
-    assert abs(top_m - bottom_m) <= 1
+    def setValue(self, key, val):
+        self._values[key] = val
 
 
-def test_tray_manager_icons_and_submenus(qapp):
-    win = QWidget()
-    i18n = I18n("it")
-    tray = TrayManager(win, i18n)
-    tray.ensure_tray_enabled(True, tooltip="Line0\nLine1\nLine2")
+class DummyParent(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.settings = DummySettings(
+            {
+                KEY_CHANNEL: "J-POP",
+                KEY_FORMAT: "Vorbis",
+            }
+        )
 
-    dummy_icon = QIcon(os.path.join("icons", "app_stop.png"))
-    icons = {
-        "play": dummy_icon,
-        "pause": dummy_icon,
-        "stop": dummy_icon,
-        "mute": dummy_icon,
-        "unmute": dummy_icon,
-        "force_stop": dummy_icon,
-        "channel": dummy_icon,
-        "codec": dummy_icon,
-        "quit": dummy_icon,
-    }
-    tray.update_controls_icons(icons)
 
-    assert not tray._act_play_pause.icon().isNull()
-    assert not tray._act_stop.icon().isNull()
-    assert not tray._act_mute.icon().isNull()
-    assert not tray._act_quit.icon().isNull()
-    assert not tray._act_ch.icon().isNull()
-    assert not tray._act_fmt.icon().isNull()
+def test_tray_manager_initial_sync(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
 
-    # Submenus are properly parented to context menu
-    menu = tray._tray.contextMenu()
-    assert tray._act_ch.menu().parent() is menu
-    assert tray._act_fmt.menu().parent() is menu
+    channel_callback = MagicMock()
+    format_callback = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_change_channel=channel_callback,
+        on_change_format=format_callback,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Verifica che le azioni siano state registrate
+    assert "listenmoe" in tray_mgr._station_actions
+    assert "gensokyo" in tray_mgr._station_actions
+    assert "anison" in tray_mgr._station_actions
+    assert tray_mgr._station_actions["listenmoe"].isChecked() is True
+    assert "J-POP" in tray_mgr._channel_actions
+    assert "K-POP" in tray_mgr._channel_actions
+    assert "Vorbis" in tray_mgr._format_actions
+    assert "Opus" in tray_mgr._format_actions
+    assert "MP3" in tray_mgr._format_actions
+
+    # Verifica che le selezioni iniziali corrispondano a QSettings
+    assert tray_mgr._channel_actions["J-POP"].isChecked() is True
+    assert tray_mgr._channel_actions["K-POP"].isChecked() is False
+    assert tray_mgr._format_actions["Vorbis"].isChecked() is True
+    assert tray_mgr._format_actions["Opus"].isChecked() is False
+    assert tray_mgr._format_actions["MP3"].isChecked() is False
+
+
+def test_tray_manager_sync_stream_settings_explicit(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    channel_callback = MagicMock()
+    format_callback = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_change_channel=channel_callback,
+        on_change_format=format_callback,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Sincronizza esplicitamente su K-POP e Opus
+    tray_mgr.sync_stream_settings(channel="K-POP", fmt="Opus")
+
+    assert tray_mgr._channel_actions["K-POP"].isChecked() is True
+    assert tray_mgr._channel_actions["J-POP"].isChecked() is False
+    assert tray_mgr._format_actions["Opus"].isChecked() is True
+    assert tray_mgr._format_actions["Vorbis"].isChecked() is False
+    assert tray_mgr._format_actions["MP3"].isChecked() is False
+
+    # Assicurati che i callback non siano stati scatenati dalla sincronizzazione programmatica
+    assert channel_callback.call_count == 0
+    assert format_callback.call_count == 0
+
+
+def test_tray_manager_sync_stream_settings_from_settings(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Cambia le impostazioni nel genitore simulando il salvataggio da SettingsDialog
+    parent.settings.setValue(KEY_CHANNEL, "K-POP")
+    parent.settings.setValue(KEY_FORMAT, "MP3")
+
+    tray_mgr.sync_stream_settings()
+
+    assert tray_mgr._channel_actions["K-POP"].isChecked() is True
+    assert tray_mgr._channel_actions["J-POP"].isChecked() is False
+    assert tray_mgr._format_actions["MP3"].isChecked() is True
+    assert tray_mgr._format_actions["Vorbis"].isChecked() is False
+    assert tray_mgr._format_actions["Opus"].isChecked() is False
+
+
+def test_tray_manager_on_quit_triggered(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    quit_callback = MagicMock()
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n, on_quit=quit_callback)
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._act_quit is not None
+    tray_mgr._act_quit.trigger()
+    assert quit_callback.call_count == 1
+
+
+def test_tray_manager_settings_and_about_actions(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    settings_cb = MagicMock()
+    about_cb = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_open_settings=settings_cb,
+        on_about=about_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._act_settings is not None
+    assert tray_mgr._act_about is not None
+
+    tray_mgr._act_settings.trigger()
+    assert settings_cb.call_count == 1
+
+    tray_mgr._act_about.trigger()
+    assert about_cb.call_count == 1
+
+
+def test_tray_manager_now_playing_card_integration(qapp):
+    from PyQt6.QtGui import QColor, QPixmap
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    play_cb = MagicMock()
+    stop_cb = MagicMock()
+    mute_cb = MagicMock()
+    history_cb = MagicMock()
+    show_cb = MagicMock()
+
+    parent.toggle_history_popover = history_cb
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_show_window=show_cb,
+        on_toggle_play_pause=play_cb,
+        on_stop_stream=stop_cb,
+        on_toggle_mute=mute_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    # 1. Card should be initialized and added
+    assert tray_mgr._card is not None
+    assert tray_mgr._card_action is not None
+    assert tray_mgr._card_action.defaultWidget() == tray_mgr._card
+
+    # 2. Update tooltip and check metadata extraction
+    tooltip_text = "LISTEN.moe (J-POP • Vorbis)\nPoison — Alice Cooper\nSessione: 05:20"
+    tray_mgr.update_tooltip(tooltip_text)
+
+    assert "Poison" in tray_mgr._card._lbl_title.text()
+    assert "Alice Cooper" in tray_mgr._card._lbl_artist.text()
+    assert "05:20" in tray_mgr._card._lbl_session.text()
+
+    # 3. Update cover pixmap (58x58 px)
+    pm = QPixmap(100, 100)
+    pm.fill(QColor("magenta"))
+    tray_mgr.set_cover_pixmap(pm)
+    assert tray_mgr._card._cover_lbl.pixmap() is not None
+    assert not tray_mgr._card._cover_lbl.pixmap().isNull()
+    assert tray_mgr._card._cover_lbl.width() == 58
+    assert tray_mgr._card._cover_lbl.height() == 58
+
+    # Reset cover pixmap to None (fallback)
+    tray_mgr.set_cover_pixmap(None)
+    assert tray_mgr._card._cover_lbl.pixmap() is not None
+
+    # 4. Update controls state
+    tray_mgr.update_controls_state(is_playing=True, is_paused=False, is_muted=True)
+    assert tray_mgr._card._is_playing is True
+    assert tray_mgr._card._is_muted is True
+    assert tray_mgr._act_play_pause.text() == "pause"
+    assert tray_mgr._act_mute.text() == "tray_unmute"
+
+    tray_mgr.update_controls_state(is_playing=False, is_paused=False, is_muted=False)
+    assert tray_mgr._act_play_pause.text() == "play"
+    assert tray_mgr._act_mute.text() == "tray_mute"
+
+    # 5. Sync controls from parent player
+    mock_player = MagicMock()
+    mock_player.is_playing.return_value = True
+    mock_player.is_paused.return_value = False
+    mock_player.is_muted.return_value = False
+    parent.player = mock_player
+    tray_mgr._sync_controls_from_parent()
+    assert tray_mgr._card._is_playing is True
+    assert tray_mgr._card._is_paused is False
+
+
+def test_tray_manager_card_inline_buttons(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    play_cb = MagicMock()
+    stop_cb = MagicMock()
+    mute_cb = MagicMock()
+    history_cb = MagicMock()
+
+    parent.toggle_history_popover = history_cb
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_toggle_play_pause=play_cb,
+        on_stop_stream=stop_cb,
+        on_toggle_mute=mute_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    card = tray_mgr._card
+    assert card is not None
+
+    # Trigger inline buttons
+    card._btn_play.click()
+    assert play_cb.call_count == 1
+
+    card._btn_stop.click()
+    assert stop_cb.call_count == 1
+
+    card._btn_mute.click()
+    assert mute_cb.call_count == 1
+
+    card._btn_history.click()
+    assert history_cb.call_count == 1
+
+
+def test_tray_manager_vector_icons_and_theme_refresh(qapp):
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Verify all action vector icons are set and non-null
+    assert not tray_mgr._act_play_pause.icon().isNull()
+    assert not tray_mgr._act_stop.icon().isNull()
+    assert not tray_mgr._act_mute.icon().isNull()
+    assert not tray_mgr._act_history.icon().isNull()
+    assert not tray_mgr._act_show.icon().isNull()
+    assert not tray_mgr._act_settings.icon().isNull()
+    assert not tray_mgr._act_about.icon().isNull()
+    assert not tray_mgr._act_st.icon().isNull()
+    assert not tray_mgr._act_ch.icon().isNull()
+    assert not tray_mgr._act_fmt.icon().isNull()
+    assert not tray_mgr._act_quit.icon().isNull()
+
+    # Trigger theme refresh
+    tray_mgr.refresh_theme()
+
+    # Ensure icons remain valid after theme refresh
+    assert not tray_mgr._act_settings.icon().isNull()
+    assert not tray_mgr._act_quit.icon().isNull()
+
+
+def test_tray_menu_clean_layout(qapp, monkeypatch):
+    monkeypatch.setenv("KIKUMOE_TRAY_FORCE_CARD", "1")
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._tray is not None
+    menu = tray_mgr._tray.contextMenu()
+    assert menu is not None
+    actions = menu.actions()
+
+    # The card must be the first action in the menu
+    assert actions[0] == tray_mgr._card_action
+
+    # Redundant actions must NOT be present in the visible menu actions
+    assert tray_mgr._act_play_pause not in actions
+    assert tray_mgr._act_stop not in actions
+    assert tray_mgr._act_mute not in actions
+    assert tray_mgr._act_history not in actions
+    assert tray_mgr._act_hdr_playback not in actions
+
+    # Window, settings, prefs, and quit actions MUST be in the menu
+    assert tray_mgr._act_show in actions
+    assert tray_mgr._act_settings in actions
+    assert tray_mgr._act_about in actions
+    assert tray_mgr._act_quit in actions
+
+
+def test_tray_card_ambient_glow_and_theme_sync(qapp):
+    from PyQt6.QtCore import QRect
+    from PyQt6.QtGui import QPaintEvent
+
+    from ui.themes.engine import apply_theme_palette
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+    card = tray_mgr._card
+    assert card is not None
+
+    card.resize(280, 116)
+    card.set_track_info(
+        "Song With A Very Long Title That Should Elide Smoothly",
+        "Famous Artist",
+        "LISTEN.moe",
+        "01:23",
+    )
+    assert card._lbl_title.text() != ""
+
+    # Paint event should render ambient glow without error
+    pe = QPaintEvent(QRect(0, 0, 280, 116))
+    card.paintEvent(pe)
+
+    # Change theme to Neon Matrix and refresh
+    apply_theme_palette("neon_matrix")
+    tray_mgr.refresh_theme()
+    card.paintEvent(pe)
+
+    # Revert back to default theme
+    apply_theme_palette("cyber_moe")
+    tray_mgr.refresh_theme()
+
+
+def test_tray_menu_hover_cyber_glass_styling(qapp):
+    from ui.themes.engine import PALETTE, apply_theme_palette
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    assert tray_mgr._tray is not None
+    menu = tray_mgr._tray.contextMenu()
+    assert menu is not None
+    ss = menu.styleSheet()
+
+    # Must occupy full box width (margin: 0px) and full height (padding: 0px)
+    assert "margin: 0px;" in ss
+    assert "padding: 0px;" in ss
+    # Icon must have left padding to avoid touching menu border
+    assert "padding-left: 10px;" in ss
+    # Submenu right arrow must have inward offset to avoid touching border
+    assert "right: 12px;" in ss
+    # Section headers must align with icon column and have theme accent + 11px bold size
+    assert "margin-left: -13px;" in ss
+    assert "font-size: 11px;" in ss
+    assert PALETTE["accent"] in ss
+    # Must use theme accent menu hover
+    assert PALETTE["accent_menu_hover"] in ss
+    # Card controls hover style check
+    assert tray_mgr._card is not None
+    btn_ss = tray_mgr._card._btn_play.styleSheet()
+    assert "QToolButton:hover" in btn_ss
+
+    # Verify theme refresh propagates new theme colors
+    apply_theme_palette("ocean_breeze")
+    tray_mgr.refresh_theme()
+    ss_ocean = menu.styleSheet()
+    assert PALETTE["accent_menu_hover"] in ss_ocean
+    assert PALETTE["accent"] in ss_ocean
+
+    apply_theme_palette("cyber_moe")
+    tray_mgr.refresh_theme()
+
+
+def test_tray_manager_dynamic_station_formats_and_channels(qapp):
+    from core.constants import KEY_STATION, STATION_GENSOKYO, STATION_LISTENMOE, STATION_TRUCKERSFM
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    format_cb = MagicMock()
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n, on_change_format=format_cb)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # 1. Listen.moe default
+    assert "Vorbis" in tray_mgr._format_actions
+    assert "Opus" in tray_mgr._format_actions
+    assert "MP3" in tray_mgr._format_actions
+    assert tray_mgr._format_actions["Vorbis"].isChecked() is True
+    assert tray_mgr._act_ch.isVisible() is True
+
+    # 2. Switch to TruckersFM
+    parent.settings.setValue(KEY_STATION, STATION_TRUCKERSFM)
+    parent.settings.setValue(KEY_FORMAT, "MP3 320k")
+    tray_mgr.sync_stream_settings(station=STATION_TRUCKERSFM, fmt="MP3 320k")
+
+    assert "MP3 320k" in tray_mgr._format_actions
+    assert "MP3 128k" in tray_mgr._format_actions
+    assert "AAC 64k" in tray_mgr._format_actions
+    assert "Vorbis" not in tray_mgr._format_actions
+    assert tray_mgr._format_actions["MP3 320k"].isChecked() is True
+    assert tray_mgr._format_actions["MP3 128k"].isChecked() is False
+    assert tray_mgr._act_ch.isVisible() is False
+
+    # Trigger format change to MP3 128k
+    tray_mgr._format_actions["MP3 128k"].trigger()
+    assert format_cb.call_count == 1
+    assert format_cb.call_args[0][0] == "MP3 128k"
+
+    # 3. Switch to Gensokyo
+    parent.settings.setValue(KEY_STATION, STATION_GENSOKYO)
+    parent.settings.setValue(KEY_FORMAT, "Opus 64k")
+    tray_mgr.sync_stream_settings(station=STATION_GENSOKYO, fmt="Opus 64k")
+
+    assert "MP3 256k" in tray_mgr._format_actions
+    assert "MP3 128k" in tray_mgr._format_actions
+    assert "Opus 64k" in tray_mgr._format_actions
+    assert tray_mgr._format_actions["Opus 64k"].isChecked() is True
+    assert tray_mgr._format_actions["MP3 256k"].isChecked() is False
+    assert tray_mgr._act_ch.isVisible() is False
+
+    # 4. Switch back to Listen.moe
+    parent.settings.setValue(KEY_STATION, STATION_LISTENMOE)
+    parent.settings.setValue(KEY_FORMAT, "Opus")
+    tray_mgr.sync_stream_settings(station=STATION_LISTENMOE, channel="K-POP", fmt="Opus")
+
+    assert "Vorbis" in tray_mgr._format_actions
+    assert "Opus" in tray_mgr._format_actions
+    assert tray_mgr._format_actions["Opus"].isChecked() is True
+    assert tray_mgr._act_ch.isVisible() is True
+    assert tray_mgr._channel_actions["K-POP"].isChecked() is True
+
+
+def test_tray_manager_linux_native_dbus_layout(qapp, monkeypatch):
+    from PyQt6.QtGui import QColor, QPixmap
+
+    monkeypatch.setenv("KIKUMOE_TEST_LINUX_TRAY", "1")
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    show_cb = MagicMock()
+    play_cb = MagicMock()
+    stop_cb = MagicMock()
+    mute_cb = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_show_window=show_cb,
+        on_toggle_play_pause=play_cb,
+        on_stop_stream=stop_cb,
+        on_toggle_mute=mute_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    menu = tray_mgr._tray.contextMenu()
+    actions = menu.actions()
+
+    # On Linux / DBus: Card action is NOT in menu (avoiding DBusmenu drop)
+    assert tray_mgr._card_action not in actions
+
+    # Native actions ARE in the menu
+    assert tray_mgr._act_info_now in actions
+    assert tray_mgr._act_info_session in actions
+    assert tray_mgr._act_hdr_playback in actions
+    assert tray_mgr._act_play_pause in actions
+    assert tray_mgr._act_stop in actions
+    assert tray_mgr._act_mute in actions
+    assert tray_mgr._act_history in actions
+
+    # Update tooltip and cover
+    tray_mgr.update_tooltip("LISTEN.moe\nRenai Circulation — Kana Hanazawa\n02:15")
+    assert "Renai Circulation — Kana Hanazawa" in tray_mgr._act_info_now.text()
+    assert "LISTEN.MOE • 02:15" in tray_mgr._act_info_session.text()
+
+    # Cover art icon thumbnail set on _act_info_now
+    pm = QPixmap(64, 64)
+    pm.fill(QColor("cyan"))
+    tray_mgr.set_cover_pixmap(pm)
+    assert not tray_mgr._act_info_now.icon().isNull()
+
+    # Triggering info action raises window
+    tray_mgr._act_info_now.trigger()
+    assert show_cb.call_count == 1
+
+    # Playback action triggers
+    tray_mgr._act_play_pause.trigger()
+    assert play_cb.call_count == 1
+    tray_mgr._act_stop.trigger()
+    assert stop_cb.call_count == 1
+    tray_mgr._act_mute.trigger()
+    assert mute_cb.call_count == 1
+
+
+def test_tray_manager_activation_clicks(qapp):
+    from PyQt6.QtWidgets import QSystemTrayIcon
+
+    parent = DummyParent()
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: key
+    show_cb = MagicMock()
+    play_cb = MagicMock()
+
+    tray_mgr = TrayManager(
+        parent=parent,
+        i18n=i18n,
+        on_show_window=show_cb,
+        on_toggle_play_pause=play_cb,
+    )
+    tray_mgr.ensure_tray_enabled(True)
+
+    # Left click (Trigger)
+    tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.Trigger)
+    assert show_cb.call_count == 1
+
+    # Double click
+    tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+    assert show_cb.call_count == 2
+
+    # Middle click
+    tray_mgr._on_tray_activated(QSystemTrayIcon.ActivationReason.MiddleClick)
+    assert play_cb.call_count == 1
+
+
+def test_tray_header_initial_labels_and_submenu_ownership(qapp, monkeypatch):
+    from core.constants import KEY_STATION, STATION_LOCAL, STATION_TRUCKERSFM
+
+    monkeypatch.setenv("KIKUMOE_TEST_LINUX_TRAY", "1")
+    parent = DummyParent()
+    parent.settings.setValue(KEY_STATION, STATION_LOCAL)
+    i18n = MagicMock()
+    i18n.t.side_effect = lambda key: {
+        "tray_no_track": "No track playing",
+        "station_local": "Local Music",
+    }.get(key, key)
+
+    tray_mgr = TrayManager(parent=parent, i18n=i18n)
+    tray_mgr.ensure_tray_enabled(True)
+
+    # DBusMenu header actions must start non-empty and reflect configured station
+    assert tray_mgr._act_info_now is not None
+    assert tray_mgr._act_info_session is not None
+    assert tray_mgr._act_info_now.text() == "No track playing"
+    assert tray_mgr._act_info_session.text() == "LOCAL MUSIC"
+    assert tray_mgr._card is not None
+    assert tray_mgr._card._badge_station.text() == "LOCAL MUSIC"
+
+    # Placeholder "–" does not replace fallback text on either Linux or card
+    parent._current_title = "–"
+    tray_mgr.update_tooltip("Local Music - Originale\n–\n00:01")
+    assert tray_mgr._act_info_now.text() == "No track playing"
+    assert tray_mgr._card._lbl_title.text() == "KikuMoe"
+
+    # Submenu actions must be owned by their QMenu so clear() doesn't orphan on parent
+    parent.settings.setValue(KEY_STATION, STATION_TRUCKERSFM)
+    tray_mgr.sync_stream_settings(station=STATION_TRUCKERSFM, fmt="MP3 320k")
+    assert all(act.parent() is tray_mgr._sub_format for act in tray_mgr._format_actions.values())
+    assert all(act.parent() is tray_mgr._sub_station for act in tray_mgr._station_actions.values())
+
+
+def test_tray_card_and_mini_hud_prevent_html_injection_in_labels_and_tooltips(qapp):
+    """Verify metadata labels force PlainText and escape tooltips against UNC HTML injection."""
+    from PyQt6.QtCore import Qt
+
+    from ui.tray_manager import TrayNowPlayingCard
+    from ui.widgets.mini_hud import MarqueeLabel
+
+    card = TrayNowPlayingCard()
+    payload = '<img src="\\\\attacker-host\\s\\a.png"><b>Track</b>'
+    card.set_track_info(title=payload, artist=payload, station="LOCAL", session="00:10")
+
+    assert card._lbl_title.textFormat() == Qt.TextFormat.PlainText
+    assert card._lbl_artist.textFormat() == Qt.TextFormat.PlainText
+    assert card._badge_station.textFormat() == Qt.TextFormat.PlainText
+    assert card._lbl_session.textFormat() == Qt.TextFormat.PlainText
+    assert "<img" not in card._lbl_title.toolTip()
+    assert "&lt;img" in card._lbl_title.toolTip()
+    assert "<img" not in card._lbl_artist.toolTip()
+
+    marquee = MarqueeLabel("#ffffff")
+    marquee.set_text(payload)
+    assert "<img" not in marquee.toolTip()
+    assert "&lt;img" in marquee.toolTip()
+    card.deleteLater()
+    marquee.deleteLater()
+
+
+def test_closing_to_tray_twice_does_not_quit_app(qapp):
+    """Verify choosing 'Minimize to tray' twice (window close then tray quit) keeps app alive."""
+    from PyQt6.QtCore import Qt, QTimer
+
+    from ui.close_dialog import CloseConfirmDialog
+
+    dlg = CloseConfirmDialog(parent=None)
+    assert dlg.testAttribute(Qt.WidgetAttribute.WA_QuitOnClose) is False
+    dlg.deleteLater()
+
+    last_window_closed_events: list[str] = []
+    conn = qapp.lastWindowClosed.connect(lambda: last_window_closed_events.append("closed"))
+    main_win = QWidget()
+    main_win.show()
+    steps: list[str] = []
+
+    def _run_sequence() -> None:
+        # 1. Close main window -> choose Minimize to tray
+        d1 = CloseConfirmDialog(parent=main_win)
+        QTimer.singleShot(10, d1._on_tray)
+        d1.exec()
+        assert d1.action == "tray"
+        main_win.hide()
+        steps.append("first_tray")
+
+        # 2. Hidden in tray; right-click tray -> Quit -> choose Minimize to tray again
+        d2 = CloseConfirmDialog(parent=None)
+        QTimer.singleShot(10, d2._on_tray)
+        d2.exec()
+        assert d2.action == "tray"
+        steps.append("second_tray")
+
+        QTimer.singleShot(20, qapp.quit)
+
+    try:
+        QTimer.singleShot(10, _run_sequence)
+        qapp.exec()
+        assert steps == ["first_tray", "second_tray"]
+        assert last_window_closed_events == []
+    finally:
+        qapp.lastWindowClosed.disconnect(conn)
+        main_win.deleteLater()

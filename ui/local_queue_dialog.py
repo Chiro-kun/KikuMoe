@@ -1,0 +1,751 @@
+"""Local playlist and queue manager dialog for KikuMoe.
+
+Frameless Cyber-Moe modal showing the active track queue, search filtering,
+shuffle/repeat toggles, drag & drop loading, and instant seeking playback.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import subprocess
+import sys
+from pathlib import Path
+
+from PyQt6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QPushButton,
+    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.constants import REPEAT_ALL, REPEAT_OFF, REPEAT_ONE
+from core.i18n import I18n, resolve_i18n
+from core.local_metadata import LocalTrackInfo
+from core.local_playlist import LocalPlaylistManager
+from core.now_playing import _format_mmss
+from ui.custom_titlebar import CustomTitleBar, install_size_grip
+from ui.dialog_animations import CyberMoeDialogAnimationMixin
+from ui.native_file_dialog import get_existing_directory, get_open_file_names
+from ui.themes.cyber_moe import PALETTE, accent_qcolor, surface_qcolor
+from ui.vector_icons import (
+    get_folder_icon,
+    get_music_note_icon,
+    get_repeat_icon,
+    get_shuffle_icon,
+)
+from ui.windows_titlebar import apply_windows_titlebar_dark_mode
+
+_IS_WIN32 = sys.platform == "win32"
+
+
+class _QueueItemDelegate(QStyledItemDelegate):
+    """Draw hover/selection item chrome without painting DisplayRole text over TrackItemWidget."""
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        opt.icon = QIcon()
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        if style is not None:
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+
+class _QueueTrackThumb(QWidget):
+    """48x48 HiDPI-safe rounded cover art thumbnail with stylized music note fallback."""
+
+    _SIZE = 48
+
+    def __init__(
+        self,
+        cover_bytes: bytes | None = None,
+        is_playing: bool = False,
+        thumb_cache: dict[tuple[bytes, int], QPixmap] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setFixedSize(self._SIZE, self._SIZE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._cover_bytes = cover_bytes
+        self._is_playing = is_playing
+        self._cache = thumb_cache
+        self._scaled_pixmap: QPixmap | None = None
+        self._cached_target_px = 0
+
+    def has_cover_art(self) -> bool:
+        """Return True if embedded cover bytes decode into a non-null pixmap."""
+        return self._resolve_pixmap() is not None
+
+    def _resolve_pixmap(self) -> QPixmap | None:
+        if not self._cover_bytes:
+            return None
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        target_px = max(self._SIZE, round(self._SIZE * dpr))
+        if self._scaled_pixmap is not None and self._cached_target_px == target_px:
+            return self._scaled_pixmap
+
+        digest = hashlib.blake2b(self._cover_bytes, digest_size=8).digest()
+        cache_key = (digest, target_px)
+        if self._cache is not None and cache_key in self._cache:
+            self._scaled_pixmap = self._cache[cache_key]
+            self._cached_target_px = target_px
+            return self._scaled_pixmap
+
+        raw = QPixmap()
+        if not raw.loadFromData(self._cover_bytes) or raw.isNull():
+            return None
+        scaled = raw.scaled(
+            target_px,
+            target_px,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        cx = max(0, (scaled.width() - target_px) // 2)
+        cy = max(0, (scaled.height() - target_px) // 2)
+        cropped = scaled.copy(cx, cy, target_px, target_px)
+        cropped.setDevicePixelRatio(dpr)
+        if self._cache is not None:
+            if len(self._cache) >= 256:
+                self._cache.clear()
+            self._cache[cache_key] = cropped
+        self._scaled_pixmap = cropped
+        self._cached_target_px = target_px
+        return cropped
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        rect = QRectF(0.5, 0.5, float(self._SIZE - 1), float(self._SIZE - 1))
+        pix = self._resolve_pixmap()
+
+        if pix is not None and not pix.isNull():
+            painter.save()
+            path = QPainterPath()
+            path.addRoundedRect(rect, 8.0, 8.0)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pix)
+            painter.restore()
+
+            border_pen = (
+                QPen(accent_qcolor(210), 1.4)
+                if self._is_playing
+                else QPen(QColor(255, 255, 255, 28), 1.0)
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(border_pen)
+            painter.drawRoundedRect(rect, 8.0, 8.0)
+        else:
+            painter.setBrush(
+                surface_qcolor(170, "bg_surface") if not self._is_playing else accent_qcolor(36)
+            )
+            painter.setPen(
+                QPen(accent_qcolor(190), 1.3) if self._is_playing else QPen(accent_qcolor(70), 1.0)
+            )
+            painter.drawRoundedRect(rect, 8.0, 8.0)
+
+            accent = QColor(PALETTE["accent_hover"] if self._is_playing else PALETTE["accent"])
+            pen = QPen(accent, 2.1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(19.5, 29.0), QPointF(19.5, 16.0))
+            painter.drawLine(QPointF(19.5, 16.0), QPointF(29.5, 13.0))
+            painter.drawLine(QPointF(29.5, 13.0), QPointF(29.5, 26.0))
+            painter.setBrush(accent)
+            painter.drawEllipse(QPointF(17.0, 29.0), 3.2, 2.6)
+            painter.drawEllipse(QPointF(27.0, 26.0), 3.2, 2.6)
+
+        painter.end()
+
+
+class TrackItemWidget(QWidget):
+    """Rich Cyber-Deck item row for a single track in the queue."""
+
+    def __init__(
+        self,
+        track: LocalTrackInfo,
+        index: int,
+        is_playing: bool = False,
+        thumb_cache: dict[tuple[bytes, int], QPixmap] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.track = track
+        self.index = index
+        self.is_playing = is_playing
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 14, 8)
+        layout.setSpacing(12)
+
+        # Index / Playing indicator
+        self.idx_label = QLabel(f"{index + 1:02d}")
+        self.idx_label.setFixedWidth(28)
+        self.idx_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if is_playing:
+            self.idx_label.setText("▶")
+            self.idx_label.setStyleSheet(
+                f"color: {PALETTE['accent']}; font-weight: bold; font-size: 13px;"
+                " background: transparent;"
+            )
+        else:
+            self.idx_label.setStyleSheet(
+                f"color: {PALETTE['text_muted']}; font-size: 13px; font-weight: 600;"
+                " background: transparent;"
+            )
+        layout.addWidget(self.idx_label)
+
+        # Artwork Thumbnail
+        self.thumb = _QueueTrackThumb(
+            track.cover_bytes, is_playing=is_playing, thumb_cache=thumb_cache, parent=self
+        )
+        layout.addWidget(self.thumb)
+
+        # Metadata column
+        meta_col = QVBoxLayout()
+        meta_col.setContentsMargins(0, 0, 0, 0)
+        meta_col.setSpacing(3)
+
+        self.title_lbl = QLabel(track.display_title())
+        self.title_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.title_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.title_lbl.setStyleSheet(
+            f"color: {PALETTE['accent_hover'] if is_playing else PALETTE['text_primary']}; "
+            "font-size: 14px; font-weight: 700; background: transparent;"
+        )
+
+        artist_text = track.display_artist()
+        if track.album:
+            artist_text += f" • {track.album}"
+        self.artist_lbl = QLabel(artist_text)
+        self.artist_lbl.setTextFormat(Qt.TextFormat.PlainText)
+        self.artist_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.artist_lbl.setStyleSheet(
+            f"color: {PALETTE['text_secondary']}; font-size: 12px; font-weight: 500;"
+            " background: transparent;"
+        )
+
+        meta_col.addWidget(self.title_lbl)
+        meta_col.addWidget(self.artist_lbl)
+        layout.addLayout(meta_col, 1)
+
+        # Duration label
+        dur_str = (
+            _format_mmss(int(track.duration_seconds)) if track.duration_seconds > 0 else "--:--"
+        )
+        self.dur_lbl = QLabel(dur_str)
+        self.dur_lbl.setStyleSheet(
+            f"color: {PALETTE['text_muted']}; font-size: 12px; font-weight: 600;"
+            " background: transparent;"
+        )
+        layout.addWidget(self.dur_lbl)
+
+
+class LocalQueueDialog(CyberMoeDialogAnimationMixin, QDialog):
+    """Cyber-Glass modal dialog managing the local audio playback queue."""
+
+    play_track_requested = pyqtSignal(int)
+
+    def __init__(
+        self,
+        playlist_manager: LocalPlaylistManager,
+        parent: QWidget | None = None,
+        i18n: I18n | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.playlist_mgr = playlist_manager
+        self.i18n = resolve_i18n(i18n, parent)
+
+        self.setObjectName("localQueueDialog")
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("QDialog#localQueueDialog { background: transparent; border: none; }")
+        self.resize(580, 640)
+        self.setMinimumSize(460, 440)
+
+        self._drag_start_pos: QPoint | None = None
+        self._filtered_indices: list[int] = []
+        self._thumb_cache: dict[tuple[bytes, int], QPixmap] = {}
+
+        self._init_ui()
+        install_size_grip(self)
+        self._connect_signals()
+        self._refresh_queue()
+        apply_windows_titlebar_dark_mode(self, True)
+
+    def _init_ui(self) -> None:
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        self._content_frame = QFrame(self)
+        self._content_frame.setObjectName("queueContentFrame")
+        self._content_frame.setStyleSheet(
+            f"QFrame#queueContentFrame {{"
+            f"  background-color: {PALETTE['bg_surface']};"
+            f"  border: 1px solid {PALETTE['border_card']};"
+            "  border-radius: 12px;"
+            "}"
+        )
+        frame_layout = QVBoxLayout(self._content_frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setSpacing(0)
+
+        # 1. Custom TitleBar
+        parent_w = self.parentWidget()
+        app_icon = getattr(parent_w, "_icon_app", None) if parent_w is not None else None
+        self.titlebar = CustomTitleBar(self, icon=app_icon, i18n=self.i18n)
+        self.titlebar.set_badge_text(self.i18n.t("local_queue_title").upper())
+        self.titlebar._btn_min.setVisible(False)
+        self.titlebar._btn_max.setVisible(False)
+        frame_layout.addWidget(self.titlebar)
+
+        # 2. Main content area
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(12)
+
+        # Top Deck: Search Filter + Action Buttons
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText(self.i18n.t("local_search_placeholder"))
+        self.search_box.setStyleSheet(
+            f"QLineEdit {{"
+            "  background-color: rgba(255, 255, 255, 0.06);"
+            f"  border: 1px solid {PALETTE['border_card']};"
+            "  border-radius: 8px;"
+            f"  color: {PALETTE['text_primary']};"
+            "  padding: 7px 12px;"
+            "  font-size: 12px;"
+            "}"
+            f"QLineEdit:focus {{"
+            f"  border-color: {PALETTE['accent']};"
+            "}"
+        )
+        self.search_box.textChanged.connect(self._on_search_changed)
+        top_row.addWidget(self.search_box, 1)
+
+        self.btn_add_files = QPushButton(self.i18n.t("local_add_files"))
+        self.btn_add_files.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_files.setIcon(get_music_note_icon(14))
+        self.btn_add_files.setStyleSheet(self._button_style(False))
+        self.btn_add_files.clicked.connect(self._on_add_files_clicked)
+        top_row.addWidget(self.btn_add_files)
+
+        self.btn_add_folder = QPushButton(self.i18n.t("local_add_folder"))
+        self.btn_add_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_folder.setIcon(get_folder_icon(14))
+        self.btn_add_folder.setStyleSheet(self._button_style(False))
+        self.btn_add_folder.clicked.connect(self._on_add_folder_clicked)
+        top_row.addWidget(self.btn_add_folder)
+
+        layout.addLayout(top_row)
+
+        # Queue List Widget
+        self.list_widget = QListWidget()
+        self.list_widget.setObjectName("queueList")
+        self.list_widget.setItemDelegate(_QueueItemDelegate(self.list_widget))
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list_widget.setStyleSheet(
+            f"QListWidget#queueList {{"
+            f"  background-color: {PALETTE['bg_subtle']};"
+            f"  border: 1px solid {PALETTE['border_card']};"
+            "  border-radius: 10px;"
+            "  outline: none;"
+            "}"
+            f"QListWidget#queueList::item {{"
+            "  padding: 0px;"
+            "  border-bottom: 1px solid rgba(255, 255, 255, 0.04);"
+            "}"
+            f"QListWidget#queueList::item:hover {{"
+            f"  background-color: rgba(255, 255, 255, 0.04);"
+            "}"
+            f"QListWidget#queueList::item:selected {{"
+            f"  background-color: rgba(236, 24, 108, 0.12);"
+            "}"
+        )
+        self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self._on_context_menu)
+        self.setAcceptDrops(True)
+        layout.addWidget(self.list_widget, 1)
+
+        # Empty Queue Placeholder Card
+        self.empty_widget = QFrame()
+        self.empty_widget.setObjectName("emptyQueueFrame")
+        self.empty_widget.setStyleSheet(
+            f"QFrame#emptyQueueFrame {{"
+            f"  background-color: {PALETTE['bg_subtle']};"
+            f"  border: 1px dashed {PALETTE['border_card']};"
+            "  border-radius: 10px;"
+            "}"
+        )
+        empty_layout = QVBoxLayout(self.empty_widget)
+        empty_layout.setContentsMargins(24, 24, 24, 24)
+        empty_layout.setSpacing(12)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        empty_icon = QLabel()
+        empty_icon.setPixmap(get_music_note_icon(32).pixmap(32, 32))
+        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_icon, 0, Qt.AlignmentFlag.AlignCenter)
+
+        self.empty_title = QLabel(self.i18n.t("local_prompt_title"))
+        font_em_title = QFont()
+        font_em_title.setPointSize(12)
+        font_em_title.setBold(True)
+        self.empty_title.setFont(font_em_title)
+        self.empty_title.setStyleSheet(f"color: {PALETTE['text_primary']};")
+        self.empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self.empty_title)
+
+        self.empty_desc = QLabel(self.i18n.t("local_queue_empty"))
+        self.empty_desc.setWordWrap(True)
+        self.empty_desc.setStyleSheet(f"color: {PALETTE['text_muted']}; font-size: 11px;")
+        self.empty_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self.empty_desc)
+
+        empty_btns = QHBoxLayout()
+        empty_btns.setSpacing(10)
+        empty_btns.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.btn_em_folder = QPushButton(self.i18n.t("local_add_folder"))
+        self.btn_em_folder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_em_folder.setIcon(get_folder_icon(14, "#FFFFFF"))
+        self.btn_em_folder.setStyleSheet(self._button_style(True))
+        self.btn_em_folder.clicked.connect(self._on_add_folder_clicked)
+        empty_btns.addWidget(self.btn_em_folder)
+
+        self.btn_em_files = QPushButton(self.i18n.t("local_add_files"))
+        self.btn_em_files.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_em_files.setIcon(get_music_note_icon(14, PALETTE["accent"]))
+        self.btn_em_files.setStyleSheet(self._button_style(False))
+        self.btn_em_files.clicked.connect(self._on_add_files_clicked)
+        empty_btns.addWidget(self.btn_em_files)
+
+        empty_layout.addLayout(empty_btns)
+        layout.addWidget(self.empty_widget, 1)
+        self.empty_widget.setVisible(False)
+
+        # Bottom Deck: Stats + Shuffle/Repeat/Clear
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
+
+        self.stats_lbl = QLabel(self.i18n.t("local_tracks_zero"))
+        self.stats_lbl.setStyleSheet(
+            f"color: {PALETTE['text_muted']}; font-size: 12px; font-weight: 600;"
+        )
+        bottom_row.addWidget(self.stats_lbl)
+        bottom_row.addStretch(1)
+
+        self.btn_shuffle = QPushButton()
+        self.btn_shuffle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_shuffle.setIcon(get_shuffle_icon(14))
+        self.btn_shuffle.setText(self.i18n.t("local_shuffle"))
+        self.btn_shuffle.setStyleSheet(self._button_style(self.playlist_mgr.shuffle))
+        self.btn_shuffle.clicked.connect(self._on_toggle_shuffle)
+        bottom_row.addWidget(self.btn_shuffle)
+
+        self.btn_repeat = QPushButton()
+        self.btn_repeat.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_repeat.setIcon(get_repeat_icon(14))
+        self._update_repeat_text()
+        self.btn_repeat.clicked.connect(self._on_cycle_repeat)
+        bottom_row.addWidget(self.btn_repeat)
+
+        self.btn_clear = QPushButton(self.i18n.t("local_clear_queue"))
+        self.btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear.setStyleSheet(self._button_style(False, danger=True))
+        self.btn_clear.clicked.connect(self.playlist_mgr.clear)
+        bottom_row.addWidget(self.btn_clear)
+
+        layout.addLayout(bottom_row)
+        frame_layout.addWidget(content, 1)
+        outer_layout.addWidget(self._content_frame)
+
+    def _button_style(self, active: bool = False, danger: bool = False) -> str:
+        if danger:
+            bg = "rgba(255, 75, 110, 0.12)"
+            border = "rgba(255, 75, 110, 0.35)"
+            color = "#FF4B6E"
+        elif active:
+            bg = "rgba(236, 24, 108, 0.22)"
+            border = PALETTE["accent"]
+            color = "#ffffff"
+        else:
+            bg = "rgba(255, 255, 255, 0.06)"
+            border = PALETTE["border_card"]
+            color = PALETTE["text_primary"]
+
+        return (
+            f"QPushButton {{"
+            f"  background-color: {bg};"
+            f"  border: 1px solid {border};"
+            "  border-radius: 8px;"
+            f"  color: {color};"
+            "  padding: 6px 13px;"
+            "  font-size: 12px;"
+            "  font-weight: 600;"
+            "}"
+            f"QPushButton:hover {{"
+            f"  border-color: {PALETTE['accent_hover']};"
+            "}"
+        )
+
+    def _update_repeat_text(self) -> None:
+        mode = self.playlist_mgr.repeat_mode
+        active = mode != REPEAT_OFF
+        if mode == REPEAT_ALL:
+            text = self.i18n.t("local_repeat_all")
+        elif mode == REPEAT_ONE:
+            text = self.i18n.t("local_repeat_one")
+        else:
+            text = self.i18n.t("local_repeat_off")
+
+        self.btn_repeat.setText(text)
+        self.btn_repeat.setStyleSheet(self._button_style(active))
+
+    def _connect_signals(self) -> None:
+        self.playlist_mgr.queue_updated.connect(self._refresh_queue)
+        self.playlist_mgr.track_changed.connect(self._on_track_changed)
+        self.playlist_mgr.mode_changed.connect(self._on_mode_changed)
+
+    def _refresh_queue(self) -> None:
+        query = self.search_box.text().strip().lower()
+        self.list_widget.clear()
+        self._filtered_indices = []
+
+        tracks = self.playlist_mgr.tracks
+        curr_idx = self.playlist_mgr.current_index
+
+        for idx, track in enumerate(tracks):
+            title = track.display_title().lower()
+            artist = track.display_artist().lower()
+            album = (track.album or "").lower()
+
+            if query and (query not in title and query not in artist and query not in album):
+                continue
+
+            self._filtered_indices.append(idx)
+            item = QListWidgetItem(track.display_title())
+            item.setSizeHint(QSize(0, 68))
+            is_playing = idx == curr_idx
+            widget = TrackItemWidget(
+                track, idx, is_playing=is_playing, thumb_cache=self._thumb_cache
+            )
+            self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, widget)
+
+        # Update stats
+        count = len(tracks)
+        tot_sec = int(self.playlist_mgr.total_duration_seconds())
+        tot_str = _format_mmss(tot_sec)
+        self.stats_lbl.setText(self.i18n.t("local_tracks_summary", count=count, duration=tot_str))
+
+        # Toggle empty-state vs list widget
+        is_empty = count == 0
+        if hasattr(self, "empty_widget"):
+            self.empty_widget.setVisible(is_empty)
+        self.list_widget.setVisible(not is_empty)
+
+    def _on_search_changed(self, text: str) -> None:
+        self._refresh_queue()
+
+    def _on_track_changed(self, track: LocalTrackInfo | None) -> None:
+        self._refresh_queue()
+
+    def _on_mode_changed(self, shuffle: bool, repeat_mode: int) -> None:
+        self.btn_shuffle.setStyleSheet(self._button_style(shuffle))
+        self._update_repeat_text()
+
+    def _on_toggle_shuffle(self) -> None:
+        self.playlist_mgr.toggle_shuffle()
+
+    def _on_cycle_repeat(self) -> None:
+        self.playlist_mgr.cycle_repeat_mode()
+
+    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+        row = self.list_widget.row(item)
+        if 0 <= row < len(self._filtered_indices):
+            actual_idx = self._filtered_indices[row]
+            self.playlist_mgr.play_index(actual_idx)
+            self.play_track_requested.emit(actual_idx)
+
+    def retranslate(self, i18n: I18n | None = None) -> None:
+        """Update dialog labels, placeholders, and buttons to the active language."""
+        if i18n is not None:
+            self.i18n = i18n
+        self.titlebar.set_badge_text(self.i18n.t("local_queue_title").upper())
+        self.titlebar.retranslate(self.i18n)
+        self.search_box.setPlaceholderText(self.i18n.t("local_search_placeholder"))
+        self.btn_add_files.setText(self.i18n.t("local_add_files"))
+        self.btn_add_folder.setText(self.i18n.t("local_add_folder"))
+        self.empty_title.setText(self.i18n.t("local_prompt_title"))
+        self.empty_desc.setText(self.i18n.t("local_queue_empty"))
+        self.btn_em_folder.setText(self.i18n.t("local_add_folder"))
+        self.btn_em_files.setText(self.i18n.t("local_add_files"))
+        self.btn_shuffle.setText(self.i18n.t("local_shuffle"))
+        self.btn_clear.setText(self.i18n.t("local_clear_queue"))
+        self._update_repeat_text()
+        self._refresh_queue()
+
+    def _on_add_files_clicked(self) -> None:
+        filters = self.i18n.t("local_audio_files_filter")
+        files, _ = get_open_file_names(
+            self,
+            self.i18n.t("local_add_files"),
+            self.playlist_mgr.get_initial_picker_dir(),
+            filters,
+        )
+        if files:
+            add_async = getattr(self.playlist_mgr, "add_files_async", None)
+            if callable(add_async):
+                add_async(files)
+            else:
+                self.playlist_mgr.add_files(files)
+
+    def _on_add_folder_clicked(self) -> None:
+        folder = get_existing_directory(
+            self,
+            self.i18n.t("local_add_folder"),
+            self.playlist_mgr.get_initial_picker_dir(),
+        )
+        if folder:
+            add_async = getattr(self.playlist_mgr, "add_folder_async", None)
+            if callable(add_async):
+                add_async(folder)
+            else:
+                self.playlist_mgr.add_folder(folder)
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        item = self.list_widget.itemAt(pos)
+        if not item:
+            return
+        row = self.list_widget.row(item)
+        if not (0 <= row < len(self._filtered_indices)):
+            return
+        actual_idx = self._filtered_indices[row]
+        track = self.playlist_mgr.get_track(actual_idx)
+        if not track:
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            f"QMenu {{"
+            f"  background-color: {PALETTE['bg_surface_elevated']};"
+            f"  border: 1px solid {PALETTE['border_card']};"
+            "  border-radius: 8px;"
+            "  padding: 4px;"
+            f"  color: {PALETTE['text_primary']};"
+            "}"
+            f"QMenu::item {{ padding: 6px 14px; border-radius: 6px; "
+            f"color: {PALETTE['text_secondary']}; }}"
+            f"QMenu::item:selected {{"
+            f"  background-color: {PALETTE['accent_menu_hover']};"
+            f"  color: {PALETTE['text_primary']};"
+            "  border-radius: 6px;"
+            "}"
+        )
+
+        act_play = menu.addAction(self.i18n.t("local_play_now"))
+        act_open_dir = menu.addAction(self.i18n.t("local_open_directory"))
+        menu.addSeparator()
+        act_remove = menu.addAction(self.i18n.t("local_remove_track"))
+
+        selected = menu.exec(self.list_widget.mapToGlobal(pos))
+        if selected == act_play:
+            self.playlist_mgr.play_index(actual_idx)
+            self.play_track_requested.emit(actual_idx)
+        elif selected == act_open_dir:
+            file_path = Path(track.file_path)
+            if _IS_WIN32:
+                subprocess.Popen(["explorer", "/select,", str(file_path)])
+            else:
+                subprocess.Popen(["xdg-open", str(file_path.parent)])
+        elif selected == act_remove:
+            self.playlist_mgr.remove_track(actual_idx)
+
+    # Drag & Drop handling
+    def dragEnterEvent(self, a0) -> None:
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is not None and mime is not None and mime.hasUrls():
+            a0.acceptProposedAction()
+        else:
+            super().dragEnterEvent(a0)
+
+    def dropEvent(self, a0) -> None:
+        mime = a0.mimeData() if a0 is not None else None
+        if a0 is None or mime is None:
+            return
+        urls = mime.urls()
+        paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        files_to_add: list[str] = []
+        add_folder_async = getattr(self.playlist_mgr, "add_folder_async", None)
+        add_files_async = getattr(self.playlist_mgr, "add_files_async", None)
+        for p in paths:
+            path_obj = Path(p)
+            if path_obj.is_dir():
+                if callable(add_folder_async):
+                    add_folder_async(str(path_obj))
+                else:
+                    self.playlist_mgr.add_folder(str(path_obj))
+            elif path_obj.is_file():
+                files_to_add.append(str(path_obj))
+        if files_to_add:
+            if callable(add_files_async):
+                add_files_async(files_to_add)
+            else:
+                self.playlist_mgr.add_files(files_to_add)
+        a0.acceptProposedAction()
+
+    # Window Dragging
+    def mousePressEvent(self, a0) -> None:
+        if a0 is not None and a0.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = a0.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(a0)
+
+    def mouseMoveEvent(self, a0) -> None:
+        if (
+            a0 is not None
+            and self._drag_start_pos is not None
+            and a0.buttons() == Qt.MouseButton.LeftButton
+        ):
+            self.move(a0.globalPosition().toPoint() - self._drag_start_pos)
+        super().mouseMoveEvent(a0)
+
+    def mouseReleaseEvent(self, a0) -> None:
+        self._drag_start_pos = None
+        super().mouseReleaseEvent(a0)
+
+    def paintEvent(self, a0) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(14, 16, 26, 235))
+        painter.setPen(QPen(QColor(255, 255, 255, 20), 1))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 16, 16)
+        painter.end()
