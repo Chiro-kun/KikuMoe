@@ -9,13 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2026-11-24
 
+> **KikuMoe 2.0.0 Stable** — Complete Cyber-Moe UI redesign, multi-station radio engine, local music playback with 3-level synced lyrics, 10-band cross-backend ISO equalizer, dynamic volume auto-ducking, dual-channel OTA updates, and full Windows SMTC / Linux MPRIS & Wayland integration.
+>
+> Below are all changes since `2.0.0-beta4` culminating in the `2.0.0` stable release (see `2.0.0-beta1` through `2.0.0-beta4` below for the full 2.0.0 development history).
+
 ### Added
-- **Recommended 10-Band EQ Preset & Persistent Equalizer Window (`audio/equalizer.py`, `ui/equalizer_popover.py`, `ui/main_window.py`)**:
-  - Added the built-in `★ Recommended` / `★ Consigliato` EQ preset (`-4.5 dB` preamp, smooth V-curve with `0.0 dB` headroom safety) right under `Flat`.
-  - Enlarged `EqualizerPopover` to `580×380` with taller faders, made it persistent (no longer auto-closes on outside clicks or window focus changes) and draggable (including native Wayland `startSystemMove()`), and added a pixel-centered vector `×` close button.
-- **Wayland Tiling Compositor Support for Mini-HUD (`core/wayland_window.py`, `ui/widgets/mini_hud.py`, `ui/main_window.py`)**:
+- **10-Band ISO Audio Equalizer (`audio/equalizer.py`, `ui/equalizer_popover.py`, `ui/main_window.py`)**:
+  - Real-time 10-band ISO equalizer (`31 Hz`–`16 kHz`) + preamp (`-12 dB` to `+12 dB`) across all three audio backends: zero-dependency pure-Python biquad cascade with C1 soft-clipping safety knee in `PlayerFFmpeg`, `anequalizer`/`superequalizer` filter graph in `PlayerMPV`, and native `libvlc_audio_equalizer` in `PlayerVLC`.
+  - Built-in presets (`Flat`, `★ Recommended` / `★ Consigliato`, `Bass Boost`, `Treble Boost`, `Pop`, `Anime / J-Pop`, `Rock`, `Electronic`, `Vocal`, `Headphones`, `Classical`, `Night / Soft`, plus persistent `Custom`), all calibrated for `≤ 0.0 dB` summed peak headroom to prevent digital clipping.
+  - Cyber-Glass interactive spline-curve Equalizer window (`580×380`) with mouse drag, wheel fine-tuning, double-click/right-click reset, persistent open state (does not auto-close on outside clicks or app switch), header dragging (including native Wayland `startSystemMove()`), and pixel-centered vector `×` close button.
+- **Dynamic Volume / Auto-Ducking (`core/dynamic_volume.py`, `ui/settings_dialog.py`)**:
+  - Automatically lowers KikuMoe's playback volume while selected applications (e.g., Discord, games, browsers) are running or actively outputting audio, with configurable target duck level, app picker, fast unduck polling, and smooth 2-second smoothstep fade-in restoration (#89, #90, #96, #97).
+- **Better Lyrics Provider & Configurable Lyrics Cascade (`core/lyrics.py`, `ui/settings_dialog.py`)**:
+  - Added Better Lyrics support alongside LRCLIB with selectable provider priority (*Auto*, *Better Lyrics first*, *LRCLIB only*, *Better Lyrics only*) and optional API key support (#94).
+- **Linux Wayland Tiling Compositor Support for Mini-HUD (`core/wayland_window.py`, `ui/widgets/mini_hud.py`, `ui/main_window.py`)**:
   - Hosted Mini-HUD inside a dedicated fixed-size (`420×112`) top-level `MiniHudWindow` on Linux Wayland so tiling compositors (`niri`, `Hyprland`, `Sway`) automatically open it in the floating layer above tiled windows without disturbing the tiled main window.
   - Wired the Mini-HUD Pin toggle on Wayland to idempotent compositor-native IPC (`niri msg`, `hyprctl`, `swaymsg`), and gracefully disabled the button with an explanatory tooltip on Wayland compositors without IPC support.
+- **XDG Desktop Portal Native File Picker on Linux (`ui/native_file_dialog.py`)**:
+  - Uses the native desktop file chooser via XDG Desktop Portal over D-Bus on Linux (#82) and defaults to the user's Music folder on first run (#86).
+- **Comprehensive Crash Handler (`core/crash_handler.py`)**:
+  - Captures and logs native fatal signals, `sys.excepthook`, `threading.excepthook`, and Qt fatal errors to persistent crash logs for easier diagnostics.
 
 ### Performance
 - **Background / Tray Power-Saving & Visualizer Bypass (`ui/main_window.py`, `ui/widgets/ambient_cover.py`)**:
@@ -36,15 +49,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Stopped the 1s Discord RPC polling timer whenever Discord Rich Presence is disabled and eliminated per-second `QSettings` reads on periodic ticks via `_sync_discord_settings()`.
   - Optimized Mini-HUD `MarqueeLabel` to cache text widths, handle `hideEvent()`, and only run its 35 ms scroll timer when visible and overflowing.
 
+### Security
+- **Hardened Metadata, Cover Paths, Updater & Binary Parsers (`core/local_metadata.py`, `core/updater.py`, `network/image_cache.py`, `ui/main_window.py`)**:
+  - Hardened rich-text metadata sinks against unintended HTML injection, enforced strict HTTPS host whitelisting and local path verification for cover art, validated updater download URLs, and added bounds checks in local binary metadata parsers.
+
 ### Fixed
-- **Linux MPRIS album cover artwork (`network/image_cache.py`, `ui/main_window.py`)**: cached downloaded radio covers and local track embedded covers to a bounded local disk cache (`$XDG_CACHE_HOME/kikumoe/mpris_art`), transcoded WebP/non-universal formats to PNG for universal widget compatibility, and published `file://` URIs in `mpris:artUrl` with immediate D-Bus `PropertiesChanged` sync.
-- **Better Lyrics API key input clipping (`ui/settings_dialog.py`)**: moved the Better Lyrics API Key field to a full-width stacked layout and aligned all settings `QLineEdit` heights to `34px` (`min-height: 24px`) to prevent horizontal and vertical text clipping.
-- **Equalizer anti-clipping headroom & soft-limiter (`audio/equalizer.py`, `ui/main_window.py`)**: recalibrated `headphones` and all built-in 10-band EQ presets so summed `Q=1.414` peak response stays at or below `0.0 dB` across 20 Hz–20 kHz, added a transparent C1 soft-clipping safety knee above `-0.92 dBFS` in `BiquadEqualizerProcessor` to prevent harsh digital crackling even on extreme custom boosts, and ensured built-in presets always reload their canonical curve on startup.
-- **Embedded SettingsDialog close handling (`ui/settings_dialog.py`)**: accepted `closeEvent` and hid the dialog when `embedded=True`, preventing hidden/closed embedded settings dialogs from canceling `QApplication.quit()`.
+- **Linux MPRIS album cover artwork (`network/image_cache.py`, `ui/main_window.py`)**: cached downloaded radio covers and local track embedded covers to a bounded local disk cache (`$XDG_CACHE_HOME/kikumoe/mpris_art`), transcoded WebP/non-universal formats to PNG for universal widget compatibility, and published `file://` URIs in `mpris:artUrl` with immediate D-Bus `PropertiesChanged` sync (#80).
+- **Local music stability & playback sync**: prevented crashes during automatic track transitions (#91), switching to local music with an existing playlist (#88), and rapid station switching (#84); fixed local pause/resume and MPRIS backend state sync (#92); preserved local music station when applying settings (#87); enlarged queue thumbnails and eliminated player cover flicker (#79); cached local cover pixmaps for session history thumbnails (#95).
+- **System tray & window lifecycle**: prevented `CloseConfirmDialog` from triggering `lastWindowClosed` when hidden in tray (#99), accepted `closeEvent` cleanly on embedded `SettingsDialog`, kept tray menu header synced and fixed Linux DBusMenu action initialization (#93), and omitted channel suffix from station change logs on channel-less/local stations (#98).
+- **Settings & UI layout polish**: moved the Better Lyrics API Key field to a full-width stacked layout and aligned settings `QLineEdit` heights to `34px` (`min-height: 24px`) to prevent text clipping; included lyrics provider and API key in Settings Apply change detection; scaled lyrics font size and panel height responsively in hero/fullscreen mode (#85); prevented premature station pill label elision on Linux (#83); rounded titlebar close button hover and removed queue dialog outer gutter (#81); honored `StatusFooter` minimum height and animated dock transitions cleanly.
+- **Equalizer anti-clipping headroom & soft-limiter (`audio/equalizer.py`, `ui/main_window.py`)**: recalibrated `headphones` and all built-in 10-band EQ presets so summed `Q=1.414` peak response stays at or below `0.0 dB` across 20 Hz–20 kHz, added a transparent C1 soft-clipping safety knee above `-0.92 dBFS` in `BiquadEqualizerProcessor`, and ensured built-in presets always reload their canonical curve on startup.
 
 ### Testing
 - Added a global per-test hang watchdog in `tests/conftest.py` (`KIKUMOE_TEST_TIMEOUT`, default 30s) that dumps all thread tracebacks and exits immediately if any test stalls.
-- Added regression tests covering performance/power-saving (`tests/test_performance_optimizations.py`), Wayland Mini-HUD IPC & detached lifecycle (`tests/test_wayland_mini_hud.py`), persistent draggable Equalizer UI (`tests/test_equalizer_ui.py`), and Linux MPRIS local `file://` cover art (`tests/test_system_media.py`).
+- Expanded automated test coverage to 309 tests across equalizer DSP/backends/UI, dynamic volume, Better Lyrics, native XDG file dialogs, crash handler, rapid station switching, performance/power-saving, Wayland Mini-HUD IPC/lifecycle, and Linux MPRIS local `file://` cover art.
 
 ---
 
